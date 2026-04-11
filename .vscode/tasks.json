@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure (GCC)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--preset",
+        "gcc-debug"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build (GCC)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "--preset",
+        "gcc-debug"
+      ],
+      "dependsOn": "Configure (GCC)",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Flash (OpenOCD + DAPLink)",
+      "type": "shell",
+      "command": "${config:mspm0.openocdPath}",
+      "args": [
+        "-s",
+        "${config:mspm0.openocdScriptsDir}",
+        "-f",
+        "${workspaceFolder}/DAP_LINK_TEST/openocd/daplink_ti_mspm0.cfg",
+        "-c",
+        "program {${workspaceFolder}/build-gcc/DAP_LINK_TEST/dap_link_test.elf} verify reset exit"
+      ],
+      "dependsOn": "Build (GCC)",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Build outputs
+/build-gcc/
+/build-ticlang/
+
+# SysConfig / CCS generated outputs
+/DAP_LINK_TEST/Debug/
+/DAP_LINK_TEST/DebugTiclang/
+/DAP_LINK_TEST/**/Event.dot
+
+# clangd caches
+/DAP_LINK_TEST/.clangd/
+/DAP_LINK_TEST/Debug/.clangd/
+/DAP_LINK_TEST/DebugTiclang/.clangd/
+/build-gcc/.cache/
+/build-ticlang/.cache/
+
+# IDE / OS noise
+Thumbs.db
+Desktop.ini

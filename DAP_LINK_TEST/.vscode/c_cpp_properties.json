@@ -1,0 +1,26 @@
+{
+  "configurations": [
+    {
+      "name": "MSPM0G3507",
+      "compilerPath": "D:/TI/ccs/gcc_arm_none_eabi_9_2_1/bin/arm-none-eabi-gcc.exe",
+      "compileCommands": "${workspaceFolder}/Debug/.clangd/compile_commands.json",
+      "intelliSenseMode": "windows-gcc-arm",
+      "cStandard": "c99",
+      "defines": [
+        "ARM_MATH_CM0",
+        "__MSPM0G3507__",
+        "__USE_SYSCONFIG__"
+      ],
+      "includePath": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/Debug",
+        "C:/TI/mspm0_sdk_2_10_00_04/source",
+        "C:/TI/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include",
+        "C:/TI/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/DSP/Include",
+        "D:/TI/ccs/gcc_arm_none_eabi_9_2_1/arm-none-eabi/include/newlib-nano",
+        "D:/TI/ccs/gcc_arm_none_eabi_9_2_1/arm-none-eabi/include"
+      ]
+    }
+  ],
+  "version": 4
+}

@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "MSPM0G3507 Debug (DAPLink)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "servertype": "openocd",
+      "serverpath": "${config:mspm0.openocdPath}",
+      "searchDir": [
+        "${config:mspm0.openocdScriptsDir}"
+      ],
+      "configFiles": [
+        "${workspaceFolder}/DAP_LINK_TEST/openocd/daplink_ti_mspm0.cfg"
+      ],
+      "gdbPath": "${config:mspm0.armGdbPath}",
+      "executable": "${workspaceFolder}/build-gcc/DAP_LINK_TEST/dap_link_test.elf",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "Build (GCC)",
+      "postLaunchCommands": [
+        "monitor reset halt"
+      ]
+    }
+  ]
+}

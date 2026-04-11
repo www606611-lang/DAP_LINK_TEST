@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "name": "MSPM0G3507",
+      "compilerPath": "D:/google_download/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+      "compileCommands": "${workspaceFolder}/build-gcc/compile_commands.json",
+      "intelliSenseMode": "windows-gcc-arm",
+      "cStandard": "c99",
+      "defines": [
+        "ARM_MATH_CM0",
+        "__MSPM0G3507__",
+        "__USE_SYSCONFIG__"
+      ],
+      "includePath": [
+        "${workspaceFolder}/DAP_LINK_TEST",
+        "${workspaceFolder}/DAP_LINK_TEST/modules",
+        "${workspaceFolder}/DAP_LINK_TEST/common",
+        "${workspaceFolder}/build-gcc/DAP_LINK_TEST/syscfg",
+        "C:/TI/mspm0_sdk_2_10_00_04/source",
+        "C:/TI/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include",
+        "C:/TI/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/DSP/Include",
+        "D:/google_download/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/arm-none-eabi/include/newlib-nano",
+        "D:/google_download/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/arm-none-eabi/include"
+      ]
+    }
+  ],
+  "version": 4
+}

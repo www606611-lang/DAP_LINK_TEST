@@ -1,0 +1,16 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build-gcc/compile_commands.json",
+  "C_Cpp.default.compilerPath": "D:/google_download/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+  "C_Cpp.default.cStandard": "c99",
+  "C_Cpp.default.intelliSenseMode": "windows-gcc-arm",
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.configurePreset": "gcc-debug",
+  "mspm0.openocdPath": "D:/google_download/xpack-openocd-0.12.0-7-win32-x64/xpack-openocd-0.12.0-7/bin/openocd.exe",
+  "mspm0.openocdScriptsDir": "D:/google_download/xpack-openocd-0.12.0-7-win32-x64/xpack-openocd-0.12.0-7/openocd/scripts",
+  "mspm0.armGdbPath": "D:/google_download/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build-gcc"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/Debug/.clangd/compile_commands.json",
+  "C_Cpp.default.compilerPath": "D:/TI/ccs/gcc_arm_none_eabi_9_2_1/bin/arm-none-eabi-gcc.exe",
+  "C_Cpp.default.cStandard": "c99",
+  "C_Cpp.default.intelliSenseMode": "windows-gcc-arm",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/Debug/.clangd"
+  ]
+}
