@@ -31,17 +31,34 @@
  */
 
 #include "ti_msp_dl_config.h"
+#include "uart0_dma.h"
 #include "timer.h"
 #include "oled_status.h"
 
+#define UART_DISPLAY_BUFFER_SIZE        32U
+
+static uint8_t g_uart_display_buffer[UART_DISPLAY_BUFFER_SIZE];
+
 int main(void)
 {
+    uint16_t uart_rx_length;
+
     SYSCFG_DL_init();
-    timer_common_init();//定时器中断的使能Timer_0_counter_INST_INT_IRQN
+    timer_common_init();
+    uart0_dma_init();
+    uart0_dma_start_rx_stream();
 
     oled_status_screen_init(timer_common_get_ms());
+    (void) uart0_dma_send_text("UART0 DMA OK\r\n");
 
     while (1) {
+        uart0_dma_task();
+        uart_rx_length = uart0_dma_read(g_uart_display_buffer,
+            UART_DISPLAY_BUFFER_SIZE);
+        if (uart_rx_length > 0U) {
+            oled_status_screen_uart_write(g_uart_display_buffer,
+                uart_rx_length);
+        }
         oled_status_screen_task(timer_common_get_ms());
     }
 }
