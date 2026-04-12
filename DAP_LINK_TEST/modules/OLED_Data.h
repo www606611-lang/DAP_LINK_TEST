@@ -19,6 +19,7 @@ extern const uint8_t OLED_F6x8[][6];
 
 /*汉字字模数据声明*/
 extern const ChineseCell_t OLED_CF16x16[];
+extern const uint32_t OLED_CF16x16_COUNT;
 
 /*图像数据声明*/
 extern const uint8_t Diode[];

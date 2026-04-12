@@ -9,6 +9,8 @@
 /**
  * Import the modules used in this configuration.
  */
+const GPIO          = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1         = GPIO.addInstance();
 const I2C           = scripting.addModule("/ti/driverlib/I2C", {}, false);
 const I2C1          = I2C.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
@@ -37,18 +39,26 @@ pinFunction4.inputFreq   = 40;
 pinFunction4.HFXTStartup = 10;
 pinFunction4.enable      = true;
 
-I2C1.$name                             = "I2C_0";
-I2C1.peripheral.$assign                = "I2C0";
-I2C1.sdaPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric0";
-I2C1.sdaPinConfig.hideOutputInversion  = scripting.forceWrite(false);
-I2C1.sdaPinConfig.onlyInternalResistor = scripting.forceWrite(false);
-I2C1.sdaPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
-I2C1.sclPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric1";
-I2C1.sclPinConfig.hideOutputInversion  = scripting.forceWrite(false);
-I2C1.sclPinConfig.onlyInternalResistor = scripting.forceWrite(false);
-I2C1.sclPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+GPIO1.$name                              = "User_led";
+GPIO1.associatedPins[0].$name            = "PIN_0";
+GPIO1.associatedPins[0].internalResistor = "PULL_DOWN";
+GPIO1.associatedPins[0].pin.$assign      = "PB22";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+I2C1.$name                           = "I2C_0";
+I2C1.basicEnableController           = true;
+I2C1.advDigitalGlitchFilter          = "CLOCKS_1";
+I2C1.enableDMAEvent1                 = false;
+I2C1.enableDMAEvent2                 = false;
+I2C1.basicTargetSecAddressEnable     = true;
+I2C1.basicEnableTarget               = true;
+I2C1.basicControllerStandardBusSpeed = "Fast";
+I2C1.peripheral.$assign              = "I2C0";
+I2C1.peripheral.sdaPin.$assign       = "PA0";
+I2C1.peripheral.sclPin.$assign       = "PA1";
+I2C1.sdaPinConfig.$name              = "ti_driverlib_gpio_GPIOPinGeneric0";
+I2C1.sclPinConfig.$name              = "ti_driverlib_gpio_GPIOPinGeneric1";
 
 SYSCTL.clockTreeEn = true;
 
@@ -75,8 +85,6 @@ ProjectConfig.genLibCMSIS = true;
 pinFunction4.peripheral.$suggestSolution           = "SYSCTL";
 pinFunction4.peripheral.hfxInPin.$suggestSolution  = "PA5";
 pinFunction4.peripheral.hfxOutPin.$suggestSolution = "PA6";
-I2C1.peripheral.sdaPin.$suggestSolution            = "PA0";
-I2C1.peripheral.sclPin.$suggestSolution            = "PA1";
 Board.peripheral.$suggestSolution                  = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution         = "PA20";
 Board.peripheral.swdioPin.$suggestSolution         = "PA19";
