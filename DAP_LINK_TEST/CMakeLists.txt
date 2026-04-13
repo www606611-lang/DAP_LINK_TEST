@@ -31,8 +31,24 @@ endif()
 set(SYSCFG_C "${SYSCFG_OUT_DIR}/ti_msp_dl_config.c")
 set(SYSCFG_H "${SYSCFG_OUT_DIR}/ti_msp_dl_config.h")
 set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
-file(GLOB MODULE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/modules/*.c")
-file(GLOB COMMON_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/common/*.c")
+
+set(APP_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/imu_display.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/oled_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/uart_display.c"
+)
+
+set(COMMON_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/common/delay.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/common/timer.c"
+)
+
+set(MODULE_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/oled.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/OLED_Data.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/uart0_dma.c"
+)
 
 add_custom_command(
   OUTPUT
@@ -69,6 +85,7 @@ add_executable(${APP_NAME}
   "${SYSCFG_C}"
   ${MODULE_SOURCES}
   ${COMMON_SOURCES}
+  ${APP_SOURCES}
 )
 
 add_dependencies(${APP_NAME} syscfg)
@@ -81,6 +98,7 @@ target_compile_definitions(${APP_NAME} PRIVATE ARM_MATH_CM0)
 
 target_include_directories(${APP_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules"
   "${CMAKE_CURRENT_SOURCE_DIR}/common"
   "${SYSCFG_OUT_DIR}"

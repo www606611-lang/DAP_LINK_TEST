@@ -31,34 +31,37 @@
  */
 
 #include "ti_msp_dl_config.h"
-#include "uart0_dma.h"
 #include "timer.h"
+#include "imu_display.h"
 #include "oled_status.h"
+#include "uart_display.h"
 
-#define UART_DISPLAY_BUFFER_SIZE        32U
-
-static uint8_t g_uart_display_buffer[UART_DISPLAY_BUFFER_SIZE];
+static void app_init(void);
+static void app_task(void);
 
 int main(void)
 {
-    uint16_t uart_rx_length;
-
-    SYSCFG_DL_init();
-    timer_common_init();
-    uart0_dma_init();
-    uart0_dma_start_rx_stream();
-
-    oled_status_screen_init(timer_common_get_ms());
-    (void) uart0_dma_send_text("UART0 DMA OK\r\n");
+    app_init();
 
     while (1) {
-        uart0_dma_task();
-        uart_rx_length = uart0_dma_read(g_uart_display_buffer,
-            UART_DISPLAY_BUFFER_SIZE);
-        if (uart_rx_length > 0U) {
-            oled_status_screen_uart_write(g_uart_display_buffer,
-                uart_rx_length);
-        }
-        oled_status_screen_task(timer_common_get_ms());
+        app_task();
     }
+}
+
+static void app_init(void)
+{
+    SYSCFG_DL_init();
+    timer_common_init();
+    oled_status_screen_init(timer_common_get_ms());
+    uart_display_init();
+    imu_display_init(timer_common_get_ms());
+}
+
+static void app_task(void)
+{
+    uint32_t now_ms = timer_common_get_ms();
+
+    uart_display_task(now_ms);
+    imu_display_task(now_ms);
+    oled_status_screen_task(now_ms);
 }
