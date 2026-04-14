@@ -46,6 +46,7 @@ set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/encoder.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/motor.c"
+  # ST7789 复用这里的字库；OLED 驱动本体 modules/oled.c 不参与编译。
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/OLED_Data.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/st7789.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/uart0_dma.c"

@@ -46,6 +46,10 @@
 static uint8_t g_icm20948_addr7 = ICM20948_ADDR_AD0_HIGH;
 static uint8_t g_icm20948_current_bank = 0xFFU;
 static bool g_icm20948_ready;
+static bool g_icm20948_skip_first_update;
+static uint8_t g_icm20948_last_error;
+static uint32_t g_icm20948_last_update_ms;
+static uint32_t g_icm20948_next_retry_ms;
 
 static ICM20948_Data_t g_icm20948_data;
 static ICM20948_Angle_t g_icm20948_angle;
@@ -67,6 +71,7 @@ static uint8_t icm20948_i2c_read_reg(uint8_t addr7, uint8_t reg,
     uint8_t *data, uint16_t length);
 static void icm20948_i2c_start_reg_read(uint8_t addr7, uint16_t length);
 static uint8_t icm20948_switch_bank(uint8_t bank);
+static void icm20948_task_try_init(uint32_t now_ms);
 static float icm20948_wrap_angle(float angle);
 static float icm20948_deadband(float value);
 static void icm20948_calc_accel_angle(const ICM20948_Data_t *data,
@@ -278,6 +283,11 @@ bool ICM20948_IsReady(void)
     return g_icm20948_ready;
 }
 
+uint8_t ICM20948_GetLastError(void)
+{
+    return g_icm20948_last_error;
+}
+
 uint8_t ICM20948_WriteReg(uint8_t reg, uint8_t data)
 {
     uint8_t packet[2];
@@ -427,6 +437,60 @@ uint8_t ICM20948_Init(void)
     g_icm20948_ready = true;
 
     return 0U;
+}
+
+void ICM20948_TaskInit(uint32_t now_ms)
+{
+    /* 任务层负责初始化/重试/定时解算，显示或控制只读取结果。 */
+    g_icm20948_ready = false;
+    g_icm20948_skip_first_update = false;
+    g_icm20948_last_error = 0U;
+    g_icm20948_last_update_ms = now_ms;
+    g_icm20948_next_retry_ms = now_ms;
+
+    icm20948_task_try_init(now_ms);
+}
+
+void ICM20948_Task(uint32_t now_ms)
+{
+    if (!g_icm20948_ready) {
+        /* 传感器未就绪时按固定周期重试，避免显示层关心 I2C 细节。 */
+        if ((uint32_t) (now_ms - g_icm20948_next_retry_ms) >=
+            ICM20948_RETRY_INTERVAL_MS) {
+            icm20948_task_try_init(now_ms);
+        }
+        return;
+    }
+
+    if ((uint32_t) (now_ms - g_icm20948_last_update_ms) <
+        ICM20948_UPDATE_INTERVAL_MS) {
+        return;
+    }
+
+    if (g_icm20948_skip_first_update) {
+        /* 初始化和校准耗时较长，首帧 dt 丢掉，避免角度积分跳变。 */
+        g_icm20948_skip_first_update = false;
+        g_icm20948_last_update_ms = now_ms;
+        return;
+    }
+
+    {
+        float dt = (float) (now_ms - g_icm20948_last_update_ms) / 1000.0f;
+
+        g_icm20948_last_update_ms = now_ms;
+        ICM20948_UpdateAngle(dt);
+    }
+}
+
+static void icm20948_task_try_init(uint32_t now_ms)
+{
+    g_icm20948_last_error = ICM20948_Init();
+    g_icm20948_next_retry_ms = now_ms;
+
+    if (g_icm20948_last_error == 0U) {
+        g_icm20948_skip_first_update = true;
+        g_icm20948_last_update_ms = now_ms;
+    }
 }
 
 uint8_t ICM20948_ReadRaw(ICM20948_Raw_t *raw)

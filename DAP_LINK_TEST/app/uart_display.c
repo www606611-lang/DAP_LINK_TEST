@@ -8,6 +8,7 @@
 
 #define UART_DISPLAY_RX_BUFFER_SIZE     32U
 #define UART_DISPLAY_MESSAGE_SIZE       64U
+/* 串口空闲超过这个时间就认为一帧接收完成，再刷新到 LCD。 */
 #define UART_DISPLAY_IDLE_MS            40U
 
 static uint8_t g_uart_display_rx_buffer[UART_DISPLAY_RX_BUFFER_SIZE];
@@ -33,6 +34,7 @@ void uart_display_task(uint32_t now_ms)
 
     uart0_dma_task();
 
+    /* DMA 持续收串口，应用层只取出新增数据并拼成一帧。 */
     uart_rx_length = uart0_dma_read(g_uart_display_rx_buffer,
         UART_DISPLAY_RX_BUFFER_SIZE);
     if (uart_rx_length > 0U) {
@@ -81,6 +83,7 @@ static void uart_display_capture(const uint8_t *data, uint16_t length,
 
 static void uart_display_flush(void)
 {
+    /* LCD 只显示最近一帧串口内容，换行或空闲超时都会触发这里。 */
     lcd_status_screen_uart_write(g_uart_display_message,
         g_uart_display_message_length);
     g_uart_display_message_length  = 0U;

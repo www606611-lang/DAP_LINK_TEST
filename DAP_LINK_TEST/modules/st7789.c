@@ -1,6 +1,7 @@
 #include "st7789.h"
 
 #include "delay.h"
+/* ST7789 复用原 OLED 的 6x8/8x16 字库数据，不再依赖 OLED 驱动。 */
 #include "OLED_Data.h"
 #include "ti_msp_dl_config.h"
 
@@ -16,6 +17,8 @@
 #define ST7789_MADCTL_VALUE          0x70U
 #define ST7789_COLMOD_RGB565         0x05U
 #define ST7789_PRINTF_BUFFER_SIZE    64U
+
+/* 1.9 寸 170x320 模块的可视区域在 ST7789 GRAM 中有 35 行偏移。 */
 
 #define ST7789_SWRESET               0x01U
 #define ST7789_SLPOUT                0x11U
@@ -105,6 +108,7 @@ static void st7789_write_command_data(
     uint8_t command, const uint8_t *data, uint32_t length)
 {
     st7789_select();
+    /* DC=0 写命令，DC=1 写后续参数或像素数据。 */
     DL_GPIO_clearPins(LCD_CTRL_PORT, LCD_CTRL_LCD_DC_PIN);
     st7789_write_bytes(&command, 1U);
 
@@ -363,6 +367,7 @@ void ST7789_SetWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
     uint8_t data[4];
 
+    /* 对外坐标从屏幕左上角算起，发给控制器前补上面板偏移。 */
     x0 = (uint16_t) (x0 + ST7789_X_OFFSET);
     x1 = (uint16_t) (x1 + ST7789_X_OFFSET);
     y0 = (uint16_t) (y0 + ST7789_Y_OFFSET);
@@ -766,6 +771,7 @@ void ST7789_ShowImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
     DL_GPIO_setPins(LCD_CTRL_PORT, LCD_CTRL_LCD_DC_PIN);
     for (yi = 0U; yi < draw_height; yi++) {
         for (xi = 0U; xi < draw_width; xi++) {
+            /* 字库按列存储，每 8 个纵向像素共用一个字节。 */
             uint8_t src = image[(yi / 8U) * width + xi];
             uint16_t pixel_color =
                 ((src & (uint8_t) (1U << (yi % 8U))) != 0U) ? color :
@@ -937,6 +943,7 @@ void ST7789_ShowChinese(uint16_t x, uint16_t y, const char *chinese,
         char glyph[OLED_CHN_CHAR_WIDTH + 1U];
         uint8_t i;
 
+        /* 当前字库按 UTF-8 三字节汉字索引查表。 */
         for (i = 0U; i < OLED_CHN_CHAR_WIDTH; i++) {
             if (chinese[i] == '\0') {
                 return;

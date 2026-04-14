@@ -34,8 +34,21 @@ typedef struct {
     float yaw;
 } ICM20948_Angle_t;
 
+#ifndef ICM20948_UPDATE_INTERVAL_MS
+/* 姿态解算更新周期，单位 ms。 */
+#define ICM20948_UPDATE_INTERVAL_MS 10U
+#endif
+
+#ifndef ICM20948_RETRY_INTERVAL_MS
+/* IMU 初始化失败后的重试周期，单位 ms。 */
+#define ICM20948_RETRY_INTERVAL_MS 1000U
+#endif
+
 uint8_t ICM20948_Init(void);
+void ICM20948_TaskInit(uint32_t now_ms);
+void ICM20948_Task(uint32_t now_ms);
 bool ICM20948_IsReady(void);
+uint8_t ICM20948_GetLastError(void);
 
 void ICM20948_SetDeviceAddr7bit(uint8_t addr7);
 uint8_t ICM20948_GetDeviceAddr7bit(void);

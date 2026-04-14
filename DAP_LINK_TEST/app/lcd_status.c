@@ -17,7 +17,6 @@
 #define LCD_STATUS_TEXT                ST7789_COLOR_WHITE
 #define LCD_STATUS_VALUE               ST7789_COLOR_YELLOW
 #define LCD_STATUS_WARN                ST7789_COLOR_RED
-#define LCD_STATUS_OK                  ST7789_COLOR_GREEN
 
 #define LCD_STATUS_FONT                ST7789_8X16
 #define LCD_STATUS_SMALL_FONT          ST7789_6X8
@@ -27,8 +26,6 @@
 #define LCD_STATUS_TIMER_TEXT_LEN      5U
 #define LCD_STATUS_TIMER_X             (ST7789_WIDTH - 8U - (LCD_STATUS_TIMER_TEXT_LEN * LCD_STATUS_CHAR_W))
 #define LCD_STATUS_TIMER_Y             4U
-#define LCD_STATUS_TIMER_WIDTH         (LCD_STATUS_TIMER_TEXT_LEN * LCD_STATUS_CHAR_W)
-#define LCD_STATUS_TIMER_HEIGHT        LCD_STATUS_CHAR_H
 
 #define LCD_STATUS_UART_X              8U
 #define LCD_STATUS_UART_Y              28U
@@ -36,7 +33,6 @@
 #define LCD_STATUS_UART_WIDTH          (ST7789_WIDTH - LCD_STATUS_UART_TEXT_X - 8U)
 #define LCD_STATUS_UART_COLUMNS        (LCD_STATUS_UART_WIDTH / LCD_STATUS_CHAR_W)
 #define LCD_STATUS_UART_PROMPT         "RX:"
-#define LCD_STATUS_UART_PROMPT_LEN     3U
 
 #define LCD_STATUS_ENCODER_HEADER_Y    52U
 #define LCD_STATUS_ENCODER_Y           62U
@@ -45,13 +41,13 @@
 #define LCD_STATUS_ENCODER_COUNT_MAX   99999L
 #define LCD_STATUS_ENCODER_SPEED_MAX   99999L
 
-#define LCD_STATUS_IMU_UPDATE_MS       10U
 #define LCD_STATUS_IMU_DRAW_MS         50U
-#define LCD_STATUS_IMU_RETRY_MS        1000U
 #define LCD_STATUS_IMU_X               8U
 #define LCD_STATUS_IMU_Y               104U
 #define LCD_STATUS_IMU_VALUE_X         32U
 #define LCD_STATUS_IMU_LINE_H          20U
+
+/* LCD 只在数值变化时局部刷新，避免全屏清屏导致画面闪烁。 */
 static uint32_t g_lcd_status_last_second;
 static uint32_t g_lcd_status_last_encoder_draw_ms;
 static int32_t g_lcd_status_left_count;
@@ -63,11 +59,8 @@ static uint8_t g_lcd_status_uart_column;
 static bool g_lcd_status_uart_dirty;
 
 static bool g_lcd_status_imu_ready;
-static bool g_lcd_status_imu_skip_first_update;
 static uint8_t g_lcd_status_imu_error;
-static uint32_t g_lcd_status_imu_last_update_ms;
 static uint32_t g_lcd_status_imu_last_draw_ms;
-static uint32_t g_lcd_status_imu_next_retry_ms;
 
 static void lcd_status_draw_static(void);
 static void lcd_status_draw_timer(uint32_t elapsed_ms);
@@ -78,10 +71,11 @@ static int32_t lcd_status_clip_count(int32_t count);
 static int32_t lcd_status_clip_speed(int32_t speed);
 static void lcd_status_clear_uart_line(void);
 static void lcd_status_redraw_uart(void);
-static void lcd_status_imu_try_init(uint32_t now_ms);
 static void lcd_status_imu_task(uint32_t now_ms);
+static void lcd_status_imu_draw_current(void);
 static void lcd_status_imu_draw_angles(void);
 static void lcd_status_imu_draw_error(uint8_t error_code);
+static void lcd_status_clear_imu_area(void);
 
 void lcd_status_screen_init(uint32_t now_ms)
 {
@@ -93,11 +87,8 @@ void lcd_status_screen_init(uint32_t now_ms)
     g_lcd_status_right_speed = lcd_status_clip_speed(Encoder_GetSpeedPps(ENCODER_RIGHT));
 
     g_lcd_status_imu_ready = false;
-    g_lcd_status_imu_skip_first_update = false;
     g_lcd_status_imu_error = 0U;
-    g_lcd_status_imu_last_update_ms = now_ms;
     g_lcd_status_imu_last_draw_ms = now_ms;
-    g_lcd_status_imu_next_retry_ms = now_ms;
 
     ST7789_Init();
     lcd_status_draw_static();
@@ -105,18 +96,22 @@ void lcd_status_screen_init(uint32_t now_ms)
     lcd_status_draw_timer(now_ms);
     lcd_status_draw_encoders();
     lcd_status_redraw_uart();
-    lcd_status_imu_try_init(now_ms);
+    g_lcd_status_imu_ready = ICM20948_IsReady();
+    g_lcd_status_imu_error = ICM20948_GetLastError();
+    lcd_status_imu_draw_current();
 }
 
 void lcd_status_screen_task(uint32_t now_ms)
 {
     uint32_t current_second = now_ms / 1000U;
 
+    /* 秒计时区域固定宽度，直接覆写旧字符即可。 */
     if (current_second != g_lcd_status_last_second) {
         g_lcd_status_last_second = current_second;
         lcd_status_draw_timer(now_ms);
     }
 
+    /* 编码器数据变化较快，限频后再比较，没变就不写屏。 */
     if ((uint32_t) (now_ms - g_lcd_status_last_encoder_draw_ms) >=
         LCD_STATUS_ENCODER_DRAW_MS) {
         int32_t left_count =
@@ -142,6 +137,7 @@ void lcd_status_screen_task(uint32_t now_ms)
         }
     }
 
+    /* 串口收满一帧或空闲超时后才刷新显示。 */
     if (g_lcd_status_uart_dirty) {
         g_lcd_status_uart_dirty = false;
         lcd_status_redraw_uart();
@@ -152,6 +148,7 @@ void lcd_status_screen_task(uint32_t now_ms)
 
 void lcd_status_screen_uart_put(uint8_t data)
 {
+    /* 换行只作为一帧结束标记，不直接显示到状态栏。 */
     if ((data == '\r') || (data == '\n')) {
         return;
     }
@@ -185,6 +182,7 @@ void lcd_status_screen_uart_write(const uint8_t *data, uint16_t length)
 
 static void lcd_status_draw_static(void)
 {
+    /* 背景和分隔线只画一次，后续任务只更新动态字段。 */
     ST7789_Clear(LCD_STATUS_BG);
     ST7789_FillRect(0U, 0U, ST7789_WIDTH, 24U, LCD_STATUS_HEADER);
     ST7789_FillRect(0U, 24U, ST7789_WIDTH, 22U, LCD_STATUS_PANEL);
@@ -269,6 +267,7 @@ static int32_t lcd_status_clip_speed(int32_t speed)
 
 static void lcd_status_clear_uart_line(void)
 {
+    /* 用空格填满整行，下一次 ShowString 可以完整覆盖旧内容。 */
     (void) memset(g_lcd_status_uart_line, ' ', LCD_STATUS_UART_COLUMNS);
     g_lcd_status_uart_line[LCD_STATUS_UART_COLUMNS] = '\0';
     g_lcd_status_uart_column = 0U;
@@ -282,60 +281,39 @@ static void lcd_status_redraw_uart(void)
         LCD_STATUS_PANEL);
 }
 
-static void lcd_status_imu_try_init(uint32_t now_ms)
-{
-    bool was_ready = g_lcd_status_imu_ready;
-    uint8_t previous_error = g_lcd_status_imu_error;
-    uint8_t init_error = ICM20948_Init();
-
-    g_lcd_status_imu_error = init_error;
-    g_lcd_status_imu_next_retry_ms = now_ms;
-
-    if (g_lcd_status_imu_error == 0U) {
-        if ((!was_ready) && (previous_error != 0U)) {
-            ST7789_FillRect(0U, 100U, ST7789_WIDTH, 70U, LCD_STATUS_PANEL);
-        }
-        g_lcd_status_imu_ready = true;
-        g_lcd_status_imu_skip_first_update = true;
-        g_lcd_status_imu_last_update_ms = now_ms;
-        g_lcd_status_imu_last_draw_ms = now_ms;
-        lcd_status_imu_draw_angles();
-    } else {
-        g_lcd_status_imu_ready = false;
-        if (was_ready || (previous_error != g_lcd_status_imu_error)) {
-            lcd_status_imu_draw_error(g_lcd_status_imu_error);
-        }
-    }
-}
-
 static void lcd_status_imu_task(uint32_t now_ms)
 {
-    if (!g_lcd_status_imu_ready) {
-        if ((uint32_t) (now_ms - g_lcd_status_imu_next_retry_ms) >=
-            LCD_STATUS_IMU_RETRY_MS) {
-            lcd_status_imu_try_init(now_ms);
-        }
+    bool ready = ICM20948_IsReady();
+    uint8_t error_code = ICM20948_GetLastError();
+
+    /* 姿态解算在 ICM20948_Task() 中完成，这里只负责把状态画到 LCD。 */
+    if ((ready != g_lcd_status_imu_ready) ||
+        ((!ready) && (error_code != g_lcd_status_imu_error))) {
+        g_lcd_status_imu_ready = ready;
+        g_lcd_status_imu_error = error_code;
+        g_lcd_status_imu_last_draw_ms = now_ms;
+        lcd_status_imu_draw_current();
         return;
     }
 
-    if ((uint32_t) (now_ms - g_lcd_status_imu_last_update_ms) >=
-        LCD_STATUS_IMU_UPDATE_MS) {
-        if (g_lcd_status_imu_skip_first_update) {
-            g_lcd_status_imu_skip_first_update = false;
-            g_lcd_status_imu_last_update_ms = now_ms;
-        } else {
-            float dt =
-                (float) (now_ms - g_lcd_status_imu_last_update_ms) / 1000.0f;
-
-            g_lcd_status_imu_last_update_ms = now_ms;
-            ICM20948_UpdateAngle(dt);
-        }
+    if (!g_lcd_status_imu_ready) {
+        return;
     }
 
     if ((uint32_t) (now_ms - g_lcd_status_imu_last_draw_ms) >=
         LCD_STATUS_IMU_DRAW_MS) {
         g_lcd_status_imu_last_draw_ms = now_ms;
         lcd_status_imu_draw_angles();
+    }
+}
+
+static void lcd_status_imu_draw_current(void)
+{
+    if (g_lcd_status_imu_ready) {
+        lcd_status_clear_imu_area();
+        lcd_status_imu_draw_angles();
+    } else {
+        lcd_status_imu_draw_error(g_lcd_status_imu_error);
     }
 }
 
@@ -365,7 +343,7 @@ static void lcd_status_imu_draw_angles(void)
 
 static void lcd_status_imu_draw_error(uint8_t error_code)
 {
-    ST7789_FillRect(0U, 100U, ST7789_WIDTH, 70U, LCD_STATUS_PANEL);
+    lcd_status_clear_imu_area();
 
     ST7789_ShowString(LCD_STATUS_IMU_X, LCD_STATUS_IMU_Y, "ICM:",
         LCD_STATUS_FONT, LCD_STATUS_WARN, LCD_STATUS_PANEL);
@@ -377,4 +355,9 @@ static void lcd_status_imu_draw_error(uint8_t error_code)
     ST7789_ShowString(LCD_STATUS_IMU_X,
         (uint16_t) (LCD_STATUS_IMU_Y + LCD_STATUS_IMU_LINE_H * 2U), "CHK I2C",
         LCD_STATUS_FONT, LCD_STATUS_WARN, LCD_STATUS_PANEL);
+}
+
+static void lcd_status_clear_imu_area(void)
+{
+    ST7789_FillRect(0U, 100U, ST7789_WIDTH, 70U, LCD_STATUS_PANEL);
 }

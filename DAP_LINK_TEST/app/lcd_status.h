@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 
+/* LCD 状态页：显示运行时间、串口最近一帧、编码器和 IMU 数据。 */
 void lcd_status_screen_init(uint32_t now_ms);
 void lcd_status_screen_task(uint32_t now_ms);
 void lcd_status_screen_uart_put(uint8_t data);

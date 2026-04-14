@@ -33,6 +33,7 @@
 #include "ti_msp_dl_config.h"
 #include "timer.h"
 #include "encoder.h"
+#include "icm20948.h"
 #include "lcd_status.h"
 #include "motor.h"
 #include "uart_display.h"
@@ -51,10 +52,16 @@ int main(void)
 
 static void app_init(void)
 {
+    uint32_t now_ms;
+
     SYSCFG_DL_init();
     Motor_Init();
     timer_common_init();
-    Encoder_Init(timer_common_get_ms());
+
+    now_ms = timer_common_get_ms();
+    Encoder_Init(now_ms);
+    /* 姿态任务独立于 LCD，后续控制逻辑也可以直接读取 IMU 数据。 */
+    ICM20948_TaskInit(now_ms);
     lcd_status_screen_init(timer_common_get_ms());
     uart_display_init();
 
@@ -67,6 +74,8 @@ static void app_task(void)
     uint32_t now_ms = timer_common_get_ms();
 
     Encoder_Task(now_ms);
+    /* 先更新姿态，再让显示页读取最新结果。 */
+    ICM20948_Task(now_ms);
     uart_display_task(now_ms);
     lcd_status_screen_task(now_ms);
 }
