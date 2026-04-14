@@ -9,10 +9,15 @@
 #define IMU_DISPLAY_DRAW_MS            50U
 #define IMU_DISPLAY_RETRY_MS           1000U
 
-#define IMU_DISPLAY_ROLL_Y             16U
+#define IMU_DISPLAY_ROLL_Y             24U
 #define IMU_DISPLAY_PITCH_Y            32U
-#define IMU_DISPLAY_YAW_Y              48U
-#define IMU_DISPLAY_LINE_HEIGHT        16U
+#define IMU_DISPLAY_YAW_Y              40U
+#define IMU_DISPLAY_LINE_HEIGHT        8U
+#define IMU_DISPLAY_TEXT_LEN           8U
+#define IMU_DISPLAY_X                  (OLED_WIDTH - (IMU_DISPLAY_TEXT_LEN * OLED_6X8))
+#define IMU_DISPLAY_WIDTH              (IMU_DISPLAY_TEXT_LEN * OLED_6X8)
+#define IMU_DISPLAY_VALUE_X            (IMU_DISPLAY_X + 12U)
+#define IMU_DISPLAY_FONT               OLED_6X8
 
 static bool g_imu_display_ready;
 static bool g_imu_display_skip_first_update;
@@ -93,37 +98,44 @@ static void imu_display_draw_angles(void)
 
     imu_display_clear_rows();
 
-    OLED_ShowString(0U, IMU_DISPLAY_ROLL_Y, "R:", OLED_8X16);
-    OLED_ShowFloatNum(16U, IMU_DISPLAY_ROLL_Y, angle.roll, 3U, 1U,
-        OLED_8X16);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_ROLL_Y, "R:",
+        IMU_DISPLAY_FONT);
+    OLED_ShowFloatNum(IMU_DISPLAY_VALUE_X, IMU_DISPLAY_ROLL_Y, angle.roll, 3U,
+        1U, IMU_DISPLAY_FONT);
 
-    OLED_ShowString(0U, IMU_DISPLAY_PITCH_Y, "P:", OLED_8X16);
-    OLED_ShowFloatNum(16U, IMU_DISPLAY_PITCH_Y, angle.pitch, 3U, 1U,
-        OLED_8X16);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_PITCH_Y, "P:",
+        IMU_DISPLAY_FONT);
+    OLED_ShowFloatNum(IMU_DISPLAY_VALUE_X, IMU_DISPLAY_PITCH_Y, angle.pitch,
+        3U, 1U, IMU_DISPLAY_FONT);
 
-    OLED_ShowString(0U, IMU_DISPLAY_YAW_Y, "Y:", OLED_8X16);
-    OLED_ShowFloatNum(16U, IMU_DISPLAY_YAW_Y, angle.yaw, 3U, 1U,
-        OLED_8X16);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_YAW_Y, "Y:",
+        IMU_DISPLAY_FONT);
+    OLED_ShowFloatNum(IMU_DISPLAY_VALUE_X, IMU_DISPLAY_YAW_Y, angle.yaw, 3U,
+        1U, IMU_DISPLAY_FONT);
 
-    OLED_UpdateArea(0U, IMU_DISPLAY_ROLL_Y, OLED_WIDTH,
-        (uint8_t) (OLED_HEIGHT - IMU_DISPLAY_ROLL_Y));
+    OLED_UpdateArea(IMU_DISPLAY_X, IMU_DISPLAY_ROLL_Y, IMU_DISPLAY_WIDTH,
+        (uint8_t) (IMU_DISPLAY_LINE_HEIGHT * 3U));
 }
 
 static void imu_display_draw_error(uint8_t error_code)
 {
     imu_display_clear_rows();
 
-    OLED_ShowString(0U, IMU_DISPLAY_ROLL_Y, "ICM ERR:", OLED_8X16);
-    OLED_ShowNum(64U, IMU_DISPLAY_ROLL_Y, error_code, 2U, OLED_8X16);
-    OLED_ShowString(0U, IMU_DISPLAY_PITCH_Y, "ADDR 68/69", OLED_8X16);
-    OLED_ShowString(0U, IMU_DISPLAY_YAW_Y, "CHECK I2C0", OLED_8X16);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_ROLL_Y, "ICM:",
+        IMU_DISPLAY_FONT);
+    OLED_ShowNum((uint8_t) (IMU_DISPLAY_X + 24U), IMU_DISPLAY_ROLL_Y,
+        error_code, 2U, IMU_DISPLAY_FONT);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_PITCH_Y, "ADDR68",
+        IMU_DISPLAY_FONT);
+    OLED_ShowString(IMU_DISPLAY_X, IMU_DISPLAY_YAW_Y, "CHK I2C",
+        IMU_DISPLAY_FONT);
 
-    OLED_UpdateArea(0U, IMU_DISPLAY_ROLL_Y, OLED_WIDTH,
-        (uint8_t) (OLED_HEIGHT - IMU_DISPLAY_ROLL_Y));
+    OLED_UpdateArea(IMU_DISPLAY_X, IMU_DISPLAY_ROLL_Y, IMU_DISPLAY_WIDTH,
+        (uint8_t) (IMU_DISPLAY_LINE_HEIGHT * 3U));
 }
 
 static void imu_display_clear_rows(void)
 {
-    OLED_ClearArea(0U, IMU_DISPLAY_ROLL_Y, OLED_WIDTH,
-        (uint8_t) (OLED_HEIGHT - IMU_DISPLAY_ROLL_Y));
+    OLED_ClearArea(IMU_DISPLAY_X, IMU_DISPLAY_ROLL_Y, IMU_DISPLAY_WIDTH,
+        (uint8_t) (IMU_DISPLAY_LINE_HEIGHT * 3U));
 }

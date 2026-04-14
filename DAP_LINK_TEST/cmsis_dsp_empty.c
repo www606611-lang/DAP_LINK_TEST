@@ -32,8 +32,9 @@
 
 #include "ti_msp_dl_config.h"
 #include "timer.h"
-#include "imu_display.h"
-#include "oled_status.h"
+#include "encoder.h"
+#include "lcd_status.h"
+#include "motor.h"
 #include "uart_display.h"
 
 static void app_init(void);
@@ -51,17 +52,21 @@ int main(void)
 static void app_init(void)
 {
     SYSCFG_DL_init();
+    Motor_Init();
     timer_common_init();
-    oled_status_screen_init(timer_common_get_ms());
+    Encoder_Init(timer_common_get_ms());
+    lcd_status_screen_init(timer_common_get_ms());
     uart_display_init();
-    imu_display_init(timer_common_get_ms());
+
+    Motor_SetLeft(100);
+    Motor_SetRight(100);
 }
 
 static void app_task(void)
 {
     uint32_t now_ms = timer_common_get_ms();
 
+    Encoder_Task(now_ms);
     uart_display_task(now_ms);
-    imu_display_task(now_ms);
-    oled_status_screen_task(now_ms);
+    lcd_status_screen_task(now_ms);
 }

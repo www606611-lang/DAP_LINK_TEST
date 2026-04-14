@@ -1,6 +1,6 @@
 #include "uart_display.h"
 
-#include "oled_status.h"
+#include "lcd_status.h"
 #include "uart0_dma.h"
 
 #include <stdbool.h>
@@ -81,7 +81,7 @@ static void uart_display_capture(const uint8_t *data, uint16_t length,
 
 static void uart_display_flush(void)
 {
-    oled_status_screen_uart_write(g_uart_display_message,
+    lcd_status_screen_uart_write(g_uart_display_message,
         g_uart_display_message_length);
     g_uart_display_message_length  = 0U;
     g_uart_display_message_pending = false;

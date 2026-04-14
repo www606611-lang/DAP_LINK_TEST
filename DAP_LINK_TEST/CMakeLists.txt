@@ -33,8 +33,7 @@ set(SYSCFG_H "${SYSCFG_OUT_DIR}/ti_msp_dl_config.h")
 set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
 
 set(APP_SOURCES
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/imu_display.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/oled_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/lcd_status.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/uart_display.c"
 )
 
@@ -44,9 +43,11 @@ set(COMMON_SOURCES
 )
 
 set(MODULE_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/encoder.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/modules/oled.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/motor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/OLED_Data.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/st7789.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/uart0_dma.c"
 )
 
