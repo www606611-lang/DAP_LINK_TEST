@@ -17,3 +17,9 @@
 # IDE / OS noise
 Thumbs.db
 Desktop.ini
+
+# Python caches / local research artifacts
+__pycache__/
+*.pyc
+/_manual_extract_pages.txt
+/_manual_zdt_x42s_v1_0_3.pdf

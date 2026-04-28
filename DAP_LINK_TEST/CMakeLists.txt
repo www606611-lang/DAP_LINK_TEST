@@ -33,7 +33,9 @@ set(SYSCFG_H "${SYSCFG_OUT_DIR}/ti_msp_dl_config.h")
 set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
 
 set(APP_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/k230_uart.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/lcd_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/track_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/uart_display.c"
 )
 
@@ -45,11 +47,13 @@ set(COMMON_SOURCES
 set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/encoder.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/key.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/motor.c"
-  # ST7789 复用这里的字库；OLED 驱动本体 modules/oled.c 不参与编译。
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/zdt_stepper.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/OLED_Data.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/st7789.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/uart0_dma.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID/pid.c"
 )
 
 add_custom_command(
@@ -100,6 +104,7 @@ target_compile_definitions(${APP_NAME} PRIVATE ARM_MATH_CM0)
 
 target_include_directories(${APP_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID"
   "${CMAKE_CURRENT_SOURCE_DIR}/app"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules"
   "${CMAKE_CURRENT_SOURCE_DIR}/common"

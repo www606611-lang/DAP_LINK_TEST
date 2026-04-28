@@ -14,6 +14,14 @@
 #define ENCODER_RIGHT_B_IIDX Encoder_Input_Pin_Encoder_R_B_IIDX
 #define ENCODER_RIGHT_B_PIN  Encoder_Input_Pin_Encoder_R_B_PIN
 
+#ifdef Encoder_Input_Pin_INT_IRQN
+#define ENCODER_INT_IRQN Encoder_Input_Pin_INT_IRQN
+#define ENCODER_INT_IIDX Encoder_Input_Pin_INT_IIDX
+#else
+#define ENCODER_INT_IRQN GPIO_MULTIPLE_GPIOB_INT_IRQN
+#define ENCODER_INT_IIDX GPIO_MULTIPLE_GPIOB_INT_IIDX
+#endif
+
 typedef struct {
     volatile int32_t count;
     uint8_t last_state;
@@ -41,7 +49,7 @@ void Encoder_Init(uint32_t now_ms)
     g_encoder[ENCODER_LEFT].last_state = encoder_read_state(ENCODER_LEFT);
     g_encoder[ENCODER_RIGHT].last_state = encoder_read_state(ENCODER_RIGHT);
     g_last_sample_ms = now_ms;
-    NVIC_EnableIRQ(Encoder_Input_Pin_INT_IRQN);
+    NVIC_EnableIRQ(ENCODER_INT_IRQN);
 }
 
 void Encoder_Task(uint32_t now_ms)
@@ -152,7 +160,7 @@ bool Encoder_GetSnapshot(encoder_id_t id, encoder_snapshot_t *snapshot)
 void GROUP1_IRQHandler(void)
 {
     switch (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1)) {
-        case Encoder_Input_Pin_INT_IIDX:
+        case ENCODER_INT_IIDX:
             while (true) {
                 switch (DL_GPIO_getPendingInterrupt(ENCODER_PORT)) {
                     case ENCODER_LEFT_A_IIDX:

@@ -5,6 +5,7 @@
 #include "OLED_Data.h"
 #include "ti_msp_dl_config.h"
 
+#include <stdbool.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -17,6 +18,10 @@
 #define ST7789_MADCTL_VALUE          0x70U
 #define ST7789_COLMOD_RGB565         0x05U
 #define ST7789_PRINTF_BUFFER_SIZE    64U
+#define ST7789_SPI_SCR_DIVIDER       1U
+#define ST7789_DMA_CHAN_ID           DMA_CH2_CHAN_ID
+#define ST7789_DMA_MIN_BYTES         32U
+#define ST7789_DMA_BUFFER_SIZE       512U
 
 /* 1.9 寸 170x320 模块的可视区域在 ST7789 GRAM 中有 35 行偏移。 */
 
@@ -44,12 +49,16 @@
 static void st7789_select(void);
 static void st7789_deselect(void);
 static void st7789_wait_idle(void);
+static void st7789_write_bytes_polling(const uint8_t *data, uint32_t length);
+static void st7789_write_bytes_dma(const uint8_t *data, uint32_t length);
 static void st7789_write_bytes(const uint8_t *data, uint32_t length);
 static void st7789_write_command(uint8_t command);
 static void st7789_write_command_data(
     uint8_t command, const uint8_t *data, uint32_t length);
 static void st7789_write_pixel_color(uint16_t color);
 static void st7789_write_color(uint16_t color, uint32_t count);
+static void st7789_flush_pixel_buffer(
+    uint8_t *buffer, uint32_t *buffered_bytes);
 static void st7789_hardware_reset(void);
 static uint32_t st7789_pow_u32(uint32_t base, uint32_t exp);
 static uint8_t st7789_ascii_index(char ch);
@@ -65,6 +74,9 @@ static uint8_t st7789_point_in_polygon(uint8_t nvert, const int32_t *vertx,
 static uint8_t st7789_is_in_angle(
     int32_t x, int32_t y, int16_t start_angle, int16_t end_angle);
 
+static volatile bool g_st7789_dma_busy;
+static uint8_t g_st7789_dma_buffer[ST7789_DMA_BUFFER_SIZE];
+
 static void st7789_select(void)
 {
     DL_GPIO_clearPins(LCD_CTRL_PORT, LCD_CTRL_LCD_CS_PIN);
@@ -78,11 +90,11 @@ static void st7789_deselect(void)
 
 static void st7789_wait_idle(void)
 {
-    while (DL_SPI_isBusy(SPI_LCD_INST)) {
+    while (g_st7789_dma_busy || DL_SPI_isBusy(SPI_LCD_INST)) {
     }
 }
 
-static void st7789_write_bytes(const uint8_t *data, uint32_t length)
+static void st7789_write_bytes_polling(const uint8_t *data, uint32_t length)
 {
     while (length > 0U) {
         while (DL_SPI_isTXFIFOFull(SPI_LCD_INST)) {
@@ -93,6 +105,42 @@ static void st7789_write_bytes(const uint8_t *data, uint32_t length)
     }
 
     st7789_wait_idle();
+}
+
+static void st7789_write_bytes_dma(const uint8_t *data, uint32_t length)
+{
+    if ((data == NULL) || (length == 0U)) {
+        return;
+    }
+
+    st7789_wait_idle();
+    g_st7789_dma_busy = true;
+
+    DL_DMA_disableChannel(DMA, ST7789_DMA_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DL_DMA_INTERRUPT_CHANNEL2);
+    DL_DMA_setSrcAddr(DMA, ST7789_DMA_CHAN_ID, (uint32_t) data);
+    DL_DMA_setDestAddr(
+        DMA, ST7789_DMA_CHAN_ID, (uint32_t) &SPI_LCD_INST->TXDATA);
+    DL_DMA_setTransferSize(DMA, ST7789_DMA_CHAN_ID, length);
+    DL_DMA_enableChannel(DMA, ST7789_DMA_CHAN_ID);
+
+    while (g_st7789_dma_busy) {
+    }
+
+    st7789_wait_idle();
+}
+
+static void st7789_write_bytes(const uint8_t *data, uint32_t length)
+{
+    if ((data == NULL) || (length == 0U)) {
+        return;
+    }
+
+    if (length >= ST7789_DMA_MIN_BYTES) {
+        st7789_write_bytes_dma(data, length);
+    } else {
+        st7789_write_bytes_polling(data, length);
+    }
 }
 
 static void st7789_write_command(uint8_t command)
@@ -136,11 +184,51 @@ static void st7789_write_pixel_color(uint16_t color)
 
 static void st7789_write_color(uint16_t color, uint32_t count)
 {
-    while (count-- > 0U) {
-        st7789_write_pixel_color(color);
+    uint8_t high = (uint8_t) (color >> 8);
+    uint8_t low = (uint8_t) color;
+    uint32_t buffer_bytes = ST7789_DMA_BUFFER_SIZE;
+    uint32_t i;
+
+    if ((count * 2U) < ST7789_DMA_MIN_BYTES) {
+        while (count-- > 0U) {
+            st7789_write_pixel_color(color);
+        }
+
+        st7789_wait_idle();
+        return;
     }
 
-    st7789_wait_idle();
+    if ((buffer_bytes & 0x1U) != 0U) {
+        buffer_bytes--;
+    }
+
+    for (i = 0U; i < buffer_bytes; i += 2U) {
+        g_st7789_dma_buffer[i] = high;
+        g_st7789_dma_buffer[i + 1U] = low;
+    }
+
+    while (count > 0U) {
+        uint32_t burst_pixels = buffer_bytes / 2U;
+
+        if (burst_pixels > count) {
+            burst_pixels = count;
+        }
+
+        st7789_write_bytes(g_st7789_dma_buffer, burst_pixels * 2U);
+        count -= burst_pixels;
+    }
+}
+
+static void st7789_flush_pixel_buffer(
+    uint8_t *buffer, uint32_t *buffered_bytes)
+{
+    if ((buffer == NULL) || (buffered_bytes == NULL) ||
+        (*buffered_bytes == 0U)) {
+        return;
+    }
+
+    st7789_write_bytes(buffer, *buffered_bytes);
+    *buffered_bytes = 0U;
 }
 
 static void st7789_hardware_reset(void)
@@ -301,6 +389,12 @@ void ST7789_Init(void)
         0x33U, 0x3EU, 0x36U, 0x14U, 0x14U, 0x29U, 0x32U
     };
     uint8_t data;
+
+    /* SysConfig 默认把 LCD SPI 设在 8 MHz，这里提升到 20 MHz 以减轻字符刷屏卡顿。 */
+    DL_SPI_setBitRateSerialClockDivider(
+        SPI_LCD_INST, ST7789_SPI_SCR_DIVIDER);
+    NVIC_ClearPendingIRQ(DMA_INT_IRQn);
+    NVIC_EnableIRQ(DMA_INT_IRQn);
 
     st7789_hardware_reset();
 
@@ -749,6 +843,11 @@ void ST7789_ShowImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
     uint16_t draw_height;
     uint16_t xi;
     uint16_t yi;
+    uint8_t color_high = (uint8_t) (color >> 8);
+    uint8_t color_low = (uint8_t) color;
+    uint8_t bg_high = (uint8_t) (bg_color >> 8);
+    uint8_t bg_low = (uint8_t) bg_color;
+    uint32_t buffered_bytes = 0U;
 
     if ((image == NULL) || (x >= ST7789_WIDTH) || (y >= ST7789_HEIGHT) ||
         (width == 0U) || (height == 0U)) {
@@ -773,15 +872,112 @@ void ST7789_ShowImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
         for (xi = 0U; xi < draw_width; xi++) {
             /* 字库按列存储，每 8 个纵向像素共用一个字节。 */
             uint8_t src = image[(yi / 8U) * width + xi];
-            uint16_t pixel_color =
-                ((src & (uint8_t) (1U << (yi % 8U))) != 0U) ? color :
-                                                               bg_color;
+            bool pixel_on =
+                ((src & (uint8_t) (1U << (yi % 8U))) != 0U);
 
-            st7789_write_pixel_color(pixel_color);
+            g_st7789_dma_buffer[buffered_bytes++] =
+                pixel_on ? color_high : bg_high;
+            g_st7789_dma_buffer[buffered_bytes++] =
+                pixel_on ? color_low : bg_low;
+
+            if (buffered_bytes >= ST7789_DMA_BUFFER_SIZE) {
+                st7789_flush_pixel_buffer(
+                    g_st7789_dma_buffer, &buffered_bytes);
+            }
         }
     }
-    st7789_wait_idle();
+    st7789_flush_pixel_buffer(g_st7789_dma_buffer, &buffered_bytes);
     st7789_deselect();
+}
+
+void ST7789_ShowAsciiStringFast(uint16_t x, uint16_t y, const char *str,
+    uint8_t font_size, uint16_t color, uint16_t bg_color)
+{
+    uint8_t char_height = st7789_font_height(font_size);
+    uint16_t char_width = font_size;
+    uint16_t visible_chars = 0U;
+    uint16_t draw_height;
+    uint16_t row;
+    uint16_t col;
+    uint16_t ch_index;
+    uint8_t color_high = (uint8_t) (color >> 8);
+    uint8_t color_low = (uint8_t) color;
+    uint8_t bg_high = (uint8_t) (bg_color >> 8);
+    uint8_t bg_low = (uint8_t) bg_color;
+    uint32_t buffered_bytes = 0U;
+
+    if ((str == NULL) || (char_height == 0U) || (x >= ST7789_WIDTH) ||
+        (y >= ST7789_HEIGHT)) {
+        return;
+    }
+
+    while ((str[visible_chars] != '\0') && (str[visible_chars] != '\n') &&
+           ((uint32_t) x + (uint32_t) ((visible_chars + 1U) * char_width) <=
+               ST7789_WIDTH)) {
+        visible_chars++;
+    }
+
+    if (visible_chars == 0U) {
+        return;
+    }
+
+    draw_height = char_height;
+    if ((uint32_t) y + draw_height > ST7789_HEIGHT) {
+        draw_height = (uint16_t) (ST7789_HEIGHT - y);
+    }
+
+    ST7789_SetWindow(x, y,
+        (uint16_t) (x + visible_chars * char_width - 1U),
+        (uint16_t) (y + draw_height - 1U));
+
+    st7789_select();
+    DL_GPIO_setPins(LCD_CTRL_PORT, LCD_CTRL_LCD_DC_PIN);
+
+    for (row = 0U; row < draw_height; row++) {
+        uint8_t glyph_row = (uint8_t) (row / 8U);
+        uint8_t glyph_mask = (uint8_t) (1U << (row % 8U));
+
+        for (ch_index = 0U; ch_index < visible_chars; ch_index++) {
+            const uint8_t *glyph;
+
+            if (font_size == ST7789_8X16) {
+                glyph = OLED_F8x16[st7789_ascii_index(str[ch_index])];
+            } else {
+                glyph = OLED_F6x8[st7789_ascii_index(str[ch_index])];
+            }
+
+            for (col = 0U; col < char_width; col++) {
+                bool pixel_on =
+                    ((glyph[glyph_row * char_width + col] & glyph_mask) != 0U);
+
+                g_st7789_dma_buffer[buffered_bytes++] =
+                    pixel_on ? color_high : bg_high;
+                g_st7789_dma_buffer[buffered_bytes++] =
+                    pixel_on ? color_low : bg_low;
+
+                if (buffered_bytes >= ST7789_DMA_BUFFER_SIZE) {
+                    st7789_flush_pixel_buffer(
+                        g_st7789_dma_buffer, &buffered_bytes);
+                }
+            }
+        }
+    }
+
+    st7789_flush_pixel_buffer(g_st7789_dma_buffer, &buffered_bytes);
+    st7789_deselect();
+}
+
+void DMA_IRQHandler(void)
+{
+    switch (DL_DMA_getPendingInterrupt(DMA)) {
+        case DL_DMA_EVENT_IIDX_DMACH2:
+            DL_DMA_clearInterruptStatus(DMA, DL_DMA_INTERRUPT_CHANNEL2);
+            DL_DMA_disableChannel(DMA, ST7789_DMA_CHAN_ID);
+            g_st7789_dma_busy = false;
+            break;
+        default:
+            break;
+    }
 }
 
 void ST7789_ShowChar(uint16_t x, uint16_t y, char ch, uint8_t font_size,

@@ -34,8 +34,10 @@
 #include "timer.h"
 #include "encoder.h"
 #include "icm20948.h"
+#include "k230_uart.h"
 #include "lcd_status.h"
 #include "motor.h"
+#include "track_control.h"
 #include "uart_display.h"
 
 static void app_init(void);
@@ -59,14 +61,12 @@ static void app_init(void)
     timer_common_init();
 
     now_ms = timer_common_get_ms();
+    track_control_init(now_ms);
     Encoder_Init(now_ms);
-    /* 姿态任务独立于 LCD，后续控制逻辑也可以直接读取 IMU 数据。 */
     ICM20948_TaskInit(now_ms);
     lcd_status_screen_init(timer_common_get_ms());
     uart_display_init();
-
-    Motor_SetLeft(100);
-    Motor_SetRight(100);
+    k230_uart_init();
 }
 
 static void app_task(void)
@@ -74,8 +74,9 @@ static void app_task(void)
     uint32_t now_ms = timer_common_get_ms();
 
     Encoder_Task(now_ms);
-    /* 先更新姿态，再让显示页读取最新结果。 */
     ICM20948_Task(now_ms);
     uart_display_task(now_ms);
+    k230_uart_task(now_ms);
+    track_control_task(now_ms);
     lcd_status_screen_task(now_ms);
 }
