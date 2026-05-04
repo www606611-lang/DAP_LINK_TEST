@@ -14,13 +14,16 @@ sensor_id = 2
 LCD_W = 800
 LCD_H = 480
 
-IMG_W = 400
-IMG_H = 240
+UART_COORD_W = 400
+UART_COORD_H = 240
+
+IMG_W = 360
+IMG_H = 216
 
 RECT_THRESHOLD = 11000
-MIN_AREA = 2200
-MIN_WIDTH = 40
-MIN_HEIGHT = 28
+MIN_AREA = (2200 * IMG_W * IMG_H) // (UART_COORD_W * UART_COORD_H)
+MIN_WIDTH = (40 * IMG_W) // UART_COORD_W
+MIN_HEIGHT = (28 * IMG_H) // UART_COORD_H
 MIN_FRAME_COVERAGE = 0.025
 
 RECT_ASPECT_MIN = 1.20
@@ -28,17 +31,17 @@ RECT_ASPECT_MAX = 2.20
 TARGET_RECT_ASPECT = 1.50
 
 LOST_TOL = 6
-CENTER_JUMP_LIMIT = 70
-CORNER_JUMP_LIMIT = 45
+CENTER_JUMP_LIMIT = (70 * IMG_W) // UART_COORD_W
+CORNER_JUMP_LIMIT = (45 * IMG_W) // UART_COORD_W
 AREA_CHANGE_LOW = 0.55
 AREA_CHANGE_HIGH = 1.65
 SMOOTH_A = 0.35
 
 USE_ROI = True
-ROI_MARGIN_X = 12
-ROI_MARGIN_Y = 8
-TRACK_ROI_MARGIN_X = 64
-TRACK_ROI_MARGIN_Y = 44
+ROI_MARGIN_X = max(8, (12 * IMG_W) // UART_COORD_W)
+ROI_MARGIN_Y = max(6, (8 * IMG_H) // UART_COORD_H)
+TRACK_ROI_MARGIN_X = max(40, (64 * IMG_W) // UART_COORD_W)
+TRACK_ROI_MARGIN_Y = max(28, (44 * IMG_H) // UART_COORD_H)
 TRACK_REACQUIRE_CENTER_AFTER = 1
 TRACK_REACQUIRE_FULL_AFTER = 2
 FULL_SEARCH_EVERY_N_FRAME = 2
@@ -56,8 +59,16 @@ uart = None
 uart_frame_cnt = 0
 
 DISPLAY_ENABLE = True
-DISPLAY_SHOW_N_FRAME = 2
+DISPLAY_SHOW_N_FRAME = 3
 DRAW_DEBUG_ROI = False
+DISPLAY_TEXT_SCALE = 1
+DISPLAY_TEXT_MARGIN_X = 8
+DISPLAY_TEXT_MARGIN_Y = 8
+DISPLAY_TEXT_CHAR_W = 8
+DISPLAY_QUAD_THICKNESS = 2
+DISPLAY_CROSS_SIZE = 8
+DISPLAY_CROSS_THICKNESS = 1
+DISPLAY_FPS_LOG_MS = 2000
 
 SHOW_X = (LCD_W - IMG_W) // 2
 SHOW_Y = (LCD_H - IMG_H) // 2
@@ -77,6 +88,14 @@ def clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def scale_coord_x(x):
+    return (x * UART_COORD_W + (IMG_W // 2)) // IMG_W
+
+
+def scale_coord_y(y):
+    return (y * UART_COORD_H + (IMG_H // 2)) // IMG_H
 
 
 def center_of(corners):
@@ -152,30 +171,28 @@ def rect_side_lengths(corners):
     return top, right, bottom, left
 
 
-def rect_aspect(corners):
+def rect_metrics(corners):
     top, right, bottom, left = rect_side_lengths(corners)
     width = (top + bottom) * 0.5
     height = (left + right) * 0.5
 
     if height <= 0.0 or width <= 0.0:
-        return 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
     if width >= height:
-        return width / height
-    return height / width
+        aspect = width / height
+    else:
+        aspect = height / width
 
-
-def quad_is_reasonable(corners):
-    top, right, bottom, left = rect_side_lengths(corners)
     side_min = min(top, right, bottom, left)
     side_max = max(top, right, bottom, left)
 
-    if side_min < 14.0:
-        return False
-    if side_max > side_min * 8.0:
-        return False
+    return width, height, aspect, side_min, side_max
 
-    return True
+
+def rect_aspect(corners):
+    _, _, aspect, _, _ = rect_metrics(corners)
+    return aspect
 
 
 def corners_jump_too_much(old_corners, new_corners, limit):
@@ -200,6 +217,29 @@ def draw_quad(img, corners, color=(255, 0, 0), thickness=2):
     img.draw_line(corners[1][0], corners[1][1], corners[2][0], corners[2][1], color=color, thickness=thickness)
     img.draw_line(corners[2][0], corners[2][1], corners[3][0], corners[3][1], color=color, thickness=thickness)
     img.draw_line(corners[3][0], corners[3][1], corners[0][0], corners[0][1], color=color, thickness=thickness)
+
+
+def draw_center_text(img, valid, cx, cy):
+    if valid:
+        text = "X:{:03d} Y:{:03d}".format(
+            scale_coord_x(cx), scale_coord_y(cy))
+        color = (255, 255, 0)
+    else:
+        text = "X:--- Y:---"
+        color = (255, 64, 64)
+
+    text_w = len(text) * DISPLAY_TEXT_CHAR_W * DISPLAY_TEXT_SCALE
+    text_x = IMG_W - DISPLAY_TEXT_MARGIN_X - text_w
+    if text_x < 0:
+        text_x = 0
+
+    img.draw_string(
+        text_x,
+        DISPLAY_TEXT_MARGIN_Y,
+        text,
+        color=color,
+        scale=DISPLAY_TEXT_SCALE,
+    )
 
 
 def normalize_roi(x, y, w, h):
@@ -239,8 +279,6 @@ def candidate_from_rect(rect, offset_x=0, offset_y=0):
         corners.append((p[0] + offset_x, p[1] + offset_y))
 
     corners = order_corners(corners)
-    if not quad_is_reasonable(corners):
-        return None
 
     x, y, w, h = bbox_from_corners(corners)
     bbox_area = w * h
@@ -252,7 +290,11 @@ def candidate_from_rect(rect, offset_x=0, offset_y=0):
     if bbox_area < int(IMG_W * IMG_H * MIN_FRAME_COVERAGE):
         return None
 
-    aspect = rect_aspect(corners)
+    _, _, aspect, side_min, side_max = rect_metrics(corners)
+    if side_min < 14.0:
+        return None
+    if side_max > side_min * 8.0:
+        return None
     if aspect < RECT_ASPECT_MIN or aspect > RECT_ASPECT_MAX:
         return None
 
@@ -431,11 +473,11 @@ def uart_send_packet(valid, cx, cy):
 
 
 def uart_send_center(cx, cy):
-    uart_send_packet(1, cx, cy)
+    uart_send_packet(1, scale_coord_x(cx), scale_coord_y(cy))
 
 
 def uart_send_lost(cx, cy):
-    uart_send_packet(0, cx, cy)
+    uart_send_packet(0, scale_coord_x(cx), scale_coord_y(cy))
 
 
 def main():
@@ -495,7 +537,7 @@ def main():
 
             fps_cnt += 1
             dt = time.ticks_diff(time.ticks_ms(), t0)
-            if dt >= 1000:
+            if dt >= DISPLAY_FPS_LOG_MS:
                 fps = fps_cnt * 1000.0 / dt
                 print("fps=%.2f valid=%d lost=%d cx=%d cy=%d" % (
                     fps,
@@ -513,13 +555,25 @@ def main():
                     display_frame_cnt = 0
 
                     if track_valid and track_corners is not None:
-                        draw_quad(img, track_corners, color=(255, 0, 0), thickness=3)
-                        img.draw_cross(track_cx, track_cy, color=(0, 255, 0), size=10, thickness=2)
-                        img.draw_circle(track_cx, track_cy, 4, color=(255, 255, 0), thickness=1)
+                        draw_quad(img, track_corners, color=(255, 0, 0), thickness=DISPLAY_QUAD_THICKNESS)
+                        img.draw_cross(
+                            track_cx,
+                            track_cy,
+                            color=(0, 255, 0),
+                            size=DISPLAY_CROSS_SIZE,
+                            thickness=DISPLAY_CROSS_THICKNESS,
+                        )
 
                     if DRAW_DEBUG_ROI and used_roi is not None:
                         roi_x, roi_y, roi_w, roi_h = used_roi
                         img.draw_rectangle(roi_x, roi_y, roi_w, roi_h, color=(0, 0, 255), thickness=1)
+
+                    draw_center_text(
+                        img,
+                        track_valid and track_corners is not None,
+                        track_cx,
+                        track_cy,
+                    )
 
                     Display.show_image(img, x=SHOW_X, y=SHOW_Y)
 

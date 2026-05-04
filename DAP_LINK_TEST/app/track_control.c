@@ -11,9 +11,10 @@
 #define TRACK_CONTROL_ADDR_2         (2U)
 #define TRACK_CONTROL_ACCEL          (15U)
 #define TRACK_CONTROL_BOOT_DELAY     (1000U)
-#define TRACK_CONTROL_UPDATE_MS      (20U)
-#define TRACK_CONTROL_X_RPM_STEP_LIMIT (2)
-#define TRACK_CONTROL_Y_RPM_STEP_LIMIT (2)
+#define TRACK_CONTROL_UPDATE_MS      (10U)
+#define TRACK_CONTROL_DT_CLAMP_MS    (20U)
+#define TRACK_CONTROL_X_RPM_STEP_LIMIT (1)
+#define TRACK_CONTROL_Y_RPM_STEP_LIMIT (1)
 
 #define TRACK_CONTROL_X_KP           (0.10f)
 #define TRACK_CONTROL_X_KI           (0.0f)
@@ -70,6 +71,7 @@ void track_control_init(uint32_t now_ms)
 
 void track_control_task(uint32_t now_ms)
 {
+    uint32_t elapsed_ms;
     float dt_s;
     k230_uart_target_t target;
     float pid_x;
@@ -97,12 +99,17 @@ void track_control_task(uint32_t now_ms)
         return;
     }
 
-    if ((uint32_t) (now_ms - g_track_control_last_update_ms) <
-        TRACK_CONTROL_UPDATE_MS) {
+    elapsed_ms = (uint32_t) (now_ms - g_track_control_last_update_ms);
+
+    if (elapsed_ms < TRACK_CONTROL_UPDATE_MS) {
         return;
     }
 
-    dt_s = (float) (now_ms - g_track_control_last_update_ms) / 1000.0f;
+    if (elapsed_ms > TRACK_CONTROL_DT_CLAMP_MS) {
+        elapsed_ms = TRACK_CONTROL_UPDATE_MS;
+    }
+
+    dt_s = (float) elapsed_ms / 1000.0f;
     g_track_control_last_update_ms = now_ms;
     target = k230_uart_get_target();
 
@@ -205,6 +212,11 @@ static float track_control_abs(float value)
 
 static void track_control_stop_all(void)
 {
+    if ((g_track_control_motor_1_rpm == 0) &&
+        (g_track_control_motor_2_rpm == 0)) {
+        return;
+    }
+
     (void) ZdtStepper_StopAll();
     g_track_control_motor_1_rpm = 0;
     g_track_control_motor_2_rpm = 0;
