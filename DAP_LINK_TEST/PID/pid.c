@@ -92,6 +92,8 @@ float PID_UpdateError(pid_controller_t *pid, float error, float measurement,
     float dt_s)
 {
     float derivative = 0.0f;
+    float proposed_integral;
+    float unclamped_output;
     float output;
 
     if (pid == NULL) {
@@ -112,11 +114,19 @@ float PID_UpdateError(pid_controller_t *pid, float error, float measurement,
         pid->initialized = true;
     }
 
-    pid->integral += error * dt_s;
-    pid->integral = pid_clamp(
-        pid->integral, pid->integral_min, pid->integral_max);
-
     derivative = -(measurement - pid->prev_measurement) / dt_s;
+
+    proposed_integral = pid_clamp(pid->integral + error * dt_s,
+        pid->integral_min, pid->integral_max);
+    unclamped_output = pid->kp * error + pid->ki * proposed_integral +
+        pid->kd * derivative;
+    output = pid_clamp(unclamped_output, pid->output_min, pid->output_max);
+
+    if ((unclamped_output == output) ||
+        ((unclamped_output > pid->output_max) && (error < 0.0f)) ||
+        ((unclamped_output < pid->output_min) && (error > 0.0f))) {
+        pid->integral = proposed_integral;
+    }
 
     output = pid->kp * error + pid->ki * pid->integral + pid->kd * derivative;
     output = pid_clamp(output, pid->output_min, pid->output_max);

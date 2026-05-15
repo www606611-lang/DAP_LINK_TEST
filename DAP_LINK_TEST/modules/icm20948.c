@@ -35,13 +35,18 @@
 #define ICM20948_I2C_WAIT_SPINS        200000U
 #define ICM20948_GYRO_CAL_SAMPLES      500U
 #define ICM20948_GYRO_CONFIG_500DPS    0x1BU
-#define ICM20948_GYRO_DEADBAND_DPS     0.05f
-#define ICM20948_STILL_GYRO_DPS        0.60f
+#define ICM20948_GYRO_DEADBAND_XY_DPS  0.05f
+#define ICM20948_GYRO_DEADBAND_Z_DPS   0.12f
+#define ICM20948_STILL_GYRO_XY_DPS     0.60f
+#define ICM20948_STILL_GYRO_Z_DPS      0.80f
 #define ICM20948_STILL_ACCEL_MIN_G2    0.90f
 #define ICM20948_STILL_ACCEL_MAX_G2    1.10f
-#define ICM20948_STILL_COUNT_MIN       50U
-#define ICM20948_BIAS_TRACK_TAU_S      2.0f
-#define ICM20948_BIAS_TRACK_MAX_GAIN   0.02f
+#define ICM20948_STILL_COUNT_MIN       20U
+#define ICM20948_BIAS_TRACK_TAU_XY_S   2.0f
+#define ICM20948_BIAS_TRACK_TAU_Z_S    0.8f
+#define ICM20948_BIAS_TRACK_MAX_GAIN_XY 0.02f
+#define ICM20948_BIAS_TRACK_MAX_GAIN_Z 0.05f
+#define ICM20948_DT_CLAMP_MS          (ICM20948_UPDATE_INTERVAL_MS * 2U)
 
 static uint8_t g_icm20948_addr7 = ICM20948_ADDR_AD0_HIGH;
 static uint8_t g_icm20948_current_bank = 0xFFU;
@@ -73,7 +78,7 @@ static void icm20948_i2c_start_reg_read(uint8_t addr7, uint16_t length);
 static uint8_t icm20948_switch_bank(uint8_t bank);
 static void icm20948_task_try_init(uint32_t now_ms);
 static float icm20948_wrap_angle(float angle);
-static float icm20948_deadband(float value);
+static float icm20948_deadband(float value, float deadband);
 static void icm20948_calc_accel_angle(const ICM20948_Data_t *data,
     float *roll, float *pitch);
 static bool icm20948_is_stationary(const ICM20948_Data_t *data);
@@ -453,6 +458,8 @@ void ICM20948_TaskInit(uint32_t now_ms)
 
 void ICM20948_Task(uint32_t now_ms)
 {
+    uint32_t elapsed_ms;
+
     if (!g_icm20948_ready) {
         /* 传感器未就绪时按固定周期重试，避免显示层关心 I2C 细节。 */
         if ((uint32_t) (now_ms - g_icm20948_next_retry_ms) >=
@@ -462,8 +469,9 @@ void ICM20948_Task(uint32_t now_ms)
         return;
     }
 
-    if ((uint32_t) (now_ms - g_icm20948_last_update_ms) <
-        ICM20948_UPDATE_INTERVAL_MS) {
+    elapsed_ms = (uint32_t) (now_ms - g_icm20948_last_update_ms);
+
+    if (elapsed_ms < ICM20948_UPDATE_INTERVAL_MS) {
         return;
     }
 
@@ -474,12 +482,12 @@ void ICM20948_Task(uint32_t now_ms)
         return;
     }
 
-    {
-        float dt = (float) (now_ms - g_icm20948_last_update_ms) / 1000.0f;
-
-        g_icm20948_last_update_ms = now_ms;
-        ICM20948_UpdateAngle(dt);
+    if (elapsed_ms > ICM20948_DT_CLAMP_MS) {
+        elapsed_ms = ICM20948_UPDATE_INTERVAL_MS;
     }
+
+    g_icm20948_last_update_ms = now_ms;
+    ICM20948_UpdateAngle((float) elapsed_ms / 1000.0f);
 }
 
 static void icm20948_task_try_init(uint32_t now_ms)
@@ -607,10 +615,11 @@ void ICM20948_UpdateAngle(float dt)
     gz_dps = g_icm20948_data.gz_dps;
 
     if (icm20948_is_stationary(&g_icm20948_data)) {
+        icm20948_track_gyro_bias(&g_icm20948_data, dt);
+
         if (g_icm20948_still_count < ICM20948_STILL_COUNT_MIN) {
             g_icm20948_still_count++;
         } else {
-            icm20948_track_gyro_bias(&g_icm20948_data, dt);
             gx_dps = 0.0f;
             gy_dps = 0.0f;
             gz_dps = 0.0f;
@@ -619,9 +628,9 @@ void ICM20948_UpdateAngle(float dt)
         g_icm20948_still_count = 0U;
     }
 
-    gx_dps = icm20948_deadband(gx_dps);
-    gy_dps = icm20948_deadband(gy_dps);
-    gz_dps = icm20948_deadband(gz_dps);
+    gx_dps = icm20948_deadband(gx_dps, ICM20948_GYRO_DEADBAND_XY_DPS);
+    gy_dps = icm20948_deadband(gy_dps, ICM20948_GYRO_DEADBAND_XY_DPS);
+    gz_dps = icm20948_deadband(gz_dps, ICM20948_GYRO_DEADBAND_Z_DPS);
 
     icm20948_calc_accel_angle(&g_icm20948_data, &roll_acc, &pitch_acc);
     roll_acc = icm20948_wrap_angle(roll_acc - g_icm20948_roll_zero);
@@ -659,9 +668,9 @@ static bool icm20948_is_stationary(const ICM20948_Data_t *data)
         return false;
     }
 
-    if ((fabsf(data->gx_dps) > ICM20948_STILL_GYRO_DPS) ||
-        (fabsf(data->gy_dps) > ICM20948_STILL_GYRO_DPS) ||
-        (fabsf(data->gz_dps) > ICM20948_STILL_GYRO_DPS)) {
+    if ((fabsf(data->gx_dps) > ICM20948_STILL_GYRO_XY_DPS) ||
+        (fabsf(data->gy_dps) > ICM20948_STILL_GYRO_XY_DPS) ||
+        (fabsf(data->gz_dps) > ICM20948_STILL_GYRO_Z_DPS)) {
         return false;
     }
 
@@ -674,9 +683,9 @@ static bool icm20948_is_stationary(const ICM20948_Data_t *data)
                 (ICM20948_STILL_ACCEL_MAX_G2 * ICM20948_STILL_ACCEL_MAX_G2)));
 }
 
-static float icm20948_deadband(float value)
+static float icm20948_deadband(float value, float deadband)
 {
-    if (fabsf(value) < ICM20948_GYRO_DEADBAND_DPS) {
+    if (fabsf(value) < deadband) {
         return 0.0f;
     }
 
@@ -698,20 +707,26 @@ static void icm20948_calc_accel_angle(const ICM20948_Data_t *data,
 
 static void icm20948_track_gyro_bias(const ICM20948_Data_t *data, float dt)
 {
-    float gain;
+    float gain_xy;
+    float gain_z;
 
     if ((data == NULL) || (dt <= 0.0f)) {
         return;
     }
 
-    gain = dt / ICM20948_BIAS_TRACK_TAU_S;
-    if (gain > ICM20948_BIAS_TRACK_MAX_GAIN) {
-        gain = ICM20948_BIAS_TRACK_MAX_GAIN;
+    gain_xy = dt / ICM20948_BIAS_TRACK_TAU_XY_S;
+    if (gain_xy > ICM20948_BIAS_TRACK_MAX_GAIN_XY) {
+        gain_xy = ICM20948_BIAS_TRACK_MAX_GAIN_XY;
     }
 
-    g_icm20948_gyro_offset_x += data->gx_dps * gain;
-    g_icm20948_gyro_offset_y += data->gy_dps * gain;
-    g_icm20948_gyro_offset_z += data->gz_dps * gain;
+    gain_z = dt / ICM20948_BIAS_TRACK_TAU_Z_S;
+    if (gain_z > ICM20948_BIAS_TRACK_MAX_GAIN_Z) {
+        gain_z = ICM20948_BIAS_TRACK_MAX_GAIN_Z;
+    }
+
+    g_icm20948_gyro_offset_x += data->gx_dps * gain_xy;
+    g_icm20948_gyro_offset_y += data->gy_dps * gain_xy;
+    g_icm20948_gyro_offset_z += data->gz_dps * gain_z;
 }
 
 static float icm20948_wrap_angle(float angle)

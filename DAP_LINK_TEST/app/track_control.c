@@ -11,23 +11,26 @@
 #define TRACK_CONTROL_ADDR_2         (2U)
 #define TRACK_CONTROL_ACCEL          (15U)
 #define TRACK_CONTROL_BOOT_DELAY     (1000U)
-#define TRACK_CONTROL_UPDATE_MS      (20U)
-#define TRACK_CONTROL_X_RPM_STEP_LIMIT (2)
-#define TRACK_CONTROL_Y_RPM_STEP_LIMIT (2)
+#define TRACK_CONTROL_UPDATE_MS      (10U)
+#define TRACK_CONTROL_DT_CLAMP_MS    (20U)
+#define TRACK_CONTROL_X_RPM_ACCEL_STEP_LIMIT (2)
+#define TRACK_CONTROL_Y_RPM_ACCEL_STEP_LIMIT (2)
+#define TRACK_CONTROL_X_RPM_BRAKE_STEP_LIMIT (5)
+#define TRACK_CONTROL_Y_RPM_BRAKE_STEP_LIMIT (4)
 
-#define TRACK_CONTROL_X_KP           (0.10f)
+#define TRACK_CONTROL_X_KP           (0.11f)
 #define TRACK_CONTROL_X_KI           (0.0f)
-#define TRACK_CONTROL_X_KD           (0.009f)
-#define TRACK_CONTROL_Y_KP           (0.08f)
+#define TRACK_CONTROL_X_KD           (0.013f)
+#define TRACK_CONTROL_Y_KP           (0.09f)
 #define TRACK_CONTROL_Y_KI           (0.0f)
-#define TRACK_CONTROL_Y_KD           (0.010f)
+#define TRACK_CONTROL_Y_KD           (0.014f)
 
-#define TRACK_CONTROL_X_DEADBAND     (7.0f)
-#define TRACK_CONTROL_Y_DEADBAND     (6.0f)
+#define TRACK_CONTROL_X_DEADBAND     (6.0f)
+#define TRACK_CONTROL_Y_DEADBAND     (5.0f)
 #define TRACK_CONTROL_ZERO_BAND_RPM  (0.2f)
 #define TRACK_CONTROL_MIN_RPM        (1.0f)
-#define TRACK_CONTROL_X_MAX_RPM      (7.0f)
-#define TRACK_CONTROL_Y_MAX_RPM      (5.0f)
+#define TRACK_CONTROL_X_MAX_RPM      (18.0f)
+#define TRACK_CONTROL_Y_MAX_RPM      (12.0f)
 
 #define TRACK_CONTROL_X_SIGN         (1.0f)
 #define TRACK_CONTROL_Y_SIGN         (1.0f)
@@ -45,9 +48,12 @@ static void track_control_configure_pid(void);
 static int16_t track_control_pid_to_rpm(
     float pid_output, float sign, float max_rpm);
 static float track_control_abs(float value);
+static int16_t track_control_abs_i16(int16_t value);
+static bool track_control_same_sign_i16(int16_t a, int16_t b);
 static void track_control_stop_all(void);
 static int16_t track_control_limit_rpm_step(
-    int16_t target_rpm, int16_t last_rpm, int16_t step_limit);
+    int16_t target_rpm, int16_t last_rpm, int16_t accel_step_limit,
+    int16_t brake_step_limit);
 static void track_control_apply_speed(
     zdt_stepper_id_t motor, int16_t rpm, int16_t *last_rpm);
 
@@ -70,6 +76,7 @@ void track_control_init(uint32_t now_ms)
 
 void track_control_task(uint32_t now_ms)
 {
+    uint32_t elapsed_ms;
     float dt_s;
     k230_uart_target_t target;
     float pid_x;
@@ -97,12 +104,17 @@ void track_control_task(uint32_t now_ms)
         return;
     }
 
-    if ((uint32_t) (now_ms - g_track_control_last_update_ms) <
-        TRACK_CONTROL_UPDATE_MS) {
+    elapsed_ms = (uint32_t) (now_ms - g_track_control_last_update_ms);
+
+    if (elapsed_ms < TRACK_CONTROL_UPDATE_MS) {
         return;
     }
 
-    dt_s = (float) (now_ms - g_track_control_last_update_ms) / 1000.0f;
+    if (elapsed_ms > TRACK_CONTROL_DT_CLAMP_MS) {
+        elapsed_ms = TRACK_CONTROL_UPDATE_MS;
+    }
+
+    dt_s = (float) elapsed_ms / 1000.0f;
     g_track_control_last_update_ms = now_ms;
     target = k230_uart_get_target();
 
@@ -123,10 +135,12 @@ void track_control_task(uint32_t now_ms)
 
     motor_1_rpm = track_control_limit_rpm_step(
         motor_1_rpm, g_track_control_motor_1_rpm,
-        TRACK_CONTROL_X_RPM_STEP_LIMIT);
+        TRACK_CONTROL_X_RPM_ACCEL_STEP_LIMIT,
+        TRACK_CONTROL_X_RPM_BRAKE_STEP_LIMIT);
     motor_2_rpm = track_control_limit_rpm_step(
         motor_2_rpm, g_track_control_motor_2_rpm,
-        TRACK_CONTROL_Y_RPM_STEP_LIMIT);
+        TRACK_CONTROL_Y_RPM_ACCEL_STEP_LIMIT,
+        TRACK_CONTROL_Y_RPM_BRAKE_STEP_LIMIT);
 
     track_control_apply_speed(
         ZDT_STEPPER_1, motor_1_rpm, &g_track_control_motor_1_rpm);
@@ -203,17 +217,48 @@ static float track_control_abs(float value)
     return (value < 0.0f) ? -value : value;
 }
 
+static int16_t track_control_abs_i16(int16_t value)
+{
+    return (value < 0) ? (int16_t) -value : value;
+}
+
+static bool track_control_same_sign_i16(int16_t a, int16_t b)
+{
+    if ((a == 0) || (b == 0)) {
+        return false;
+    }
+
+    return ((a > 0) && (b > 0)) || ((a < 0) && (b < 0));
+}
+
 static void track_control_stop_all(void)
 {
+    if ((g_track_control_motor_1_rpm == 0) &&
+        (g_track_control_motor_2_rpm == 0)) {
+        return;
+    }
+
     (void) ZdtStepper_StopAll();
     g_track_control_motor_1_rpm = 0;
     g_track_control_motor_2_rpm = 0;
 }
 
 static int16_t track_control_limit_rpm_step(
-    int16_t target_rpm, int16_t last_rpm, int16_t step_limit)
+    int16_t target_rpm, int16_t last_rpm, int16_t accel_step_limit,
+    int16_t brake_step_limit)
 {
     int16_t delta = (int16_t) (target_rpm - last_rpm);
+    int16_t step_limit = accel_step_limit;
+
+    if ((accel_step_limit <= 0) || (brake_step_limit <= 0)) {
+        return target_rpm;
+    }
+
+    if ((target_rpm == 0) || (last_rpm == 0) ||
+        (!track_control_same_sign_i16(target_rpm, last_rpm)) ||
+        (track_control_abs_i16(target_rpm) < track_control_abs_i16(last_rpm))) {
+        step_limit = brake_step_limit;
+    }
 
     if (delta > step_limit) {
         return (int16_t) (last_rpm + step_limit);
@@ -232,11 +277,6 @@ static void track_control_apply_speed(
         return;
     }
 
-    if (rpm == 0) {
-        (void) ZdtStepper_Stop(motor, false);
-    } else {
-        (void) ZdtStepper_SetSpeed(motor, rpm, TRACK_CONTROL_ACCEL);
-    }
-
+    (void) ZdtStepper_SetSpeed(motor, rpm, TRACK_CONTROL_ACCEL);
     *last_rpm = rpm;
 }

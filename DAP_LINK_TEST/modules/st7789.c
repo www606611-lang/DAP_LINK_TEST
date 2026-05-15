@@ -20,8 +20,8 @@
 #define ST7789_PRINTF_BUFFER_SIZE    64U
 #define ST7789_SPI_SCR_DIVIDER       1U
 #define ST7789_DMA_CHAN_ID           DMA_CH2_CHAN_ID
-#define ST7789_DMA_MIN_BYTES         32U
-#define ST7789_DMA_BUFFER_SIZE       512U
+#define ST7789_DMA_MIN_BYTES         64U
+#define ST7789_DMA_BUFFER_SIZE       1024U
 
 /* 1.9 寸 170x320 模块的可视区域在 ST7789 GRAM 中有 35 行偏移。 */
 

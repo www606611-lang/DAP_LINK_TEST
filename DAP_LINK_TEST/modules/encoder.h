@@ -10,7 +10,7 @@ extern "C" {
 
 #ifndef ENCODER_SAMPLE_INTERVAL_MS
 /* 编码器速度计算周期，单位ms。 */
-#define ENCODER_SAMPLE_INTERVAL_MS 20U
+#define ENCODER_SAMPLE_INTERVAL_MS 50U
 #endif
 
 /* 编码器编号：左电机和右电机。 */
