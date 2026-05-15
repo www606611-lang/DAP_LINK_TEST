@@ -30,6 +30,9 @@ typedef struct {
     float pwm_command;
     float speed_feedforward_pwm;
     float speed_feedforward_reference_pps;
+    float speed_forward_min_drive_pwm;
+    float speed_reverse_min_drive_pwm;
+    float speed_min_drive_reference_pps;
     uint32_t last_update_ms;
     encoder_motor_pid_mode_t mode;
     bool enabled;
@@ -55,6 +58,12 @@ void EncoderMotorPID_SetPositionIntegralLimits(encoder_motor_pid_t *controller,
 void EncoderMotorPID_SetSpeedFeedforwardPwm(encoder_motor_pid_t *controller,
     float feedforward_pwm);
 void EncoderMotorPID_SetSpeedFeedforwardReferencePps(
+    encoder_motor_pid_t *controller, float reference_pps);
+void EncoderMotorPID_SetSpeedMinDrivePwm(encoder_motor_pid_t *controller,
+    float min_drive_pwm);
+void EncoderMotorPID_SetSpeedDirectionalMinDrivePwm(
+    encoder_motor_pid_t *controller, float forward_pwm, float reverse_pwm);
+void EncoderMotorPID_SetSpeedMinDriveReferencePps(
     encoder_motor_pid_t *controller, float reference_pps);
 void EncoderMotorPID_SetSpeedDeadband(encoder_motor_pid_t *controller,
     float deadband);

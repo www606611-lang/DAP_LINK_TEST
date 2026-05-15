@@ -9,6 +9,9 @@ static float encoder_motor_pid_clamp(
 static float encoder_motor_pid_apply_feedforward(
     float pid_output, float speed_target, float feedforward_pwm,
     float reference_pps);
+static float encoder_motor_pid_apply_min_drive(
+    float pwm_command, float speed_target, float forward_min_drive_pwm,
+    float reverse_min_drive_pwm, float reference_pps);
 static float encoder_motor_pid_limit_to_target_direction(
     float pwm_command, float speed_target);
 static void encoder_motor_pid_apply_pwm(
@@ -35,6 +38,9 @@ void EncoderMotorPID_Init(encoder_motor_pid_t *controller,
     controller->pwm_command = 0.0f;
     controller->speed_feedforward_pwm = 0.0f;
     controller->speed_feedforward_reference_pps = 0.0f;
+    controller->speed_forward_min_drive_pwm = 0.0f;
+    controller->speed_reverse_min_drive_pwm = 0.0f;
+    controller->speed_min_drive_reference_pps = 0.0f;
     controller->last_update_ms = now_ms;
     controller->mode = ENCODER_MOTOR_PID_MODE_STOP;
     controller->enabled = false;
@@ -158,6 +164,41 @@ void EncoderMotorPID_SetSpeedFeedforwardReferencePps(
         encoder_motor_pid_abs(reference_pps);
 }
 
+void EncoderMotorPID_SetSpeedMinDrivePwm(encoder_motor_pid_t *controller,
+    float min_drive_pwm)
+{
+    if (controller == NULL) {
+        return;
+    }
+
+    EncoderMotorPID_SetSpeedDirectionalMinDrivePwm(
+        controller, min_drive_pwm, min_drive_pwm);
+}
+
+void EncoderMotorPID_SetSpeedDirectionalMinDrivePwm(
+    encoder_motor_pid_t *controller, float forward_pwm, float reverse_pwm)
+{
+    if (controller == NULL) {
+        return;
+    }
+
+    controller->speed_forward_min_drive_pwm =
+        encoder_motor_pid_abs(forward_pwm);
+    controller->speed_reverse_min_drive_pwm =
+        encoder_motor_pid_abs(reverse_pwm);
+}
+
+void EncoderMotorPID_SetSpeedMinDriveReferencePps(
+    encoder_motor_pid_t *controller, float reference_pps)
+{
+    if (controller == NULL) {
+        return;
+    }
+
+    controller->speed_min_drive_reference_pps =
+        encoder_motor_pid_abs(reference_pps);
+}
+
 void EncoderMotorPID_SetSpeedDeadband(encoder_motor_pid_t *controller,
     float deadband)
 {
@@ -245,6 +286,11 @@ bool EncoderMotorPID_Update(encoder_motor_pid_t *controller, uint32_t now_ms)
         controller->pwm_command, speed_target,
         controller->speed_feedforward_pwm,
         controller->speed_feedforward_reference_pps);
+    controller->pwm_command = encoder_motor_pid_apply_min_drive(
+        controller->pwm_command, speed_target,
+        controller->speed_forward_min_drive_pwm,
+        controller->speed_reverse_min_drive_pwm,
+        controller->speed_min_drive_reference_pps);
     controller->pwm_command = encoder_motor_pid_clamp(
         controller->pwm_command, controller->speed_pid.output_min,
         controller->speed_pid.output_max);
@@ -358,6 +404,41 @@ static float encoder_motor_pid_apply_feedforward(
 
     return (speed_target > 0.0f) ? (pid_output + scaled_feedforward) :
         (pid_output - scaled_feedforward);
+}
+
+static float encoder_motor_pid_apply_min_drive(
+    float pwm_command, float speed_target, float forward_min_drive_pwm,
+    float reverse_min_drive_pwm, float reference_pps)
+{
+    float abs_pwm;
+    float min_drive_pwm;
+    float scaled_min_drive;
+
+    if (speed_target == 0.0f) {
+        return pwm_command;
+    }
+
+    min_drive_pwm = (speed_target > 0.0f) ? forward_min_drive_pwm :
+        reverse_min_drive_pwm;
+    if (min_drive_pwm <= 0.0f) {
+        return pwm_command;
+    }
+
+    scaled_min_drive = min_drive_pwm;
+    if (reference_pps > 0.0f) {
+        scaled_min_drive = min_drive_pwm *
+            (encoder_motor_pid_abs(speed_target) / reference_pps);
+        if (scaled_min_drive > min_drive_pwm) {
+            scaled_min_drive = min_drive_pwm;
+        }
+    }
+
+    abs_pwm = encoder_motor_pid_abs(pwm_command);
+    if (abs_pwm >= scaled_min_drive) {
+        return pwm_command;
+    }
+
+    return (speed_target > 0.0f) ? scaled_min_drive : -scaled_min_drive;
 }
 
 static float encoder_motor_pid_limit_to_target_direction(

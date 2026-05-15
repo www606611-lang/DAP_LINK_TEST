@@ -57,6 +57,7 @@ set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_motor_pid.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_position_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_speed_control.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID/yaw_angle_control.c"
 )
 
 add_custom_command(

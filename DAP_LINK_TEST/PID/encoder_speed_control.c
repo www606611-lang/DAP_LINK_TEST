@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define SPEED_CONTROL_TARGET_MIN_PPS      0.0f
+#define SPEED_CONTROL_TARGET_MIN_PPS      -3000.0f
 #define SPEED_CONTROL_TARGET_MAX_PPS      3000.0f
 #define SPEED_CONTROL_LEFT_KP             0.08f
 #define SPEED_CONTROL_LEFT_KI             0.06f
@@ -91,6 +91,38 @@ void EncoderSpeedControl_GetTargetPps(
     if (right_speed_pps != NULL) {
         *right_speed_pps = g_right_target_pps;
     }
+}
+
+void EncoderSpeedControl_SetMinDrivePwm(
+    float left_pwm, float right_pwm, float reference_pps)
+{
+    EncoderSpeedControl_SetDirectionalMinDrivePwm(left_pwm, left_pwm,
+        right_pwm, right_pwm, reference_pps);
+}
+
+void EncoderSpeedControl_SetDirectionalMinDrivePwm(
+    float left_forward_pwm, float left_reverse_pwm,
+    float right_forward_pwm, float right_reverse_pwm,
+    float reference_pps)
+{
+    if (!g_initialized) {
+        return;
+    }
+
+    EncoderMotorPID_SetSpeedDirectionalMinDrivePwm(
+        &g_left_speed_loop, left_forward_pwm, left_reverse_pwm);
+    EncoderMotorPID_SetSpeedDirectionalMinDrivePwm(
+        &g_right_speed_loop, right_forward_pwm, right_reverse_pwm);
+    EncoderMotorPID_SetSpeedMinDriveReferencePps(
+        &g_left_speed_loop, reference_pps);
+    EncoderMotorPID_SetSpeedMinDriveReferencePps(
+        &g_right_speed_loop, reference_pps);
+}
+
+void EncoderSpeedControl_ClearMinDrivePwm(void)
+{
+    EncoderSpeedControl_SetDirectionalMinDrivePwm(
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 void EncoderSpeedControl_GetSpeedTunings(

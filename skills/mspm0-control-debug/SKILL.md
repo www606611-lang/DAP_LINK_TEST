@@ -49,6 +49,14 @@ Position control is cascade PID:
 target position -> position PID -> target speed -> speed PID -> PWM
 ```
 
+Yaw angle control is also cascade-style:
+
+```text
+target yaw -> yaw PID -> opposite wheel speed targets -> speed PID -> PWM
+```
+
+Use `YawAngleControl_*` APIs for yaw posture tests. If the car rotates opposite to the command, adjust the yaw control sign first, then tune PID.
+
 ## PID Tuning Guidance
 
 Do not add KD by reflex. Encoder speed is quantized and D can amplify noise.

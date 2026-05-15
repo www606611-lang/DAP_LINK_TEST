@@ -277,6 +277,49 @@ EncoderPositionControl_Stop();
 
 不要让任务层直接 `Motor_SetLeft/Right()` 长期控制电机，除非是在开环诊断。
 
+## 2026-05-15 追加：Yaw 角度环测试
+
+新增正式 yaw 角度环模块：
+
+- `DAP_LINK_TEST/PID/yaw_angle_control.c`
+- `DAP_LINK_TEST/PID/yaw_angle_control.h`
+
+当前 yaw 控制采用：
+
+```text
+目标 yaw -> yaw 角度 PID -> 左右轮相反速度目标 -> EncoderSpeedControl -> 电机 PWM
+```
+
+主要 API：
+
+```c
+YawAngleControl_Init(now_ms);
+YawAngleControl_Task(now_ms);
+YawAngleControl_SetTargetDeg(yaw_deg);
+YawAngleControl_AddTargetDeg(delta_yaw_deg);
+YawAngleControl_HoldCurrentYaw();
+YawAngleControl_GetTargetDeg(&yaw_deg);
+YawAngleControl_ZeroYaw(now_ms);
+YawAngleControl_GetState(&state);
+YawAngleControl_GetTunings(&pid);
+YawAngleControl_Stop();
+```
+
+Yaw 调试模块已经清理：
+
+- `DAP_LINK_TEST/app/yaw_angle_debug.c`
+- `DAP_LINK_TEST/app/yaw_angle_debug.h`
+
+都已删除，不再保留按键和串口输出测试代码。
+
+注意：
+
+- yaw 原地转向需要左右轮速度一正一负，所以 `EncoderSpeedControl_SetTargetPps()` 已允许负速度目标。
+- 当前 yaw 外环参数：`KP=18, KI=0, KD=0`，最大转向速度 `900 pps`，死区 `1 deg`。
+- yaw 角度环内部对左右轮正反方向做了单独最小驱动补偿，用于处理左右电机/正反转不对称。
+- 如果后续车转反方向，优先改 `YAW_CONTROL_SIGN`，不要先动 PID。
+- 当前 `main` 已清理，不再默认调用速度环、位置环或 yaw 角度环；这些闭环模块保留 API，后续任务层需要时再显式调用。
+
 ## 项目内 skill
 
 已新增项目内 skill：
