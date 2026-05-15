@@ -1,277 +1,311 @@
 # Agent Handoff - 2026-05-06
 
-## Scope
-This handoff covers the work done in `C:\Users\ASUS\Desktop\mspm0_Project` on:
+> 这个文件是给后续 Codex / Agent 接手项目时先读的中文交接文档。当前项目还在搭基础能力阶段，后面遇到真实赛题/真实任务时，应当在这些基础模块上继续发挥，而不是重新从零乱改。
 
-- K230 rectangle tracking script
-- MSPM0 ST7789 status UI
-- encoder speed test
-- new PID-based encoder motor loop helper
+## 先读这个：用户协作习惯
 
-This note is meant for the next agent to continue without re-discovering context.
+- 用户希望我先建立全局认识，再判断问题，不要“盲目改参数、改一版试一版”。
+- 用户很重视真实硬件反馈：串口日志、VOFA 波形、LCD 表现、上电/复位/电机实际动作都要一起看。
+- 用户会直接指出现象，比如“右轮不动”“IMU 消失”“MSPM0 不断复位”“波形黄色线抖”，需要我先分析可能原因，再决定是否改代码。
+- 用户不喜欢把临时测试逻辑堆进 `main` / `cmsis_dsp_empty.c`。主循环要干净，只保留模块初始化和周期任务调用。
+- 临时测试可以做，但测完要收束成正式 API，删除 debug/test app，避免后续项目越来越乱。
+- 调 PID 时要尊重波形细节：先确认方向、采样周期、实际量纲，再谈 KP/KI/KD。
+- 串口输出要为当前调试目的服务，不需要的通道及时删掉，避免 VOFA 窗口压力和误判。
+- LCD 显示要简洁，不要塞太多调试文本；速度环参数、临时测试参数测完就清掉。
+- 硬件异常不能只怪代码：IMU 读不出、MCU 复位、电机一动 LCD 卡顿时，要同时考虑供电、电机纹波、接线、插拔状态和外设总线。
+- 代码修改后尽量同时跑 `build-ticlang` 和 `build-gcc`，确认两套构建都过。
 
-## Important Working Rule
-- The user explicitly wants `main`/`cmsis_dsp_empty.c` to stay clean.
-- Do not stuff test parameters or control logic back into `cmsis_dsp_empty.c`.
-- Keep test/business logic in separate modules under `app/` or `PID/`.
+## 当前主线状态
 
-## Current Main Entry
-Current entry file:
-- [DAP_LINK_TEST/cmsis_dsp_empty.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/cmsis_dsp_empty.c)
+当前重点已经从速度环测试切到位置环基础能力。速度环已经基本调通，并被封装成 API；位置环也已经完成第一版串级 PID，并通过按键 + VOFA 做过阶跃测试，波形效果可用。
 
-It is intentionally clean and only keeps:
-- `app_init()`
-- `app_task()`
-- init and task scheduling for timer / motor / encoder / imu / lcd / uart rx / speed test
+当前 `main` 文件：
 
-## Added Modules
-### 1. Encoder motor PID helper
-Files:
-- [DAP_LINK_TEST/PID/encoder_motor_pid.h](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/PID/encoder_motor_pid.h)
-- [DAP_LINK_TEST/PID/encoder_motor_pid.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/PID/encoder_motor_pid.c)
+- `DAP_LINK_TEST/cmsis_dsp_empty.c`
 
-What it does:
-- wraps existing `pid.c/.h`
-- supports:
-  - speed mode
-  - position mode
-- structure:
-  - position loop outputs speed target
-  - speed loop outputs motor PWM
+当前主循环保持简洁：
 
-Important implementation detail:
-- `EncoderMotorPID_Update()` was fixed to only update when
-  `elapsed_ms >= ENCODER_SAMPLE_INTERVAL_MS`
-- this was added because the loop was previously updating much faster than encoder speed refresh, causing unstable repeated PID updates on stale speed data
+- 初始化：`timer_common_init`、`ICM20948_TaskInit`、`Motor_Init`、`Encoder_Init`、`EncoderPositionControl_Init`、`lcd_status_screen_init`、`uart_display_init`
+- 周期任务：`Encoder_Task`、`ICM20948_Task`、`uart_display_task`、`lcd_status_screen_task`、`EncoderPositionControl_Task`
 
-Current behavior:
-- output limits apply to PWM command
-- `GetSpeedTargetPps()` returns direct speed target in speed mode
-- float target is internally tracked, but telemetry export was converted to integer before UART output
+注意：`main` 当前已经不再调用速度环测试，也不再调用位置环 debug app。
 
-### 2. Encoder speed test module
-Files:
-- [DAP_LINK_TEST/app/encoder_speed_test.h](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/encoder_speed_test.h)
-- [DAP_LINK_TEST/app/encoder_speed_test.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/encoder_speed_test.c)
+## 本轮完成的核心工作
 
-Purpose:
-- standalone speed-loop test without polluting `cmsis_dsp_empty.c`
-- auto-start after short delay
-- drive both motors with closed-loop speed control
-- periodically change target speed for waveform observation
-- export telemetry over UART0 for VOFA+
+### 1. 速度环从测试代码整理为正式模块
 
-Current test parameters in `encoder_speed_test.c`:
-- start delay: `100 ms`
-- target step interval: `3000 ms`
-- telemetry interval: `50 ms`
-- target sequence:
-  - `300 pps`
-  - `500 pps`
-  - `700 pps`
-  - `500 pps`
-- current speed-loop tunings:
-  - left: `kp=0.08 ki=0 kd=0`
-  - right: `kp=0.08 ki=0 kd=0`
-- integral limit: `120`
-- deadband: `24`
-- pwm limit: `420`
+原来的：
 
-Current direction handling in test module:
-- left encoder inverted:
-  - `Encoder_SetInverted(ENCODER_LEFT, true);`
-- right motor output inverted:
-  - `Motor_SetRightInverted(true);`
+- `DAP_LINK_TEST/app/encoder_speed_test.c`
+- `DAP_LINK_TEST/app/encoder_speed_test.h`
 
-Reason:
-- user reported left and right wheel behavior strongly asymmetric
-- right side was suspected to have opposite control direction
-- this was a quick practical correction, not a final verified motor/encoder polarity model
+已经删除。
 
-## VOFA+ Telemetry
-Telemetry is currently sent from:
-- [DAP_LINK_TEST/app/encoder_speed_test.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/encoder_speed_test.c)
+现在保留正式速度环模块：
 
-Format currently sent:
-```text
-d:targetL,targetR,actualL,actualR,pwmL,pwmR
-```
+- `DAP_LINK_TEST/PID/encoder_speed_control.c`
+- `DAP_LINK_TEST/PID/encoder_speed_control.h`
 
-All 6 fields are now integers.
+主要 API：
 
-Example:
-```text
-d:300,300,0,0,120,118
-```
-
-Why integer only:
-- previously float `snprintf("%.1f")` produced:
-  - `d:,,0,0,,`
-- root cause was embedded `printf/snprintf` float formatting support not enabled in current build/newlib-nano settings
-- telemetry was changed to integer formatting to guarantee waveform output
-
-VOFA+ connection assumptions:
-- Serial
-- `115200`
-- `8N1`
-- FireWater protocol
-
-Expected channel order:
-1. targetL
-2. targetR
-3. actualL
-4. actualR
-5. pwmL
-6. pwmR
-
-## ST7789 UI
-File:
-- [DAP_LINK_TEST/app/lcd_status.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/lcd_status.c)
-
-User requirements that were applied:
-- keep right-top timer
-- remove large title
-- remove blue small labels
-- remove visible `RX:` label, but keep RX content
-- keep content left-aligned and compact
-- show only:
-  - RX content
-  - IMU R/P/Y
-  - encoder speeds
-
-Current screen behavior:
-- top left: RX content only
-- top right: timer `mm:ss`
-- middle: `R / P / Y`
-- bottom: encoder speed `L / R`
-
-Important note:
-- displayed encoder speed is scaled for readability
-- `lcd_status.c` divides display value by `10`
-- this is display-only
-- underlying encoder module still computes raw `speed_pps`
-
-## Encoder Speed Calculation
-File:
-- [DAP_LINK_TEST/modules/encoder.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/modules/encoder.c)
-
-Current raw speed formula:
 ```c
-encoder->speed_pps = (int32_t) (((int64_t) delta * 1000) / elapsed_ms);
+EncoderSpeedControl_Init(now_ms);
+EncoderSpeedControl_Task(now_ms);
+EncoderSpeedControl_SetTargetPps(left_pps, right_pps);
+EncoderSpeedControl_GetTargetPps(&left_pps, &right_pps);
+EncoderSpeedControl_GetSpeedTunings(&left_pid, &right_pid);
+EncoderSpeedControl_Stop();
 ```
 
-Meaning:
-- unit is pulses per second
-- not RPM
-- user was confused by large values
-- display was scaled down for ST7789 readability only
+当前速度环参数：
 
-## K230 Rectangle Tracking Script
-File:
-- [矩形识别+串口发.py](C:/Users/ASUS/Desktop/mspm0_Project/矩形识别+串口发.py)
+- 左轮：`KP=0.08, KI=0.06, KD=0.0`
+- 右轮：`KP=0.06, KI=0.11, KD=0.0`
+- PWM 限幅：`330`
+- 速度死区：`12 pps`
+- 左轮积分限幅：`3200`
+- 右轮积分限幅：`4000`
+- 前馈当前为 `0`
 
-Recent direction before switching focus to MSP side:
-- blob-only path replaced earlier `find_rects()` dependency
-- later attempts added:
-  - merge blobs
-  - bright-window based candidate path
-- current script contains several experimental detection paths and handoff notes inside file comments
+重要经验：
 
-State from latest visible edits:
-- build string currently around:
-  - `bright-window-v5-tight-box`
-- user feedback at various points:
-  - perspective/distortion recognition still imperfect
-  - some versions over-boxed the target
-  - some versions tracked more accurately but box was too large
+- 右轮机械/电机/编码器特性和左轮明显不一样，右轮需要更大的积分补偿。
+- 速度采样和 PID 更新必须对齐到 `ENCODER_SAMPLE_INTERVAL_MS`，避免 PID 在旧速度数据上重复更新。
+- 之前出现过右轮不动、左右同 PWM 速度差很多、速度环一开 MCU/LCD 掉电等现象，后续再遇到类似问题要先分层验证：开环 PWM -> 编码器方向 -> 单轮闭环 -> 双轮闭环。
 
-No further K230 work was done in the later MSP speed-loop session.
+### 2. 新增通用编码器电机 PID 封装
 
-## Build Status
-Latest build status during this session:
-- `cmake --build . --target dap_link_test`
-- build succeeded after each meaningful step
+文件：
 
-## Current Known Problems
-### 1. Speed loop still not good
-User’s latest real-world feedback:
-- left wheel still around `30`
-- right wheel powers on around `575`
-- user suspects right side direction/sign issues
+- `DAP_LINK_TEST/PID/encoder_motor_pid.c`
+- `DAP_LINK_TEST/PID/encoder_motor_pid.h`
 
-Interpretation:
-- loop is still not tuned/stabilized
-- there may still be:
-  - right motor direction sign mismatch
-  - right encoder sign mismatch
-  - motor asymmetry
-  - scaling mismatch between target and real encoder response
+作用：
 
-### 2. VOFA+ waveform had initial issue
-Resolved root cause:
-- float fields were empty because float formatting was unsupported
+- 封装单个“编码器 + 电机”的 PID 控制。
+- 支持速度模式和位置模式。
+- 位置模式是串级结构：位置外环输出速度目标，速度内环输出 PWM。
 
-Still needs validation on hardware:
-- whether complete integer `d:...` frames now show up correctly in VOFA+
-- whether FireWater parser draws all 6 channels as expected
+当前位置环结构：
 
-### 3. Control reference may still be too abstract
-Current speed target uses `pps`.
-- This is raw encoder speed, not RPM.
-- A future improvement could convert to RPM if encoder counts-per-rev are known.
+```text
+目标位置 -> 位置 PID -> 目标速度 -> 速度 PID -> PWM -> 电机
+```
 
-## Recommended Next Steps
-Priority order recommended for next agent:
+重要实现点：
 
-1. Verify raw UART output on hardware
-- confirm lines now look like:
-  - `d:300,300,...`
-- if not, stop and inspect actual flashed image / UART route
+- `EncoderMotorPID_Update()` 只有在 `elapsed_ms >= ENCODER_SAMPLE_INTERVAL_MS` 时才更新。
+- 内部保存 `encoder_snapshot_t`，便于上层读取 count / speed / pwm / cascade speed。
+- `encoder_motor_pid_limit_to_target_direction()` 会限制 PWM 方向与速度目标一致；如果后续做更强的位置保持/反向制动，可能需要重新审视这里。
 
-2. Verify right-side sign conventions
-- if right wheel still runs away:
-  - test removing `Motor_SetRightInverted(true)`
-  - instead try `Encoder_SetInverted(ENCODER_RIGHT, true)`
-- do not blindly keep flipping both sides
-- determine one consistent sign model
+### 3. 新增位置环正式模块
 
-3. Only after sign is correct, tune speed loop
-- start with single wheel if needed
-- keep `ki = 0` initially
-- tune `kp` only
-- once basic following is stable, add small `ki`
+文件：
 
-4. Use VOFA+ waveforms as main tuning reference
-- watch:
-  - targetL vs actualL
-  - targetR vs actualR
-  - pwmL / pwmR saturation or oscillation
+- `DAP_LINK_TEST/PID/encoder_position_control.c`
+- `DAP_LINK_TEST/PID/encoder_position_control.h`
 
-5. If user wants, later add position-loop test mode
-- do not put it in `cmsis_dsp_empty.c`
-- keep it inside test module or another app module
+主要 API：
 
-## Files Added/Changed In This Session
-Added:
-- [DAP_LINK_TEST/PID/encoder_motor_pid.h](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/PID/encoder_motor_pid.h)
-- [DAP_LINK_TEST/PID/encoder_motor_pid.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/PID/encoder_motor_pid.c)
-- [DAP_LINK_TEST/app/encoder_speed_test.h](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/encoder_speed_test.h)
-- [DAP_LINK_TEST/app/encoder_speed_test.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/encoder_speed_test.c)
+```c
+EncoderPositionControl_Init(now_ms);
+EncoderPositionControl_Task(now_ms);
+EncoderPositionControl_SetTargetCount(left_count, right_count);
+EncoderPositionControl_AddTargetCount(left_delta_count, right_delta_count);
+EncoderPositionControl_GetTargetCount(&left_target, &right_target);
+EncoderPositionControl_GetCurrentCount(&left_count, &right_count);
+EncoderPositionControl_ZeroPosition(now_ms);
+EncoderPositionControl_GetState(&left_state, &right_state);
+EncoderPositionControl_GetPositionTunings(&left_pid, &right_pid);
+EncoderPositionControl_Stop();
+```
 
-Modified:
-- [DAP_LINK_TEST/cmsis_dsp_empty.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/cmsis_dsp_empty.c)
-- [DAP_LINK_TEST/app/lcd_status.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/lcd_status.c)
-- [DAP_LINK_TEST/CMakeLists.txt](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/CMakeLists.txt)
-- [矩形识别+串口发.py](C:/Users/ASUS/Desktop/mspm0_Project/矩形识别+串口发.py)
-- [DAP_LINK_TEST/app/track_control.c](C:/Users/ASUS/Desktop/mspm0_Project/DAP_LINK_TEST/app/track_control.c)
+当前参数：
 
-## User Preference Notes
-- Keep `main` / entry file clean.
-- Prefer concise, modular code.
-- Do not casually modify unrelated functions/files.
-- For ST7789:
-  - minimalist UI
-  - no oversized title clutter
-  - keep timer
-  - left-aligned compact text
+- 位置外环左轮：`KP=4.0, KI=0.0, KD=0.0`
+- 位置外环右轮：`KP=4.0, KI=0.0, KD=0.0`
+- 速度内环沿用速度环参数
+- 位置外环输出最大速度：`1600 pps`
+- PWM 限幅：`330`
+- 位置死区：`4 count`
+- 速度死区：`12 pps`
 
+测试结果：
+
+- 通过按键每次增加 `300 count` 做过测试。
+- VOFA 波形显示目标位置阶跃后，实际位置能较平滑贴近目标，过冲不明显，作为基础版本可以接受。
+- 测试用的 `encoder_position_debug.c/.h` 已经删除，不再保留在 app 层。
+
+### 4. PID 基础库增强
+
+文件：
+
+- `DAP_LINK_TEST/PID/pid.c`
+- `DAP_LINK_TEST/PID/pid.h`
+
+当前能力：
+
+- 支持 KP/KI/KD。
+- 支持输出限幅。
+- 支持积分限幅。
+- 支持 deadband。
+- 使用标准 anti-windup：输出饱和且误差还在推向饱和方向时，不继续累积积分。
+- D 项基于 measurement 变化，降低目标阶跃时的 derivative kick。
+
+经验：
+
+- 不要一开始就上 KD。当前电机编码器速度量化明显，D 项很容易放大采样噪声。
+- 先确认方向和采样，再调 KP；有稳态误差再加 KI；只有明确需要抑制过冲且速度测量足够干净时再考虑 KD。
+
+### 5. 编码器采样调整
+
+文件：
+
+- `DAP_LINK_TEST/modules/encoder.h`
+- `DAP_LINK_TEST/modules/encoder.c`
+
+当前编码器速度采样周期：
+
+```c
+#define ENCODER_SAMPLE_INTERVAL_MS 50U
+```
+
+速度单位：
+
+- `pps`，即 pulses per second。
+- 不是 RPM。
+
+重要经验：
+
+- 采样周期越短响应越快，但速度量化越明显。
+- 当前速度曲线最低变化粒度仍与编码器脉冲和采样周期相关，这是硬件/采样本身决定的，不是 VOFA 显示问题。
+
+### 6. ST7789 / 串口显示清理
+
+文件：
+
+- `DAP_LINK_TEST/app/lcd_status.c`
+- `DAP_LINK_TEST/app/uart_display.c`
+
+当前 LCD：
+
+- 顶部保留 UART RX 内容和计时。
+- 中部显示 IMU 姿态角 R/P/Y。
+- 底部显示编码器速度 L/R。
+- 已清理速度环 KP/KI/KD 参数显示。
+
+当前串口：
+
+- 已删除 `UART0 DMA OK` 启动提示。
+- 位置环 debug 串口输出已经随 debug app 删除。
+- 后续如需 VOFA 输出，要针对当前调试目标临时加，测完再删或封装到明确 debug 模块。
+
+## 硬件与调试经验
+
+### IMU / ICM20948
+
+之前出现过：
+
+- `E:001`
+- `69:0/3 FF`
+- `68:1/255 FF/60`
+- IMU 姿态角不显示
+
+最后重新插拔后恢复，说明当时很可能有硬件/接触/上电状态问题。后续不要一看到 IMU 失败就马上大改驱动。排查顺序：
+
+1. 确认供电和插拔状态。
+2. 看 I2C 地址 0x68 / 0x69 是否能读到正确 whoami。
+3. 再检查最近代码是否改过 I2C/ICM 驱动。
+4. 最后才考虑驱动回退。
+
+### MCU 复位 / LCD 灭
+
+出现过一上电电机动、MCU 和 LCD 跟着灭、再也醒不来的现象。高概率与电机供电冲击、电压纹波、地线、电源容量有关，也可能与速度环输出过猛有关。
+
+排查顺序：
+
+1. 不接速度环，只开环 PWM 小值测试。
+2. 单轮测试。
+3. 双轮开环测试。
+4. 单轮闭环测试。
+5. 双轮闭环测试。
+6. 再看是否和 IMU/LCD 同时工作相关。
+
+### 电机/编码器方向
+
+当前项目经验：
+
+- 左编码器需要反向：`Encoder_SetInverted(ENCODER_LEFT, true)`
+- 右电机输出需要反向：`Motor_SetRightInverted(true)`
+
+这套方向目前在速度环和位置环中可用。后续如果换接线/换电机/换驱动板，要先重新验证方向，不要直接调 PID。
+
+## 推荐后续路线
+
+### 近期
+
+1. 先提交当前基础版本，避免后续真实题目开发时丢失稳定状态。
+2. 给位置环补一个简洁的应用层调用示例，但不要常驻在 main。
+3. 如果要继续调位置环：
+   - 小步长：`300 count`
+   - 中步长：`1000 count`
+   - 大步长：`3000 count`
+   - 分别观察过冲、到达时间、稳态误差。
+4. 如果位置保持不够强，再考虑：
+   - 位置 KP 微调
+   - 位置死区调整
+   - 是否允许接近目标时反向制动
+
+### 后续真实题目
+
+后续真实任务可以基于现有能力继续扩展：
+
+- 直线距离控制：直接调用位置环 API。
+- 转向角/车体角度控制：用 IMU yaw 或左右轮差速，外层角度环输出左右位置/速度差。
+- 视觉追踪：K230 输出误差，外层视觉 PID 输出速度/角度命令，再交给速度环或位置环。
+- 组合动作：把位置环 API 封装成“前进 N count / 后退 N count / 原地转 N count / 停止 / 归零”。
+
+建议控制层级：
+
+```text
+任务层/状态机
+  -> 位置/角度/视觉外环
+  -> EncoderPositionControl 或 EncoderSpeedControl
+  -> EncoderMotorPID
+  -> Motor PWM
+```
+
+不要让任务层直接 `Motor_SetLeft/Right()` 长期控制电机，除非是在开环诊断。
+
+## 项目内 skill
+
+已新增项目内 skill：
+
+- `skills/mspm0-control-debug/SKILL.md`
+
+用途：
+
+- 后续遇到 MSPM0 电机、编码器、速度环、位置环、IMU、ST7789、VOFA 调试时，先读这个 skill。
+- 它总结了本项目的调试顺序和禁忌：先分层验证，再改控制；串口只输出当前目标；测试完要收束成正式 API。
+
+## 构建状态
+
+最近一次代码整合后，两套构建均通过：
+
+```powershell
+cmake --build build-ticlang --target dap_link_test
+cmake --build build-gcc --target dap_link_test
+```
+
+输出分别生成：
+
+- `DAP_LINK_TEST/dap_link_test.out`
+- `DAP_LINK_TEST/dap_link_test.elf`
+
+## 当前特别提醒
+
+- 当前工作区有大量本轮修改，建议尽快 git commit。
+- 不要恢复旧的 `encoder_speed_test`。
+- 不要恢复 `encoder_position_debug`，位置环已正式封装到 `PID/encoder_position_control.*`。
+- 后续要看 VOFA 时，新建明确的临时 debug 模块或短期串口输出，测完清理。
+- `main` 要继续保持干净。

@@ -33,7 +33,6 @@ set(SYSCFG_H "${SYSCFG_OUT_DIR}/ti_msp_dl_config.h")
 set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
 
 set(APP_SOURCES
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/encoder_speed_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/k230_uart.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/lcd_status.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/track_control.c"
@@ -56,6 +55,8 @@ set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/uart0_dma.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/pid.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_motor_pid.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_position_control.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_speed_control.c"
 )
 
 add_custom_command(

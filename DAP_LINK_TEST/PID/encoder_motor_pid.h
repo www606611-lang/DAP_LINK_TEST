@@ -28,6 +28,8 @@ typedef struct {
     float target_position_count;
     float cascade_speed_target_pps;
     float pwm_command;
+    float speed_feedforward_pwm;
+    float speed_feedforward_reference_pps;
     uint32_t last_update_ms;
     encoder_motor_pid_mode_t mode;
     bool enabled;
@@ -50,6 +52,10 @@ void EncoderMotorPID_SetSpeedIntegralLimits(encoder_motor_pid_t *controller,
     float integral_min, float integral_max);
 void EncoderMotorPID_SetPositionIntegralLimits(encoder_motor_pid_t *controller,
     float integral_min, float integral_max);
+void EncoderMotorPID_SetSpeedFeedforwardPwm(encoder_motor_pid_t *controller,
+    float feedforward_pwm);
+void EncoderMotorPID_SetSpeedFeedforwardReferencePps(
+    encoder_motor_pid_t *controller, float reference_pps);
 void EncoderMotorPID_SetSpeedDeadband(encoder_motor_pid_t *controller,
     float deadband);
 void EncoderMotorPID_SetPositionDeadband(encoder_motor_pid_t *controller,

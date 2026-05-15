@@ -3,6 +3,14 @@
 #include <stddef.h>
 
 static int encoder_motor_pid_round_to_int(float value);
+static float encoder_motor_pid_abs(float value);
+static float encoder_motor_pid_clamp(
+    float value, float min_value, float max_value);
+static float encoder_motor_pid_apply_feedforward(
+    float pid_output, float speed_target, float feedforward_pwm,
+    float reference_pps);
+static float encoder_motor_pid_limit_to_target_direction(
+    float pwm_command, float speed_target);
 static void encoder_motor_pid_apply_pwm(
     motor_id_t motor_id, int pwm_command);
 
@@ -25,6 +33,8 @@ void EncoderMotorPID_Init(encoder_motor_pid_t *controller,
     controller->target_position_count = 0.0f;
     controller->cascade_speed_target_pps = 0.0f;
     controller->pwm_command = 0.0f;
+    controller->speed_feedforward_pwm = 0.0f;
+    controller->speed_feedforward_reference_pps = 0.0f;
     controller->last_update_ms = now_ms;
     controller->mode = ENCODER_MOTOR_PID_MODE_STOP;
     controller->enabled = false;
@@ -127,6 +137,27 @@ void EncoderMotorPID_SetPositionIntegralLimits(encoder_motor_pid_t *controller,
         integral_max);
 }
 
+void EncoderMotorPID_SetSpeedFeedforwardPwm(encoder_motor_pid_t *controller,
+    float feedforward_pwm)
+{
+    if (controller == NULL) {
+        return;
+    }
+
+    controller->speed_feedforward_pwm = encoder_motor_pid_abs(feedforward_pwm);
+}
+
+void EncoderMotorPID_SetSpeedFeedforwardReferencePps(
+    encoder_motor_pid_t *controller, float reference_pps)
+{
+    if (controller == NULL) {
+        return;
+    }
+
+    controller->speed_feedforward_reference_pps =
+        encoder_motor_pid_abs(reference_pps);
+}
+
 void EncoderMotorPID_SetSpeedDeadband(encoder_motor_pid_t *controller,
     float deadband)
 {
@@ -210,6 +241,15 @@ bool EncoderMotorPID_Update(encoder_motor_pid_t *controller, uint32_t now_ms)
     controller->pwm_command = PID_Update(
         &controller->speed_pid, speed_target,
         (float) controller->snapshot.speed_pps, dt_s);
+    controller->pwm_command = encoder_motor_pid_apply_feedforward(
+        controller->pwm_command, speed_target,
+        controller->speed_feedforward_pwm,
+        controller->speed_feedforward_reference_pps);
+    controller->pwm_command = encoder_motor_pid_clamp(
+        controller->pwm_command, controller->speed_pid.output_min,
+        controller->speed_pid.output_max);
+    controller->pwm_command = encoder_motor_pid_limit_to_target_direction(
+        controller->pwm_command, speed_target);
 
     encoder_motor_pid_apply_pwm(controller->motor_id,
         encoder_motor_pid_round_to_int(controller->pwm_command));
@@ -278,6 +318,58 @@ static int encoder_motor_pid_round_to_int(float value)
     }
 
     return (int) (value - 0.5f);
+}
+
+static float encoder_motor_pid_abs(float value)
+{
+    return (value < 0.0f) ? -value : value;
+}
+
+static float encoder_motor_pid_clamp(
+    float value, float min_value, float max_value)
+{
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+static float encoder_motor_pid_apply_feedforward(
+    float pid_output, float speed_target, float feedforward_pwm,
+    float reference_pps)
+{
+    float scaled_feedforward;
+
+    if ((feedforward_pwm <= 0.0f) || (speed_target == 0.0f)) {
+        return pid_output;
+    }
+
+    scaled_feedforward = feedforward_pwm;
+    if (reference_pps > 0.0f) {
+        scaled_feedforward = feedforward_pwm *
+            (encoder_motor_pid_abs(speed_target) / reference_pps);
+        if (scaled_feedforward > feedforward_pwm) {
+            scaled_feedforward = feedforward_pwm;
+        }
+    }
+
+    return (speed_target > 0.0f) ? (pid_output + scaled_feedforward) :
+        (pid_output - scaled_feedforward);
+}
+
+static float encoder_motor_pid_limit_to_target_direction(
+    float pwm_command, float speed_target)
+{
+    if (speed_target > 0.0f) {
+        return (pwm_command < 0.0f) ? 0.0f : pwm_command;
+    }
+    if (speed_target < 0.0f) {
+        return (pwm_command > 0.0f) ? 0.0f : pwm_command;
+    }
+    return 0.0f;
 }
 
 static void encoder_motor_pid_apply_pwm(

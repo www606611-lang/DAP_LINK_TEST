@@ -1,6 +1,6 @@
 #include "ti_msp_dl_config.h"
 #include "timer.h"
-#include "encoder_speed_test.h"
+#include "encoder_position_control.h"
 #include "encoder.h"
 #include "icm20948.h"
 #include "lcd_status.h"
@@ -30,7 +30,7 @@ static void app_init(void)
     ICM20948_TaskInit(now_ms);
     Motor_Init();
     Encoder_Init(now_ms);
-    encoder_speed_test_init(now_ms);
+    EncoderPositionControl_Init(now_ms);
     lcd_status_screen_init(now_ms);
     uart_display_init();
 }
@@ -43,5 +43,5 @@ static void app_task(void)
     ICM20948_Task(now_ms);
     uart_display_task(now_ms);
     lcd_status_screen_task(now_ms);
-    encoder_speed_test_task(now_ms);
+    EncoderPositionControl_Task(now_ms);
 }

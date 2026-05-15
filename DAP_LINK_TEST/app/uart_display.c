@@ -25,7 +25,6 @@ void uart_display_init(void)
 {
     uart0_dma_init();
     uart0_dma_start_rx_stream();
-    (void) uart0_dma_send_text("UART0 DMA OK\r\n");
 }
 
 void uart_display_task(uint32_t now_ms)
