@@ -48,6 +48,7 @@ set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/encoder.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/key.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/line_sensor_i2c.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/motor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/zdt_stepper.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/OLED_Data.c"
@@ -57,6 +58,7 @@ set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_motor_pid.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_position_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/encoder_speed_control.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/PID/line_tracking_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/PID/yaw_angle_control.c"
 )
 

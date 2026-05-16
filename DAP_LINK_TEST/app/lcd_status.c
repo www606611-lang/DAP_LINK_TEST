@@ -55,6 +55,15 @@
 #define LCD_STATUS_ENCODER_SPEED_MAX   9999L
 #define LCD_STATUS_ENCODER_SPEED_SCALE 1L
 
+#define LCD_STATUS_LINE_Y              118U
+#define LCD_STATUS_LINE_H              44U
+#define LCD_STATUS_LINE_TEXT_X         6U
+#define LCD_STATUS_LINE_TEXT_LEN1      16U
+#define LCD_STATUS_LINE_TEXT_LEN2      24U
+#define LCD_STATUS_LINE_LINE1_Y        124U
+#define LCD_STATUS_LINE_LINE2_Y        140U
+#define LCD_STATUS_LINE_PANEL          ST7789_RGB565(12U, 22U, 18U)
+
 typedef enum {
     LCD_STATUS_ITEM_TIMER = 0,
     LCD_STATUS_ITEM_UART,
@@ -62,6 +71,7 @@ typedef enum {
     LCD_STATUS_ITEM_IMU_LINE2,
     LCD_STATUS_ITEM_IMU_LINE3,
     LCD_STATUS_ITEM_ENCODER,
+    LCD_STATUS_ITEM_LINE_SENSOR,
     LCD_STATUS_ITEM_COUNT
 } lcd_status_item_t;
 
@@ -84,6 +94,17 @@ static char g_lcd_status_imu_drawn_line2[LCD_STATUS_IMU_TEXT_LEN + 1U];
 static char g_lcd_status_imu_drawn_line3[LCD_STATUS_IMU_TEXT_LEN + 1U];
 static char g_lcd_status_encoder_line[LCD_STATUS_ENCODER_TEXT_LEN + 1U];
 static char g_lcd_status_encoder_drawn[LCD_STATUS_ENCODER_TEXT_LEN + 1U];
+static char g_lcd_status_line_line1[LCD_STATUS_LINE_TEXT_LEN1 + 1U];
+static char g_lcd_status_line_line2[LCD_STATUS_LINE_TEXT_LEN2 + 1U];
+static char g_lcd_status_line_drawn1[LCD_STATUS_LINE_TEXT_LEN1 + 1U];
+static char g_lcd_status_line_drawn2[LCD_STATUS_LINE_TEXT_LEN2 + 1U];
+static uint8_t g_lcd_status_line_raw;
+static uint8_t g_lcd_status_line_active_mask;
+static uint8_t g_lcd_status_line_active_count;
+static int16_t g_lcd_status_line_error;
+static uint8_t g_lcd_status_line_enabled;
+static uint8_t g_lcd_status_line_sensor_ok;
+static uint8_t g_lcd_status_line_sensor_error;
 static uint16_t g_lcd_status_dirty_mask;
 static uint8_t g_lcd_status_next_item;
 
@@ -103,6 +124,8 @@ static void lcd_status_format_angle(
 static int32_t lcd_status_clip_encoder_speed(int32_t speed_pps);
 static int32_t lcd_status_scale_encoder_speed(int32_t speed_pps);
 static void lcd_status_clear_uart_line(void);
+static void lcd_status_format_line_sensor(
+    char *line1, size_t line1_size, char *line2, size_t line2_size);
 static void lcd_status_draw_ascii(uint16_t x, uint16_t y, const char *text,
     uint16_t color, uint16_t bg_color);
 
@@ -123,6 +146,8 @@ void lcd_status_screen_init(uint32_t now_ms)
     (void) memset(g_lcd_status_imu_drawn_line2, 0, sizeof(g_lcd_status_imu_drawn_line2));
     (void) memset(g_lcd_status_imu_drawn_line3, 0, sizeof(g_lcd_status_imu_drawn_line3));
     (void) memset(g_lcd_status_encoder_drawn, 0, sizeof(g_lcd_status_encoder_drawn));
+    (void) memset(g_lcd_status_line_drawn1, 0, sizeof(g_lcd_status_line_drawn1));
+    (void) memset(g_lcd_status_line_drawn2, 0, sizeof(g_lcd_status_line_drawn2));
 
     g_lcd_status_dirty_mask = 0U;
     g_lcd_status_next_item = 0U;
@@ -133,6 +158,9 @@ void lcd_status_screen_init(uint32_t now_ms)
     lcd_status_update_timer_text(now_ms);
     lcd_status_update_imu_lines(now_ms);
     lcd_status_update_encoder_line(now_ms);
+    lcd_status_format_line_sensor(g_lcd_status_line_line1,
+        sizeof(g_lcd_status_line_line1), g_lcd_status_line_line2,
+        sizeof(g_lcd_status_line_line2));
 
     lcd_status_draw_item(LCD_STATUS_ITEM_TIMER);
     lcd_status_draw_item(LCD_STATUS_ITEM_UART);
@@ -140,6 +168,7 @@ void lcd_status_screen_init(uint32_t now_ms)
     lcd_status_draw_item(LCD_STATUS_ITEM_IMU_LINE2);
     lcd_status_draw_item(LCD_STATUS_ITEM_IMU_LINE3);
     lcd_status_draw_item(LCD_STATUS_ITEM_ENCODER);
+    lcd_status_draw_item(LCD_STATUS_ITEM_LINE_SENSOR);
     g_lcd_status_dirty_mask = 0U;
 }
 
@@ -199,6 +228,27 @@ void lcd_status_screen_set_k230(
     (void) err_y;
 }
 
+void lcd_status_screen_set_line_sensor(uint8_t raw, uint8_t active_mask,
+    uint8_t active_count, int16_t line_error, uint8_t enabled,
+    uint8_t sensor_ok, uint8_t sensor_error)
+{
+    g_lcd_status_line_raw = raw;
+    g_lcd_status_line_active_mask = active_mask;
+    g_lcd_status_line_active_count = active_count;
+    g_lcd_status_line_error = line_error;
+    g_lcd_status_line_enabled = enabled ? 1U : 0U;
+    g_lcd_status_line_sensor_ok = sensor_ok ? 1U : 0U;
+    g_lcd_status_line_sensor_error = sensor_error;
+
+    lcd_status_format_line_sensor(g_lcd_status_line_line1,
+        sizeof(g_lcd_status_line_line1), g_lcd_status_line_line2,
+        sizeof(g_lcd_status_line_line2));
+    if ((strcmp(g_lcd_status_line_line1, g_lcd_status_line_drawn1) != 0) ||
+        (strcmp(g_lcd_status_line_line2, g_lcd_status_line_drawn2) != 0)) {
+        lcd_status_mark_dirty(LCD_STATUS_ITEM_LINE_SENSOR);
+    }
+}
+
 static void lcd_status_draw_static(void)
 {
     ST7789_Clear(LCD_STATUS_BG);
@@ -214,6 +264,11 @@ static void lcd_status_draw_static(void)
         LCD_STATUS_GRID);
     ST7789_DrawLine(0U, (uint16_t) (LCD_STATUS_ENCODER_Y - 4U),
         (uint16_t) (ST7789_WIDTH - 1U), (uint16_t) (LCD_STATUS_ENCODER_Y - 4U),
+        LCD_STATUS_GRID);
+    ST7789_FillRect(0U, LCD_STATUS_LINE_Y, ST7789_WIDTH,
+        LCD_STATUS_LINE_H, LCD_STATUS_LINE_PANEL);
+    ST7789_DrawLine(0U, (uint16_t) (LCD_STATUS_LINE_Y - 4U),
+        (uint16_t) (ST7789_WIDTH - 1U), (uint16_t) (LCD_STATUS_LINE_Y - 4U),
         LCD_STATUS_GRID);
 }
 
@@ -368,6 +423,18 @@ static void lcd_status_draw_item(lcd_status_item_t item)
             (void) memcpy(g_lcd_status_encoder_drawn, g_lcd_status_encoder_line,
                 sizeof(g_lcd_status_encoder_drawn));
             break;
+        case LCD_STATUS_ITEM_LINE_SENSOR:
+            lcd_status_draw_ascii(LCD_STATUS_LINE_TEXT_X, LCD_STATUS_LINE_LINE1_Y,
+                g_lcd_status_line_line1, LCD_STATUS_TEXT,
+                LCD_STATUS_LINE_PANEL);
+            lcd_status_draw_ascii(LCD_STATUS_LINE_TEXT_X, LCD_STATUS_LINE_LINE2_Y,
+                g_lcd_status_line_line2, LCD_STATUS_VALUE,
+                LCD_STATUS_LINE_PANEL);
+            (void) memcpy(g_lcd_status_line_drawn1, g_lcd_status_line_line1,
+                sizeof(g_lcd_status_line_drawn1));
+            (void) memcpy(g_lcd_status_line_drawn2, g_lcd_status_line_line2,
+                sizeof(g_lcd_status_line_drawn2));
+            break;
         default:
             break;
     }
@@ -465,6 +532,30 @@ static void lcd_status_clear_uart_line(void)
     g_lcd_status_uart_line[LCD_STATUS_UART_COLUMNS] = '\0';
     g_lcd_status_uart_column = 0U;
     lcd_status_mark_dirty(LCD_STATUS_ITEM_UART);
+}
+
+static void lcd_status_format_line_sensor(
+    char *line1, size_t line1_size, char *line2, size_t line2_size)
+{
+    char bits[9];
+    uint8_t i;
+
+    if ((line1 == NULL) || (line2 == NULL) ||
+        (line1_size == 0U) || (line2_size == 0U)) {
+        return;
+    }
+
+    for (i = 0U; i < 8U; i++) {
+        uint8_t bit = (uint8_t) (0x80U >> i);
+        bits[i] = ((g_lcd_status_line_raw & bit) != 0U) ? '1' : '0';
+    }
+    bits[8] = '\0';
+
+    lcd_status_format_padded(line1, line1_size, "IR:%s", bits);
+    lcd_status_format_padded(line2, line2_size, "C:%u E:%+d %s",
+        (unsigned int) g_lcd_status_line_active_count,
+        (int) g_lcd_status_line_error,
+        g_lcd_status_line_enabled ? "ON" : "OFF");
 }
 
 static void lcd_status_draw_ascii(uint16_t x, uint16_t y, const char *text,

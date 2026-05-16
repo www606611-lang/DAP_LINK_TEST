@@ -92,9 +92,10 @@ If wiring changes, retest sign conventions before tuning.
 
 ## Build Check
 
-After meaningful edits, run both:
+After meaningful edits, run GCC only by default:
 
 ```powershell
-cmake --build build-ticlang --target dap_link_test
 cmake --build build-gcc --target dap_link_test
 ```
+
+Do not run `build-ticlang` unless the user explicitly asks for TIClang verification.
