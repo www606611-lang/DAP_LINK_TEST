@@ -18,7 +18,7 @@
 #define APP_POSITION_STEP_COUNT          300.0f
 #define APP_POSITION_STEP_MAX_COUNT      60000.0f
 #define APP_POSITION_STEP_MIN_COUNT      (-APP_POSITION_STEP_MAX_COUNT)
-#define APP_POSITION_VOFA_MS             50U
+#define APP_POSITION_VOFA_MS             250U
 #define APP_POSITION_VOFA_LINE_SIZE      128U
 #define APP_POSITION_LEFT_PWM_LIMIT      1000.0f
 #define APP_POSITION_RIGHT_PWM_LIMIT     1000.0f
@@ -373,6 +373,14 @@ static void app_position_step_vofa_task(uint32_t now_ms)
     EncoderPositionControl_GetTargetCount(&target_left_count,
         &target_right_count);
     EncoderPositionControl_GetState(&left, &right);
+    if ((target_left_count == 0.0f) && (target_right_count == 0.0f) &&
+        (left.count == 0) && (right.count == 0) &&
+        (left.cascade_speed_target_pps == 0.0f) &&
+        (right.cascade_speed_target_pps == 0.0f) &&
+        (left.pwm_command == 0.0f) && (right.pwm_command == 0.0f)) {
+        g_app_position_last_vofa_ms = now_ms;
+        return;
+    }
     error_left_count = app_vofa_round_float(target_left_count -
         (float) left.count);
     error_right_count = app_vofa_round_float(target_right_count -
