@@ -105,6 +105,8 @@ static bool key_read_raw_pressed(key_id_t key)
         case KEY_ID_B21:
             /* B21/PB21 is wired active-low. */
             return (DL_GPIO_readPins(user_key_PORT, user_key_PIN_21_PIN) == 0U);
+        case KEY_ID_DOWN:
+            return (DL_GPIO_readPins(key_PORT, key_down_PIN) == 0U);
         default:
             return false;
     }

@@ -10,8 +10,9 @@ static float encoder_motor_pid_apply_feedforward(
     float pid_output, float speed_target, float feedforward_pwm,
     float reference_pps);
 static float encoder_motor_pid_apply_min_drive(
-    float pwm_command, float speed_target, float forward_min_drive_pwm,
-    float reverse_min_drive_pwm, float reference_pps);
+    float pwm_command, float speed_target, float speed_measurement,
+    float forward_min_drive_pwm, float reverse_min_drive_pwm,
+    float reference_pps);
 static float encoder_motor_pid_limit_to_target_direction(
     float pwm_command, float speed_target);
 static void encoder_motor_pid_apply_pwm(
@@ -288,6 +289,7 @@ bool EncoderMotorPID_Update(encoder_motor_pid_t *controller, uint32_t now_ms)
         controller->speed_feedforward_reference_pps);
     controller->pwm_command = encoder_motor_pid_apply_min_drive(
         controller->pwm_command, speed_target,
+        (float) controller->snapshot.speed_pps,
         controller->speed_forward_min_drive_pwm,
         controller->speed_reverse_min_drive_pwm,
         controller->speed_min_drive_reference_pps);
@@ -407,12 +409,14 @@ static float encoder_motor_pid_apply_feedforward(
 }
 
 static float encoder_motor_pid_apply_min_drive(
-    float pwm_command, float speed_target, float forward_min_drive_pwm,
-    float reverse_min_drive_pwm, float reference_pps)
+    float pwm_command, float speed_target, float speed_measurement,
+    float forward_min_drive_pwm, float reverse_min_drive_pwm,
+    float reference_pps)
 {
     float abs_pwm;
     float min_drive_pwm;
     float scaled_min_drive;
+    float hold_scale;
 
     if (speed_target == 0.0f) {
         return pwm_command;
@@ -423,11 +427,22 @@ static float encoder_motor_pid_apply_min_drive(
     if (min_drive_pwm <= 0.0f) {
         return pwm_command;
     }
+    if (((speed_target > 0.0f) && (pwm_command < 0.0f)) ||
+        ((speed_target < 0.0f) && (pwm_command > 0.0f))) {
+        return pwm_command;
+    }
 
     scaled_min_drive = min_drive_pwm;
     if (reference_pps > 0.0f) {
-        scaled_min_drive = min_drive_pwm *
-            (encoder_motor_pid_abs(speed_target) / reference_pps);
+        hold_scale = 1.0f -
+            (encoder_motor_pid_abs(speed_measurement) / reference_pps);
+        if (hold_scale < 0.0f) {
+            hold_scale = 0.0f;
+        } else if (hold_scale > 1.0f) {
+            hold_scale = 1.0f;
+        }
+
+        scaled_min_drive = min_drive_pwm * hold_scale;
         if (scaled_min_drive > min_drive_pwm) {
             scaled_min_drive = min_drive_pwm;
         }

@@ -22,6 +22,7 @@
 #define ST7789_DMA_CHAN_ID           DMA_CH2_CHAN_ID
 #define ST7789_DMA_MIN_BYTES         64U
 #define ST7789_DMA_BUFFER_SIZE       1024U
+#define ST7789_WAIT_SPINS            2000000U
 
 /* 1.9 寸 170x320 模块的可视区域在 ST7789 GRAM 中有 35 行偏移。 */
 
@@ -59,6 +60,7 @@ static void st7789_write_pixel_color(uint16_t color);
 static void st7789_write_color(uint16_t color, uint32_t count);
 static void st7789_flush_pixel_buffer(
     uint8_t *buffer, uint32_t *buffered_bytes);
+static void st7789_reset_dma_state(void);
 static void st7789_hardware_reset(void);
 static uint32_t st7789_pow_u32(uint32_t base, uint32_t exp);
 static uint8_t st7789_ascii_index(char ch);
@@ -90,7 +92,16 @@ static void st7789_deselect(void)
 
 static void st7789_wait_idle(void)
 {
-    while (g_st7789_dma_busy || DL_SPI_isBusy(SPI_LCD_INST)) {
+    uint32_t spins = ST7789_WAIT_SPINS;
+
+    while ((g_st7789_dma_busy || DL_SPI_isBusy(SPI_LCD_INST)) &&
+        (spins > 0U)) {
+        spins--;
+    }
+
+    if ((spins == 0U) &&
+        (g_st7789_dma_busy || DL_SPI_isBusy(SPI_LCD_INST))) {
+        st7789_reset_dma_state();
     }
 }
 
@@ -109,6 +120,8 @@ static void st7789_write_bytes_polling(const uint8_t *data, uint32_t length)
 
 static void st7789_write_bytes_dma(const uint8_t *data, uint32_t length)
 {
+    uint32_t spins = ST7789_WAIT_SPINS;
+
     if ((data == NULL) || (length == 0U)) {
         return;
     }
@@ -124,7 +137,12 @@ static void st7789_write_bytes_dma(const uint8_t *data, uint32_t length)
     DL_DMA_setTransferSize(DMA, ST7789_DMA_CHAN_ID, length);
     DL_DMA_enableChannel(DMA, ST7789_DMA_CHAN_ID);
 
-    while (g_st7789_dma_busy) {
+    while (g_st7789_dma_busy && (spins > 0U)) {
+        spins--;
+    }
+
+    if (g_st7789_dma_busy) {
+        st7789_reset_dma_state();
     }
 
     st7789_wait_idle();
@@ -229,6 +247,14 @@ static void st7789_flush_pixel_buffer(
 
     st7789_write_bytes(buffer, *buffered_bytes);
     *buffered_bytes = 0U;
+}
+
+static void st7789_reset_dma_state(void)
+{
+    g_st7789_dma_busy = false;
+    DL_DMA_disableChannel(DMA, ST7789_DMA_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DL_DMA_INTERRUPT_CHANNEL2);
+    NVIC_ClearPendingIRQ(DMA_INT_IRQn);
 }
 
 static void st7789_hardware_reset(void)
@@ -393,6 +419,7 @@ void ST7789_Init(void)
     /* SysConfig 默认把 LCD SPI 设在 8 MHz，这里提升到 20 MHz 以减轻字符刷屏卡顿。 */
     DL_SPI_setBitRateSerialClockDivider(
         SPI_LCD_INST, ST7789_SPI_SCR_DIVIDER);
+    st7789_reset_dma_state();
     NVIC_ClearPendingIRQ(DMA_INT_IRQn);
     NVIC_EnableIRQ(DMA_INT_IRQn);
 

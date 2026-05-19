@@ -1,4 +1,155 @@
-# Agent Handoff - 2026-05-06
+# Agent Handoff - 2026-05-17
+
+## 2026-05-17 最新交接：NMI / CPU LOCKUP 追踪
+
+### 当前结论
+- 当前最新复位日志不是普通的软复位，而是 `SYSRST_CPU_LOCKUP_VIOLATION` 相关的异常链。
+- 之前抓到的现场里，`PC/LR` 已经落到 `memchr` / `_svfprintf_r`，所以更像是字符串格式化 / 显示输出链触发了异常，而不是速度环本体。
+- 为了进一步缩小范围，已给 `fault_capture` 增加 NMI 源号记录，下一版启动会打印 `N:<source>`。
+- 新收到的启动串口是 `RST:BOR_SUPPLY_FAILURE`，这说明芯片自己检测到了电源掉压/欠压，优先级已经高于软件异常。
+- 当前 `Motor_Init` 和速度环初始化路径本身不会主动给电机大功率，若上电就触发 BOR，更像是供电瞬态、接触不良、驱动板拉电流过大，或者 MCU/电机共电源下电压跌落。
+
+### 已完成改动
+- `DAP_LINK_TEST/modules/fault_capture.c/.h`
+  - 保存 HardFault / NMI 现场。
+  - 新增 `nmi_iidx`，用于区分 `BORLVL`、`WWDT0`、`LFCLK_FAIL`、`FLASH_DED`、`SRAM_DED` 等来源。
+- `DAP_LINK_TEST/cmsis_dsp_empty.c`
+  - 启动时继续打印 `RST:` 和故障信息。
+  - 若为 NMI，会额外打印 `N:<source>`。
+
+### 下一步
+1. 重新烧录最新版本。
+2. 观察第一条 `RST:` 串口，重点看 `N:`。
+3. 现在要优先查供电链，不要先调 PID。
+4. 重点验证：单独给 MCU 供电是否还会复位、接上电机电源是否立刻掉压、启动瞬间 3.3V 是否塌陷。
+5. 如果后续还看到 `N:`，再按对应 NMI 源继续缩小范围。
+
+## 2026-05-17 最新交接：八路灰度循迹与左右轮平衡
+
+### 当前已完成
+
+- 已在当前项目中接入八路灰度循迹模块。
+- 八路灰度模块使用 `I2C1`，当前引脚为 `PA16/PA17`。
+- 灰度底层读取已经调通，相关文件：
+  - `DAP_LINK_TEST/modules/line_sensor_i2c.c`
+  - `DAP_LINK_TEST/modules/line_sensor_i2c.h`
+- 注意：灰度底层 I2C 读写逻辑已经可用，后续不要随意改 `line_sensor_i2c.c/.h`。
+
+- 已新增循迹控制模块：
+  - `DAP_LINK_TEST/PID/line_tracking_control.c`
+  - `DAP_LINK_TEST/PID/line_tracking_control.h`
+- 循迹控制当前作为外层 PID，串速度环使用。
+- 速度环和位置环是已调好的基座，后续循迹调参不要改：
+  - `encoder_speed_control.c/.h`
+  - `encoder_position_control.c/.h`
+- 循迹层可以调用速度环 API，例如 `EncoderSpeedControl_SetTargetPps()`，但不要改速度环参数、采样逻辑、PWM 限幅、位置环参数。
+
+- 当前 `main` 文件为：
+  - `DAP_LINK_TEST/cmsis_dsp_empty.c`
+- 当前主循环包含：
+  - `Encoder_Task`
+  - `ICM20948_Task`
+  - `Key_Task`
+  - `LineTrackingControl_Task`
+  - `uart_display_task`
+  - `lcd_status_screen_task`
+- 当前按键 `KEY_ID_B21` 用于切换循迹开关。
+
+- LCD 当前显示八路灰度原始状态、有效数量、循迹误差和开关状态。
+- LCD 不要堆太多调试字段，之前串口/LCD 调试过重会造成 LCD 卡顿。
+
+- 已增加轻量 VOFA 文本输出，便于继续观察左右轮平衡。
+- 当前 VOFA 输出格式：
+
+```text
+d:leftTarget,rightTarget,leftActual,rightActual,lineErr,turnPps
+```
+
+- 当前 VOFA 输出位置：
+  - `DAP_LINK_TEST/cmsis_dsp_empty.c`
+- 当前输出周期：
+  - `100 ms`
+- 当前实现已经避免 `snprintf`，改为手写轻量整数拼接。
+- 注意：之前尝试过 JustFloat 二进制帧，但用户当前 VOFA 使用的是文本 `d:` 格式，因此不要再改成二进制。
+
+- 已经为 VOFA 调试前的稳定状态做过本地 checkpoint：
+  - commit: `da6b070 checkpoint: stable line tracking before vofa debug`
+  - tag: `line-tracking-before-vofa-debug-2026-05-17`
+
+### 当前循迹参数状态
+
+当前主要调参文件：
+
+- `DAP_LINK_TEST/PID/line_tracking_control.c`
+
+当前循迹层大致思路：
+
+- 灰度误差 `line_error` 经过循迹 PID 输出 `turn_correction_pps`
+- 左右轮目标速度由 `base_speed ± turn_correction_pps` 得到
+- 右轮由于机械/电机差异和死区更大，在循迹层做右轮单独补偿
+- 注意：右轮补偿只能放在循迹层，不要为了循迹去改速度环/位置环基座
+
+最近一次根据 VOFA 日志做出的判断：
+
+- 之前右轮补偿过猛，出现了“右轮不跟目标、实际速度卡在约 800pps”的现象。
+- 典型数据：
+  - `rightTarget=2015` 时 `rightActual≈800`
+  - `rightTarget=325` 时 `rightActual≈800`
+  - `rightTarget=1170` 时 `rightActual≈820`
+- 这说明当时右轮不是目标没给够，而是最小驱动地板太硬，导致右轮低速不可控。
+
+因此最近一版已把循迹层调成更可控的版本：
+
+- 基础速度从 `900` 降到 `800`
+- 最大转向从 `650` 降到 `420`
+- 循迹 `Kp` 从 `35` 降到 `18`
+- 循迹 `Kd` 从 `3.0` 降到 `1.5`
+- 右轮最小驱动从 `380` 降到 `320`
+- 最小驱动参考从 `0` 改回 `800`
+- 右轮目标增益从 `1.30` 降到 `1.15`
+
+### 接下来需要继续完善
+
+1. 继续烧录当前版本，看 VOFA 波形。
+2. 重点观察：
+   - `leftTarget` 和 `rightTarget`
+   - `leftActual` 和 `rightActual`
+   - `lineErr`
+   - `turnPps`
+3. 先确认右轮是否重新跟随目标：
+   - `rightTarget` 较低时，`rightActual` 应该能降下来
+   - 不能再出现 `rightTarget=300~500` 但 `rightActual≈800` 的硬地板现象
+4. 直行时观察：
+   - `lineErr≈0`
+   - 左右 actual 是否接近
+   - 如果右轮仍弱，可以小步增加 `LINE_TRACKING_RIGHT_SPEED_GAIN`
+   - 如果右轮低速仍起不来，可以小步增加右轮 `MIN_PWM`
+5. 转弯时观察：
+   - `turnPps` 是否频繁打满
+   - 如果经常打满，优先继续降低 `Kp` 或 `MAX_TURN_PPS`
+   - 如果跟线慢，再逐步增加 `Kp`
+6. 不要一次同时改很多参数。
+7. 不要再改速度环和位置环。
+8. 不要再改灰度 I2C 底层。
+9. 如果 VOFA 输出导致 LCD 卡顿：
+   - 先增加输出周期，例如 `100ms -> 200ms`
+   - 或减少字段
+   - 不要恢复 `snprintf`
+   - 不要改成二进制 JustFloat，除非用户明确切换 VOFA 协议
+
+### 当前重要边界
+
+- 速度环、位置环已经是项目基座，默认不要改。
+- 循迹 PID 可以串速度环，但只能调用速度环 API。
+- 右轮死区大、左右电机不对称，这是已确认的机械/电机特性。
+- 补偿应该在外层控制中做，尤其当前循迹调参只改 `line_tracking_control.c`。
+- 每次调参后必须跑：
+
+```powershell
+cmake --build build-gcc --target dap_link_test
+```
+
+- 默认只跑 `build-gcc`，不要默认跑 `build-ticlang`。
 
 > 这个文件是给后续 Codex / Agent 接手项目时先读的中文交接文档。当前项目还在搭基础能力阶段，后面遇到真实赛题/真实任务时，应当在这些基础模块上继续发挥，而不是重新从零乱改。
 

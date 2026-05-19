@@ -39,6 +39,23 @@ static void uart0_dma_fifo_push(uint8_t data);
 
 void uart0_dma_init(void)
 {
+    g_uart0_dma_tx_busy = false;
+    g_uart0_dma_tx_dma_done = false;
+    g_uart0_dma_rx_busy = false;
+    g_uart0_dma_rx_done_flag = false;
+    g_uart0_dma_rx_length = 0U;
+    g_uart0_dma_rx_count = 0U;
+    g_uart0_dma_rx_stream_enabled = false;
+    g_uart0_dma_rx_overflow = false;
+    g_uart0_dma_rx_fifo_head = 0U;
+    g_uart0_dma_rx_fifo_tail = 0U;
+    DL_DMA_disableChannel(DMA, UART0_DMA_RX_CHAN_ID);
+    DL_DMA_disableChannel(DMA, UART0_DMA_TX_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA,
+        DL_DMA_INTERRUPT_CHANNEL0 | DL_DMA_INTERRUPT_CHANNEL1);
+    DL_UART_Main_clearInterruptStatus(UART_0_INST,
+        DL_UART_MAIN_INTERRUPT_DMA_DONE_RX |
+        DL_UART_MAIN_INTERRUPT_DMA_DONE_TX);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
 }
 

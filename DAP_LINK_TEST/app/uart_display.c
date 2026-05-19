@@ -1,13 +1,14 @@
 #include "uart_display.h"
 
 #include "lcd_status.h"
+#include "pid_console.h"
 #include "uart0_dma.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 
 #define UART_DISPLAY_RX_BUFFER_SIZE     32U
-#define UART_DISPLAY_MESSAGE_SIZE       64U
+#define UART_DISPLAY_MESSAGE_SIZE       96U
 /* 串口空闲超过这个时间就认为一帧接收完成，再刷新到 LCD。 */
 #define UART_DISPLAY_IDLE_MS            40U
 
@@ -19,7 +20,7 @@ static bool g_uart_display_message_pending;
 
 static void uart_display_capture(const uint8_t *data, uint16_t length,
     uint32_t now_ms);
-static void uart_display_flush(void);
+static void uart_display_flush(uint32_t now_ms);
 
 void uart_display_init(void)
 {
@@ -43,7 +44,7 @@ void uart_display_task(uint32_t now_ms)
     if (g_uart_display_message_pending &&
         ((uint32_t) (now_ms - g_uart_display_last_rx_ms) >=
             UART_DISPLAY_IDLE_MS)) {
-        uart_display_flush();
+        uart_display_flush(now_ms);
     }
 }
 
@@ -70,7 +71,7 @@ static void uart_display_capture(const uint8_t *data, uint16_t length,
             continue;
         }
         if (ch == '\n') {
-            uart_display_flush();
+            uart_display_flush(now_ms);
             continue;
         }
 
@@ -80,11 +81,13 @@ static void uart_display_capture(const uint8_t *data, uint16_t length,
     }
 }
 
-static void uart_display_flush(void)
+static void uart_display_flush(uint32_t now_ms)
 {
     /* LCD 只显示最近一帧串口内容，换行或空闲超时都会触发这里。 */
     lcd_status_screen_uart_write(g_uart_display_message,
         g_uart_display_message_length);
+    pid_console_process_line((const char *) g_uart_display_message,
+        g_uart_display_message_length, now_ms, PID_CONSOLE_PORT_UART0);
     g_uart_display_message_length  = 0U;
     g_uart_display_message_pending = false;
 }

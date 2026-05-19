@@ -9,20 +9,25 @@
 
 #define LINE_TRACKING_UPDATE_MS             20U
 #define LINE_TRACKING_DT_CLAMP_MS           40U
-#define LINE_TRACKING_BASE_SPEED_PPS        900.0f
+#define LINE_TRACKING_START_RAMP_MS         3000U
+#define LINE_TRACKING_BASE_SPEED_PPS        760.0f
 #define LINE_TRACKING_MAX_BASE_SPEED_PPS    1800.0f
-#define LINE_TRACKING_MAX_TURN_PPS          650.0f
-#define LINE_TRACKING_KP                    35.0f
+#define LINE_TRACKING_MAX_TURN_PPS          300.0f
+#define LINE_TRACKING_KP                    10.0f
 #define LINE_TRACKING_KI                    0.0f
-#define LINE_TRACKING_KD                    3.0f
+#define LINE_TRACKING_KD                    0.8f
 #define LINE_TRACKING_I_LIMIT               120.0f
 #define LINE_TRACKING_DEADBAND              0.3f
-#define LINE_TRACKING_LEFT_FORWARD_MIN_PWM  145.0f
-#define LINE_TRACKING_LEFT_REVERSE_MIN_PWM  165.0f
-#define LINE_TRACKING_RIGHT_FORWARD_MIN_PWM 380.0f
-#define LINE_TRACKING_RIGHT_REVERSE_MIN_PWM 380.0f
-#define LINE_TRACKING_MIN_DRIVE_REF_PPS     0.0f
-#define LINE_TRACKING_RIGHT_SPEED_GAIN      1.30f
+#define LINE_TRACKING_LEFT_FORWARD_MIN_PWM  90.0f
+#define LINE_TRACKING_LEFT_REVERSE_MIN_PWM  110.0f
+#define LINE_TRACKING_RIGHT_FORWARD_MIN_PWM 220.0f
+#define LINE_TRACKING_RIGHT_REVERSE_MIN_PWM 220.0f
+#define LINE_TRACKING_MIN_DRIVE_REF_PPS     600.0f
+#define LINE_TRACKING_RIGHT_BASE_GAIN       1.18f
+#define LINE_TRACKING_RIGHT_TURN_GAIN       0.70f
+#define LINE_TRACKING_LEFT_PWM_LIMIT        330.0f
+#define LINE_TRACKING_RIGHT_PWM_LIMIT       280.0f
+#define LINE_TRACKING_MOTOR_OUTPUT_ENABLED  1
 #define LINE_TRACKING_SIGN                  1.0f
 
 static const int16_t g_line_tracking_weights[LINE_SENSOR_I2C_CHANNEL_COUNT] = {
@@ -32,10 +37,27 @@ static const int16_t g_line_tracking_weights[LINE_SENSOR_I2C_CHANNEL_COUNT] = {
 static pid_controller_t g_line_tracking_pid;
 static line_tracking_state_t g_line_tracking_state;
 static uint32_t g_line_tracking_last_update_ms;
+static uint32_t g_line_tracking_enable_ms;
 static bool g_line_tracking_initialized;
+static float g_line_tracking_left_forward_min_pwm =
+    LINE_TRACKING_LEFT_FORWARD_MIN_PWM;
+static float g_line_tracking_left_reverse_min_pwm =
+    LINE_TRACKING_LEFT_REVERSE_MIN_PWM;
+static float g_line_tracking_right_forward_min_pwm =
+    LINE_TRACKING_RIGHT_FORWARD_MIN_PWM;
+static float g_line_tracking_right_reverse_min_pwm =
+    LINE_TRACKING_RIGHT_REVERSE_MIN_PWM;
+static float g_line_tracking_min_drive_ref_pps = LINE_TRACKING_MIN_DRIVE_REF_PPS;
+static float g_line_tracking_right_base_gain = LINE_TRACKING_RIGHT_BASE_GAIN;
+static float g_line_tracking_right_turn_gain = LINE_TRACKING_RIGHT_TURN_GAIN;
+static bool g_line_tracking_motor_output_enabled =
+    (LINE_TRACKING_MOTOR_OUTPUT_ENABLED != 0);
+static float g_line_tracking_left_pwm_limit = LINE_TRACKING_LEFT_PWM_LIMIT;
+static float g_line_tracking_right_pwm_limit = LINE_TRACKING_RIGHT_PWM_LIMIT;
 
 static float line_tracking_clamp(
     float value, float min_value, float max_value);
+static float line_tracking_get_start_scale(uint32_t now_ms);
 static int16_t line_tracking_calculate_error(
     const line_sensor_i2c_state_t *sensor, bool *line_seen);
 static void line_tracking_apply_speed(float base_speed, float turn_pps);
@@ -54,7 +76,6 @@ void LineTrackingControl_Init(uint32_t now_ms)
 
     LineSensorI2C_Init();
     EncoderSpeedControl_Init(now_ms);
-    line_tracking_configure_speed_compensation();
 
     g_line_tracking_state.raw = 0xFFU;
     g_line_tracking_state.active_mask = 0U;
@@ -72,6 +93,7 @@ void LineTrackingControl_Init(uint32_t now_ms)
     g_line_tracking_state.enabled = false;
 
     g_line_tracking_last_update_ms = now_ms;
+    g_line_tracking_enable_ms = now_ms;
     g_line_tracking_initialized = true;
 }
 
@@ -81,6 +103,7 @@ void LineTrackingControl_Task(uint32_t now_ms)
     uint32_t elapsed_ms;
     float dt_s;
     float turn_pps;
+    float start_scale;
     bool line_seen;
 
     if (!g_line_tracking_initialized) {
@@ -138,8 +161,10 @@ void LineTrackingControl_Task(uint32_t now_ms)
     turn_pps = line_tracking_clamp(turn_pps, -LINE_TRACKING_MAX_TURN_PPS,
         LINE_TRACKING_MAX_TURN_PPS);
 
+    start_scale = line_tracking_get_start_scale(now_ms);
+    turn_pps *= start_scale;
     line_tracking_apply_speed(
-        g_line_tracking_state.base_speed_pps, turn_pps);
+        g_line_tracking_state.base_speed_pps * start_scale, turn_pps);
 }
 
 void LineTrackingControl_SetEnabled(bool enabled)
@@ -148,11 +173,15 @@ void LineTrackingControl_SetEnabled(bool enabled)
         return;
     }
 
-    g_line_tracking_state.enabled = enabled;
     if (!enabled) {
         LineTrackingControl_Stop();
     } else {
-        PID_Reset(&g_line_tracking_pid);
+        if (!g_line_tracking_state.enabled) {
+            PID_Reset(&g_line_tracking_pid);
+            line_tracking_apply_speed(0.0f, 0.0f);
+            g_line_tracking_enable_ms = g_line_tracking_last_update_ms;
+        }
+        g_line_tracking_state.enabled = true;
         line_tracking_configure_speed_compensation();
     }
 }
@@ -183,6 +212,79 @@ void LineTrackingControl_SetTunings(float kp, float ki, float kd)
     PID_SetTunings(&g_line_tracking_pid, kp, ki, kd);
 }
 
+void LineTrackingControl_SetOutputLimits(float output_min, float output_max)
+{
+    PID_SetOutputLimits(&g_line_tracking_pid, output_min, output_max);
+}
+
+void LineTrackingControl_SetIntegralLimits(float integral_min,
+    float integral_max)
+{
+    PID_SetIntegralLimits(&g_line_tracking_pid, integral_min, integral_max);
+}
+
+void LineTrackingControl_SetDeadband(float deadband)
+{
+    PID_SetDeadband(&g_line_tracking_pid, deadband);
+}
+
+void LineTrackingControl_SetDriveOutputLimits(float left_pwm_limit,
+    float right_pwm_limit)
+{
+    if (left_pwm_limit < 0.0f) {
+        left_pwm_limit = -left_pwm_limit;
+    }
+    if (right_pwm_limit < 0.0f) {
+        right_pwm_limit = -right_pwm_limit;
+    }
+
+    g_line_tracking_left_pwm_limit = left_pwm_limit;
+    g_line_tracking_right_pwm_limit = right_pwm_limit;
+
+    if (g_line_tracking_initialized) {
+        line_tracking_configure_speed_compensation();
+    }
+}
+
+void LineTrackingControl_SetDirectionalMinDrivePwm(
+    float left_forward_pwm, float left_reverse_pwm,
+    float right_forward_pwm, float right_reverse_pwm,
+    float reference_pps)
+{
+    g_line_tracking_left_forward_min_pwm = (left_forward_pwm < 0.0f) ?
+        -left_forward_pwm : left_forward_pwm;
+    g_line_tracking_left_reverse_min_pwm = (left_reverse_pwm < 0.0f) ?
+        -left_reverse_pwm : left_reverse_pwm;
+    g_line_tracking_right_forward_min_pwm = (right_forward_pwm < 0.0f) ?
+        -right_forward_pwm : right_forward_pwm;
+    g_line_tracking_right_reverse_min_pwm = (right_reverse_pwm < 0.0f) ?
+        -right_reverse_pwm : right_reverse_pwm;
+    g_line_tracking_min_drive_ref_pps = (reference_pps < 0.0f) ?
+        -reference_pps : reference_pps;
+
+    if (g_line_tracking_initialized) {
+        line_tracking_configure_speed_compensation();
+    }
+}
+
+void LineTrackingControl_SetRightGain(float base_gain, float turn_gain)
+{
+    if (base_gain < 0.0f) {
+        base_gain = -base_gain;
+    }
+    if (turn_gain < 0.0f) {
+        turn_gain = -turn_gain;
+    }
+
+    g_line_tracking_right_base_gain = base_gain;
+    g_line_tracking_right_turn_gain = turn_gain;
+}
+
+void LineTrackingControl_SetMotorOutputEnabled(bool enabled)
+{
+    g_line_tracking_motor_output_enabled = enabled;
+}
+
 void LineTrackingControl_GetTunings(line_tracking_pid_t *pid)
 {
     if (pid != NULL) {
@@ -190,6 +292,32 @@ void LineTrackingControl_GetTunings(line_tracking_pid_t *pid)
         pid->ki = g_line_tracking_pid.ki;
         pid->kd = g_line_tracking_pid.kd;
     }
+}
+
+void LineTrackingControl_GetConfig(line_tracking_config_t *config)
+{
+    if (config == NULL) {
+        return;
+    }
+
+    config->kp = g_line_tracking_pid.kp;
+    config->ki = g_line_tracking_pid.ki;
+    config->kd = g_line_tracking_pid.kd;
+    config->output_min = g_line_tracking_pid.output_min;
+    config->output_max = g_line_tracking_pid.output_max;
+    config->integral_min = g_line_tracking_pid.integral_min;
+    config->integral_max = g_line_tracking_pid.integral_max;
+    config->deadband = g_line_tracking_pid.deadband;
+    config->base_speed_pps = g_line_tracking_state.base_speed_pps;
+    config->left_pwm_limit = g_line_tracking_left_pwm_limit;
+    config->right_pwm_limit = g_line_tracking_right_pwm_limit;
+    config->left_forward_min_pwm = g_line_tracking_left_forward_min_pwm;
+    config->left_reverse_min_pwm = g_line_tracking_left_reverse_min_pwm;
+    config->right_forward_min_pwm = g_line_tracking_right_forward_min_pwm;
+    config->right_reverse_min_pwm = g_line_tracking_right_reverse_min_pwm;
+    config->min_drive_reference_pps = g_line_tracking_min_drive_ref_pps;
+    config->right_base_gain = g_line_tracking_right_base_gain;
+    config->right_turn_gain = g_line_tracking_right_turn_gain;
 }
 
 void LineTrackingControl_GetState(line_tracking_state_t *state)
@@ -206,6 +334,7 @@ void LineTrackingControl_Stop(void)
     line_tracking_apply_speed(0.0f, 0.0f);
     EncoderSpeedControl_Stop();
     EncoderSpeedControl_ClearMinDrivePwm();
+    EncoderSpeedControl_RestoreDefaultOutputLimits();
 }
 
 static float line_tracking_clamp(
@@ -218,6 +347,22 @@ static float line_tracking_clamp(
         return max_value;
     }
     return value;
+}
+
+static float line_tracking_get_start_scale(uint32_t now_ms)
+{
+    uint32_t elapsed_ms;
+
+    if (!g_line_tracking_state.enabled) {
+        return 0.0f;
+    }
+
+    elapsed_ms = now_ms - g_line_tracking_enable_ms;
+    if (elapsed_ms >= LINE_TRACKING_START_RAMP_MS) {
+        return 1.0f;
+    }
+
+    return (float) elapsed_ms / (float) LINE_TRACKING_START_RAMP_MS;
 }
 
 static int16_t line_tracking_calculate_error(
@@ -250,8 +395,8 @@ static void line_tracking_apply_speed(float base_speed, float turn_pps)
 {
     float signed_turn = turn_pps * LINE_TRACKING_SIGN;
     float left_target = base_speed + signed_turn;
-    float right_target =
-        (base_speed - signed_turn) * LINE_TRACKING_RIGHT_SPEED_GAIN;
+    float right_target = (base_speed * g_line_tracking_right_base_gain) -
+        (signed_turn * g_line_tracking_right_turn_gain);
 
     if (base_speed <= 0.0f) {
         left_target = 0.0f;
@@ -267,15 +412,19 @@ static void line_tracking_apply_speed(float base_speed, float turn_pps)
     g_line_tracking_state.left_target_pps = left_target;
     g_line_tracking_state.right_target_pps = right_target;
 
-    EncoderSpeedControl_SetTargetPps(left_target, right_target);
+    if (g_line_tracking_motor_output_enabled) {
+        EncoderSpeedControl_SetTargetPps(left_target, right_target);
+    }
 }
 
 static void line_tracking_configure_speed_compensation(void)
 {
+    EncoderSpeedControl_SetOutputLimits(g_line_tracking_left_pwm_limit,
+        g_line_tracking_right_pwm_limit);
     EncoderSpeedControl_SetDirectionalMinDrivePwm(
-        LINE_TRACKING_LEFT_FORWARD_MIN_PWM,
-        LINE_TRACKING_LEFT_REVERSE_MIN_PWM,
-        LINE_TRACKING_RIGHT_FORWARD_MIN_PWM,
-        LINE_TRACKING_RIGHT_REVERSE_MIN_PWM,
-        LINE_TRACKING_MIN_DRIVE_REF_PPS);
+        g_line_tracking_left_forward_min_pwm,
+        g_line_tracking_left_reverse_min_pwm,
+        g_line_tracking_right_forward_min_pwm,
+        g_line_tracking_right_reverse_min_pwm,
+        g_line_tracking_min_drive_ref_pps);
 }

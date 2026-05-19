@@ -12,6 +12,7 @@ void lcd_status_screen_init(uint32_t now_ms);
 void lcd_status_screen_task(uint32_t now_ms);
 void lcd_status_screen_uart_put(uint8_t data);
 void lcd_status_screen_uart_write(const uint8_t *data, uint16_t length);
+void lcd_status_screen_set_pid_text(const char *text);
 void lcd_status_screen_set_k230(
     uint8_t valid, uint16_t cx, uint16_t cy, int16_t err_x, int16_t err_y);
 void lcd_status_screen_set_line_sensor(uint8_t raw, uint8_t active_mask,

@@ -34,7 +34,10 @@ set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
 
 set(APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/k230_uart.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/bluetooth_uart.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/lcd_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/pid_console.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/pid_tuning_store.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/track_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/uart_display.c"
 )
@@ -46,6 +49,7 @@ set(COMMON_SOURCES
 
 set(MODULE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/encoder.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/modules/fault_capture.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/icm20948.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/key.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/modules/line_sensor_i2c.c"

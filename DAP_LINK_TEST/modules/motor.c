@@ -4,6 +4,10 @@
 
 #include <stdint.h>
 
+#define MOTOR_RIGHT_SAFE_WINDOW_ENABLE 1
+#define MOTOR_RIGHT_SAFE_PWM_MIN       280
+#define MOTOR_RIGHT_SAFE_PWM_MAX       370
+
 typedef struct {
     motor_decay_t decay;
     bool inverted;
@@ -14,6 +18,7 @@ static motor_state_t g_motors[MOTOR_ID_COUNT];
 
 static bool motor_is_valid_id(motor_id_t id);
 static int motor_limit(int pwm);
+static int motor_apply_output_window(motor_id_t id, int pwm);
 static void motor_set(motor_id_t id, int pwm);
 static void motor_stop(motor_id_t id);
 static void motor_brake(motor_id_t id);
@@ -149,13 +154,48 @@ static int motor_limit(int pwm)
     return pwm;
 }
 
+static int motor_apply_output_window(motor_id_t id, int pwm)
+{
+#if MOTOR_RIGHT_SAFE_WINDOW_ENABLE
+    int magnitude;
+    int mapped;
+    int span;
+
+    if ((id != MOTOR_RIGHT) || (pwm <= 0)) {
+        return pwm;
+    }
+
+    magnitude = pwm;
+    if (magnitude > MOTOR_PWM_MAX) {
+        magnitude = MOTOR_PWM_MAX;
+    }
+
+    if (MOTOR_RIGHT_SAFE_PWM_MAX <= MOTOR_RIGHT_SAFE_PWM_MIN) {
+        mapped = MOTOR_RIGHT_SAFE_PWM_MIN;
+    } else {
+        span = MOTOR_RIGHT_SAFE_PWM_MAX - MOTOR_RIGHT_SAFE_PWM_MIN;
+        mapped = MOTOR_RIGHT_SAFE_PWM_MIN +
+            ((magnitude * span) + (MOTOR_PWM_MAX / 2)) / MOTOR_PWM_MAX;
+    }
+
+    if (mapped > MOTOR_RIGHT_SAFE_PWM_MAX) {
+        mapped = MOTOR_RIGHT_SAFE_PWM_MAX;
+    }
+
+    return mapped;
+#else
+    (void) id;
+    return pwm;
+#endif
+}
+
 static void motor_set(motor_id_t id, int pwm)
 {
     if (!motor_is_valid_id(id)) {
         return;
     }
 
-    g_motors[id].pwm = motor_limit(pwm);
+    g_motors[id].pwm = motor_apply_output_window(id, motor_limit(pwm));
 
     if (g_motors[id].inverted) {
         motor_apply_hw(id, -g_motors[id].pwm);

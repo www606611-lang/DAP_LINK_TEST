@@ -15,6 +15,27 @@ typedef struct {
 } line_tracking_pid_t;
 
 typedef struct {
+    float kp;
+    float ki;
+    float kd;
+    float output_min;
+    float output_max;
+    float integral_min;
+    float integral_max;
+    float deadband;
+    float base_speed_pps;
+    float left_pwm_limit;
+    float right_pwm_limit;
+    float left_forward_min_pwm;
+    float left_reverse_min_pwm;
+    float right_forward_min_pwm;
+    float right_reverse_min_pwm;
+    float min_drive_reference_pps;
+    float right_base_gain;
+    float right_turn_gain;
+} line_tracking_config_t;
+
+typedef struct {
     uint8_t raw;
     uint8_t active_mask;
     uint8_t active_count;
@@ -40,7 +61,20 @@ void LineTrackingControl_SetEnabled(bool enabled);
 bool LineTrackingControl_IsEnabled(void);
 void LineTrackingControl_SetBaseSpeedPps(float speed_pps);
 void LineTrackingControl_SetTunings(float kp, float ki, float kd);
+void LineTrackingControl_SetOutputLimits(float output_min, float output_max);
+void LineTrackingControl_SetIntegralLimits(float integral_min,
+    float integral_max);
+void LineTrackingControl_SetDeadband(float deadband);
+void LineTrackingControl_SetDriveOutputLimits(float left_pwm_limit,
+    float right_pwm_limit);
+void LineTrackingControl_SetDirectionalMinDrivePwm(
+    float left_forward_pwm, float left_reverse_pwm,
+    float right_forward_pwm, float right_reverse_pwm,
+    float reference_pps);
+void LineTrackingControl_SetRightGain(float base_gain, float turn_gain);
+void LineTrackingControl_SetMotorOutputEnabled(bool enabled);
 void LineTrackingControl_GetTunings(line_tracking_pid_t *pid);
+void LineTrackingControl_GetConfig(line_tracking_config_t *config);
 void LineTrackingControl_GetState(line_tracking_state_t *state);
 
 #ifdef __cplusplus

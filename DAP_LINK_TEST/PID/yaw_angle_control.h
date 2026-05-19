@@ -15,6 +15,19 @@ typedef struct {
 } yaw_angle_control_pid_t;
 
 typedef struct {
+    float kp;
+    float ki;
+    float kd;
+    float output_min;
+    float output_max;
+    float integral_min;
+    float integral_max;
+    float deadband;
+    float min_turn_speed_pps;
+    float max_turn_speed_pps;
+} yaw_angle_control_config_t;
+
+typedef struct {
     float target_yaw_deg;
     float current_yaw_deg;
     float error_deg;
@@ -44,8 +57,21 @@ void YawAngleControl_GetTargetDeg(float *yaw_deg);
 /* Reset IMU yaw angle and yaw target to zero. */
 void YawAngleControl_ZeroYaw(uint32_t now_ms);
 
+void YawAngleControl_SetTunings(float kp, float ki, float kd);
+void YawAngleControl_SetOutputLimits(float output_min, float output_max);
+void YawAngleControl_SetIntegralLimits(float integral_min,
+    float integral_max);
+void YawAngleControl_SetDeadband(float deadband);
+void YawAngleControl_SetMinTurnSpeedPps(float min_turn_speed_pps);
+void YawAngleControl_SetMaxTurnSpeedPps(float max_turn_speed_pps);
+void YawAngleControl_SetDirectionalMinDrivePwm(
+    float left_forward_pwm, float left_reverse_pwm,
+    float right_forward_pwm, float right_reverse_pwm,
+    float reference_pps);
+
 void YawAngleControl_GetState(yaw_angle_control_state_t *state);
 void YawAngleControl_GetTunings(yaw_angle_control_pid_t *pid);
+void YawAngleControl_GetConfig(yaw_angle_control_config_t *config);
 void YawAngleControl_Stop(void);
 
 #ifdef __cplusplus

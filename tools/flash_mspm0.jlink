@@ -1,0 +1,7 @@
+device MSPM0G3507
+if SWD
+speed 4000
+r
+h
+loadfile build-gcc/DAP_LINK_TEST/dap_link_test.elf
+Exit

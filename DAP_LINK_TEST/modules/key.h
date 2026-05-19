@@ -10,6 +10,7 @@ extern "C" {
 
 typedef enum {
     KEY_ID_B21 = 0,
+    KEY_ID_DOWN,
     KEY_ID_COUNT
 } key_id_t;
 
