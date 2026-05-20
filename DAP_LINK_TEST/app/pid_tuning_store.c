@@ -14,7 +14,7 @@
 #include <ti/driverlib/m0p/dl_core.h>
 
 #define PID_TUNING_STORE_MAGIC       0x50494431UL
-#define PID_TUNING_STORE_VERSION     1UL
+#define PID_TUNING_STORE_VERSION     3UL
 #define PID_TUNING_STORE_ADDRESS     0x0001FC00UL
 #define PID_TUNING_STORE_SECTOR_SIZE 1024UL
 
@@ -70,13 +70,6 @@ typedef struct {
     float base_speed_pps;
     float left_pwm_limit;
     float right_pwm_limit;
-    float left_forward_min_pwm;
-    float left_reverse_min_pwm;
-    float right_forward_min_pwm;
-    float right_reverse_min_pwm;
-    float min_drive_reference_pps;
-    float right_base_gain;
-    float right_turn_gain;
 } pid_store_line_t;
 
 typedef struct {
@@ -92,6 +85,7 @@ typedef struct {
     pid_store_pid_t position_right_spd;
     pid_store_yaw_t yaw;
     pid_store_line_t line;
+    uint32_t reserved;
 } pid_store_image_t;
 
 typedef union {
@@ -99,6 +93,9 @@ typedef union {
     uint32_t word[(sizeof(pid_store_image_t) + sizeof(uint32_t) - 1U) /
         sizeof(uint32_t)];
 } pid_store_flash_words_t;
+
+typedef char pid_store_image_size_must_align_to_flash_write[
+    ((sizeof(pid_store_image_t) % sizeof(uint64_t)) == 0U) ? 1 : -1];
 
 static pid_tuning_store_status_t g_pid_tuning_store_status =
     PID_TUNING_STORE_NOT_FOUND;
@@ -322,14 +319,6 @@ static void pid_tuning_store_capture(pid_store_image_t *image)
     image->line.base_speed_pps = line_config.base_speed_pps;
     image->line.left_pwm_limit = line_config.left_pwm_limit;
     image->line.right_pwm_limit = line_config.right_pwm_limit;
-    image->line.left_forward_min_pwm = line_config.left_forward_min_pwm;
-    image->line.left_reverse_min_pwm = line_config.left_reverse_min_pwm;
-    image->line.right_forward_min_pwm = line_config.right_forward_min_pwm;
-    image->line.right_reverse_min_pwm = line_config.right_reverse_min_pwm;
-    image->line.min_drive_reference_pps =
-        line_config.min_drive_reference_pps;
-    image->line.right_base_gain = line_config.right_base_gain;
-    image->line.right_turn_gain = line_config.right_turn_gain;
 }
 
 static void pid_tuning_store_apply(const pid_store_image_t *image)
@@ -439,12 +428,6 @@ static void pid_tuning_store_apply(const pid_store_image_t *image)
     LineTrackingControl_SetBaseSpeedPps(image->line.base_speed_pps);
     LineTrackingControl_SetDriveOutputLimits(
         image->line.left_pwm_limit, image->line.right_pwm_limit);
-    LineTrackingControl_SetDirectionalMinDrivePwm(
-        image->line.left_forward_min_pwm, image->line.left_reverse_min_pwm,
-        image->line.right_forward_min_pwm, image->line.right_reverse_min_pwm,
-        image->line.min_drive_reference_pps);
-    LineTrackingControl_SetRightGain(
-        image->line.right_base_gain, image->line.right_turn_gain);
 
     EncoderPositionControl_SyncSpeedFromCurrent();
 }

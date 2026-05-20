@@ -33,9 +33,11 @@ set(SYSCFG_H "${SYSCFG_OUT_DIR}/ti_msp_dl_config.h")
 set(SYSCFG_OPT "${SYSCFG_OUT_DIR}/device.opt")
 
 set(APP_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/app_diagnostics.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/k230_uart.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bluetooth_uart.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/lcd_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/line_tracking_app.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/pid_console.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/pid_tuning_store.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/track_control.c"

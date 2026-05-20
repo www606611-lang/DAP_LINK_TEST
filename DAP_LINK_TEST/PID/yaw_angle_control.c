@@ -11,6 +11,7 @@
 #define YAW_CONTROL_KI                  0.0f
 #define YAW_CONTROL_KD                  0.0f
 #define YAW_CONTROL_UPDATE_MS           20U
+#define YAW_CONTROL_DT_CLAMP_MS         40U
 #define YAW_CONTROL_DEADBAND_DEG        1.0f
 #define YAW_CONTROL_SOFT_ZONE_DEG       3.0f
 #define YAW_CONTROL_MAX_TURN_SPEED_PPS  900.0f
@@ -41,9 +42,14 @@ static float yaw_angle_control_abs(float value);
 static float yaw_angle_control_clamp(
     float value, float min_value, float max_value);
 static void yaw_angle_control_apply_speed_targets(float turn_speed_pps);
+static void yaw_angle_control_configure_speed_loop(void);
 
 void YawAngleControl_Init(uint32_t now_ms)
 {
+    if (!EncoderSpeedControl_IsInitialized()) {
+        EncoderSpeedControl_Init(now_ms);
+    }
+
     PID_Init(&g_yaw_pid);
     PID_SetTunings(&g_yaw_pid, YAW_CONTROL_KP, YAW_CONTROL_KI,
         YAW_CONTROL_KD);
@@ -52,12 +58,6 @@ void YawAngleControl_Init(uint32_t now_ms)
     PID_SetIntegralLimits(&g_yaw_pid, -YAW_CONTROL_INTEGRAL_LIMIT,
         YAW_CONTROL_INTEGRAL_LIMIT);
     PID_SetDeadband(&g_yaw_pid, YAW_CONTROL_DEADBAND_DEG);
-
-    EncoderSpeedControl_Init(now_ms);
-    EncoderSpeedControl_SetDirectionalMinDrivePwm(
-        g_yaw_left_forward_min_pwm, g_yaw_left_reverse_min_pwm,
-        g_yaw_right_forward_min_pwm, g_yaw_right_reverse_min_pwm,
-        g_yaw_min_drive_ref_pps);
 
     g_yaw_state.target_yaw_deg = 0.0f;
     g_yaw_state.current_yaw_deg = 0.0f;
@@ -69,6 +69,8 @@ void YawAngleControl_Init(uint32_t now_ms)
     g_yaw_state.enabled = false;
     g_yaw_last_update_ms = now_ms;
     g_yaw_initialized = true;
+
+    yaw_angle_control_configure_speed_loop();
 }
 
 void YawAngleControl_Task(uint32_t now_ms)
@@ -86,12 +88,16 @@ void YawAngleControl_Task(uint32_t now_ms)
     EncoderSpeedControl_Task(now_ms);
 
     if (!g_yaw_state.enabled) {
+        g_yaw_last_update_ms = now_ms;
         return;
     }
 
     elapsed_ms = now_ms - g_yaw_last_update_ms;
     if (elapsed_ms < YAW_CONTROL_UPDATE_MS) {
         return;
+    }
+    if (elapsed_ms > YAW_CONTROL_DT_CLAMP_MS) {
+        elapsed_ms = YAW_CONTROL_UPDATE_MS;
     }
 
     g_yaw_last_update_ms = now_ms;
@@ -130,6 +136,7 @@ void YawAngleControl_Task(uint32_t now_ms)
 
 void YawAngleControl_SetTargetDeg(float yaw_deg)
 {
+    yaw_angle_control_configure_speed_loop();
     g_yaw_state.target_yaw_deg = yaw_angle_control_wrap_deg(yaw_deg);
     g_yaw_state.enabled = true;
 }
@@ -205,7 +212,6 @@ void YawAngleControl_Stop(void)
     PID_Reset(&g_yaw_pid);
     yaw_angle_control_apply_speed_targets(0.0f);
     EncoderSpeedControl_Stop();
-    EncoderSpeedControl_ClearMinDrivePwm();
 }
 
 void YawAngleControl_SetTunings(float kp, float ki, float kd)
@@ -262,10 +268,7 @@ void YawAngleControl_SetDirectionalMinDrivePwm(
         -reference_pps : reference_pps;
 
     if (g_yaw_initialized) {
-        EncoderSpeedControl_SetDirectionalMinDrivePwm(
-            g_yaw_left_forward_min_pwm, g_yaw_left_reverse_min_pwm,
-            g_yaw_right_forward_min_pwm, g_yaw_right_reverse_min_pwm,
-            g_yaw_min_drive_ref_pps);
+        yaw_angle_control_configure_speed_loop();
     }
 }
 
@@ -305,4 +308,17 @@ static void yaw_angle_control_apply_speed_targets(float turn_speed_pps)
 
     EncoderSpeedControl_SetTargetPps(g_yaw_state.left_speed_target_pps,
         g_yaw_state.right_speed_target_pps);
+}
+
+static void yaw_angle_control_configure_speed_loop(void)
+{
+    if (!EncoderSpeedControl_IsInitialized()) {
+        return;
+    }
+
+    EncoderSpeedControl_RestoreDefaultOutputLimits();
+    EncoderSpeedControl_SetDirectionalMinDrivePwm(
+        g_yaw_left_forward_min_pwm, g_yaw_left_reverse_min_pwm,
+        g_yaw_right_forward_min_pwm, g_yaw_right_reverse_min_pwm,
+        g_yaw_min_drive_ref_pps);
 }

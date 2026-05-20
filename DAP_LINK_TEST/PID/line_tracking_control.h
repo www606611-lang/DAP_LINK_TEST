@@ -26,13 +26,6 @@ typedef struct {
     float base_speed_pps;
     float left_pwm_limit;
     float right_pwm_limit;
-    float left_forward_min_pwm;
-    float left_reverse_min_pwm;
-    float right_forward_min_pwm;
-    float right_reverse_min_pwm;
-    float min_drive_reference_pps;
-    float right_base_gain;
-    float right_turn_gain;
 } line_tracking_config_t;
 
 typedef struct {
@@ -52,14 +45,24 @@ typedef struct {
     bool enabled;
 } line_tracking_state_t;
 
+/* Low-level line tracking controller. Prefer LineTrackingApp_* from main.c
+ * when you want key/LCD/telemetry handling as well. */
 void LineTrackingControl_Init(uint32_t now_ms);
+
+/* Call periodically after Encoder_Task(). Produces speed-loop targets. */
 void LineTrackingControl_Task(uint32_t now_ms);
+
 void LineTrackingControl_Start(void);
 void LineTrackingControl_Stop(void);
 void LineTrackingControl_Toggle(void);
 void LineTrackingControl_SetEnabled(bool enabled);
 bool LineTrackingControl_IsEnabled(void);
+
+/* Main runtime behavior knobs for route logic. */
 void LineTrackingControl_SetBaseSpeedPps(float speed_pps);
+void LineTrackingControl_SetMotorOutputEnabled(bool enabled);
+
+/* Tuning/configuration APIs used by the Bluetooth PID console and store. */
 void LineTrackingControl_SetTunings(float kp, float ki, float kd);
 void LineTrackingControl_SetOutputLimits(float output_min, float output_max);
 void LineTrackingControl_SetIntegralLimits(float integral_min,
@@ -67,12 +70,6 @@ void LineTrackingControl_SetIntegralLimits(float integral_min,
 void LineTrackingControl_SetDeadband(float deadband);
 void LineTrackingControl_SetDriveOutputLimits(float left_pwm_limit,
     float right_pwm_limit);
-void LineTrackingControl_SetDirectionalMinDrivePwm(
-    float left_forward_pwm, float left_reverse_pwm,
-    float right_forward_pwm, float right_reverse_pwm,
-    float reference_pps);
-void LineTrackingControl_SetRightGain(float base_gain, float turn_gain);
-void LineTrackingControl_SetMotorOutputEnabled(bool enabled);
 void LineTrackingControl_GetTunings(line_tracking_pid_t *pid);
 void LineTrackingControl_GetConfig(line_tracking_config_t *config);
 void LineTrackingControl_GetState(line_tracking_state_t *state);

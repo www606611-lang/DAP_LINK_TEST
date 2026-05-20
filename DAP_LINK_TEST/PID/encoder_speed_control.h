@@ -32,15 +32,21 @@ typedef struct {
 } encoder_speed_control_config_t;
 
 void EncoderSpeedControl_Init(uint32_t now_ms);
+
+/* Call periodically after Encoder_Task(). */
 void EncoderSpeedControl_Task(uint32_t now_ms);
 bool EncoderSpeedControl_IsInitialized(void);
 
+/* Main speed-loop command API, in encoder pulses per second. */
 void EncoderSpeedControl_SetTargetPps(
     float left_speed_pps, float right_speed_pps);
 void EncoderSpeedControl_GetTargetPps(
     float *left_speed_pps, float *right_speed_pps);
 void EncoderSpeedControl_GetPwmCommand(
     float *left_pwm_command, float *right_pwm_command);
+
+/* Runtime tuning/configuration APIs. Keep these out of high-level
+ * competition logic unless a mode intentionally retunes the speed loop. */
 void EncoderSpeedControl_SetSpeedTunings(
     encoder_id_t id, float kp, float ki, float kd);
 void EncoderSpeedControl_SetSpeedOutputLimits(
@@ -70,6 +76,7 @@ void EncoderSpeedControl_GetSpeedTunings(
     encoder_speed_control_pid_t *left, encoder_speed_control_pid_t *right);
 void EncoderSpeedControl_GetSpeedConfig(
     encoder_id_t id, encoder_speed_control_config_t *config);
+
 void EncoderSpeedControl_Stop(void);
 
 #ifdef __cplusplus

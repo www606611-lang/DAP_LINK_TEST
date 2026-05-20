@@ -1544,11 +1544,6 @@ static bool pid_console_handle_line(char *const *tokens, uint8_t count,
     uint32_t now_ms)
 {
     float value;
-    float left_forward_pwm;
-    float left_reverse_pwm;
-    float right_forward_pwm;
-    float right_reverse_pwm;
-    float reference_pps;
     bool enabled;
 
     if (count < 3U) {
@@ -1602,20 +1597,6 @@ static bool pid_console_handle_line(char *const *tokens, uint8_t count,
         return changed;
     }
 
-    if (pid_console_token_eq(tokens[2], "gain")) {
-        float turn_gain;
-
-        if ((count < 5U) ||
-            !pid_console_parse_float(tokens[3], &value) ||
-            !pid_console_parse_float(tokens[4], &turn_gain)) {
-            return false;
-        }
-        LineTrackingControl_SetRightGain(value, turn_gain);
-        pid_console_update_line_lcd();
-        pid_console_autosave_tunings(true);
-        return true;
-    }
-
     if (pid_console_token_eq(tokens[2], "driveout")) {
         float right_limit;
 
@@ -1625,24 +1606,6 @@ static bool pid_console_handle_line(char *const *tokens, uint8_t count,
             return false;
         }
         LineTrackingControl_SetDriveOutputLimits(value, right_limit);
-        pid_console_update_line_lcd();
-        pid_console_autosave_tunings(true);
-        return true;
-    }
-
-    if (pid_console_token_eq(tokens[2], "mindrive")) {
-        if ((count < 8U) ||
-            !pid_console_parse_float(tokens[3], &left_forward_pwm) ||
-            !pid_console_parse_float(tokens[4], &left_reverse_pwm) ||
-            !pid_console_parse_float(tokens[5], &right_forward_pwm) ||
-            !pid_console_parse_float(tokens[6], &right_reverse_pwm) ||
-            !pid_console_parse_float(tokens[7], &reference_pps)) {
-            return false;
-        }
-        LineTrackingControl_SetDirectionalMinDrivePwm(
-            left_forward_pwm, left_reverse_pwm,
-            right_forward_pwm, right_reverse_pwm,
-            reference_pps);
         pid_console_update_line_lcd();
         pid_console_autosave_tunings(true);
         return true;

@@ -1,0 +1,38 @@
+#ifndef APP_APP_DIAGNOSTICS_H
+#define APP_APP_DIAGNOSTICS_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    APP_DIAGNOSTICS_STAGE_INIT_BEGIN = 1U,
+    APP_DIAGNOSTICS_STAGE_INIT_IMU = 2U,
+    APP_DIAGNOSTICS_STAGE_INIT_MOTOR = 3U,
+    APP_DIAGNOSTICS_STAGE_INIT_ENCODER = 4U,
+    APP_DIAGNOSTICS_STAGE_INIT_KEY = 5U,
+    APP_DIAGNOSTICS_STAGE_INIT_SPEED = 6U,
+    APP_DIAGNOSTICS_STAGE_INIT_LINE = 7U,
+    APP_DIAGNOSTICS_STAGE_INIT_YAW = 8U,
+    APP_DIAGNOSTICS_STAGE_INIT_POSITION = 9U,
+    APP_DIAGNOSTICS_STAGE_INIT_LCD = 10U,
+    APP_DIAGNOSTICS_STAGE_INIT_UART = 11U,
+    APP_DIAGNOSTICS_STAGE_TASK_ENCODER = 20U,
+    APP_DIAGNOSTICS_STAGE_TASK_IMU = 21U,
+    APP_DIAGNOSTICS_STAGE_TASK_KEY = 22U,
+    APP_DIAGNOSTICS_STAGE_TASK_UART = 23U,
+    APP_DIAGNOSTICS_STAGE_TASK_YAW = 24U,
+    APP_DIAGNOSTICS_STAGE_TASK_LCD = 25U,
+} app_diagnostics_stage_t;
+
+void AppDiagnostics_SetStage(app_diagnostics_stage_t stage);
+void AppDiagnostics_ClearStage(void);
+void AppDiagnostics_ReportResetCause(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
