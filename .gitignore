@@ -6,11 +6,16 @@
 /DAP_LINK_TEST/Debug/
 /DAP_LINK_TEST/DebugTiclang/
 /DAP_LINK_TEST/**/Event.dot
+/DIANSAI_MOTOR_DRIVER_BOARD/Debug/
+/DIANSAI_MOTOR_DRIVER_BOARD/DebugTiclang/
+/DIANSAI_MOTOR_DRIVER_BOARD/**/Event.dot
 
 # clangd caches
 /DAP_LINK_TEST/.clangd/
 /DAP_LINK_TEST/Debug/.clangd/
 /DAP_LINK_TEST/DebugTiclang/.clangd/
+/DIANSAI_MOTOR_DRIVER_BOARD/Debug/.clangd/
+/DIANSAI_MOTOR_DRIVER_BOARD/DebugTiclang/.clangd/
 /build-gcc/.cache/
 /build-ticlang/.cache/
 
