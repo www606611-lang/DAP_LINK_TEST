@@ -1,7 +1,6 @@
 #include "motor_bringup_test.h"
 
-#include "at8236_motor.h"
-#include "board_resources.h"
+#include "board_wheel_drive.h"
 #include "control_supervisor.h"
 #include "encoder_input.h"
 
@@ -30,11 +29,6 @@ void MotorBringupTest_Init(bool reset_locked)
     g_run_count = 0U;
     g_command_a = 0;
     g_command_b = 0;
-    AT8236_MotorInit();
-    AT8236_MotorSetInverted(AT8236_MOTOR_A,
-        BOARD_MOTOR_A_FORWARD_INVERTED != 0);
-    AT8236_MotorSetInverted(AT8236_MOTOR_B,
-        BOARD_MOTOR_B_FORWARD_INVERTED != 0);
 }
 
 void MotorBringupTest_Task(uint32_t now_ms, bool press_event)
@@ -64,7 +58,7 @@ void MotorBringupTest_Task(uint32_t now_ms, bool press_event)
 
             if (ControlSupervisor_GetMode() !=
                 CAR_CONTROL_MODE_OPEN_LOOP) {
-                AT8236_MotorStopAll();
+                BoardWheelDrive_SetZero();
                 g_command_a = 0;
                 g_command_b = 0;
                 g_state = MOTOR_BRINGUP_TEST_COMPLETE;
@@ -81,16 +75,14 @@ void MotorBringupTest_Task(uint32_t now_ms, bool press_event)
             command_a = motor_bringup_get_ramp_command(elapsed_ms);
             command_b = command_a;
 
-            if (!AT8236_MotorSetCommand(
-                    AT8236_MOTOR_A, command_a) ||
-                !AT8236_MotorSetCommand(
-                    AT8236_MOTOR_B, command_b)) {
+            if (BoardWheelDrive_SetCommands(command_a, command_b) !=
+                BOARD_WHEEL_DRIVE_OK) {
                 motor_bringup_stop(CAR_CONTROL_BLOCK_EMERGENCY_STOP,
                     MOTOR_BRINGUP_TEST_ABORTED);
                 return;
             }
-            g_command_a = command_a;
-            g_command_b = command_b;
+            g_command_a = BoardWheelDrive_GetLeftCommand();
+            g_command_b = BoardWheelDrive_GetRightCommand();
             return;
 
         default:
@@ -168,8 +160,8 @@ static void motor_bringup_start(uint32_t now_ms)
     g_run_count++;
     g_command_a = 0;
     g_command_b = 0;
-    if (!AT8236_MotorSetCommand(AT8236_MOTOR_A, 0) ||
-        !AT8236_MotorSetCommand(AT8236_MOTOR_B, 0)) {
+    if (BoardWheelDrive_SetCommands(0, 0) !=
+        BOARD_WHEEL_DRIVE_OK) {
         motor_bringup_stop(CAR_CONTROL_BLOCK_EMERGENCY_STOP,
             MOTOR_BRINGUP_TEST_ABORTED);
         return;
@@ -180,7 +172,6 @@ static void motor_bringup_start(uint32_t now_ms)
 static void motor_bringup_stop(car_control_block_reason_t reason,
     motor_bringup_test_state_t next_state)
 {
-    AT8236_MotorStopAll();
     ControlSupervisor_EmergencyStop(reason);
     g_command_a = 0;
     g_command_b = 0;

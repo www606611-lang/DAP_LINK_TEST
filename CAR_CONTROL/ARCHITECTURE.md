@@ -6,8 +6,10 @@ app/main
   -> diagnostics/reset_diagnostics
   -> bsp/board_button
   -> bsp/board_motor_safe
+  -> bsp/board_wheel_drive
   -> drivers/mcu/encoder_input
-  -> drivers/device/at8236 -> drivers/mcu/motor_pwm
+  -> bsp/board_wheel_drive -> drivers/device/at8236
+     -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
 
 future control loops
@@ -15,12 +17,14 @@ future control loops
   -> position loop -> speed loop
   -> yaw loop -> speed loop
   -> line loop -> speed loop
-  -> motor device driver -> MCU PWM driver -> SysConfig/platform
+  -> board wheel drive -> motor device driver -> MCU PWM driver
+     -> SysConfig/platform
 ```
 
 ## Ownership
 
-- `bsp`: board wiring, physical channel names, safe pin states.
+- `bsp`: board wiring, physical channel names, safe pin states, and the public
+  left/right wheel-drive API. It owns A/B mapping and board polarity.
 - `control`: reusable PID and mutually exclusive motion modes.
 - `diagnostics`: reset and first-fault evidence without initiating a second
   software reset.
@@ -42,13 +46,19 @@ future control loops
    positive command now produces positive E1 feedback.
 5. Dual-channel open loop: arm both channels under one lease, apply one shared
    ramp time base, and compare E0/E1 signs, speeds, counts, invalid transitions,
-   and reset behavior.
-6. Speed loop: migrate the tuned loop through the new motor/encoder APIs.
-7. Position loop: cascade position output into the verified speed loop.
-8. Yaw loop: IMU validation, then yaw output into the speed loop.
-9. Line tracking: line sensor validation, then steering correction into the
+   and reset behavior. Ten consecutive tests completed without reset.
+6. Wheel-drive API: promote left/right forward-positive commands into BSP,
+   migrate the open-loop test to it, and repeat the bench test before reuse.
+7. Speed loop: migrate the tuned loop through the new motor/encoder APIs.
+8. Position loop: cascade position output into the verified speed loop.
+9. Yaw loop: IMU validation, then yaw output into the speed loop.
+10. Line tracking: line sensor validation, then steering correction into the
    speed loop.
-10. Mode arbitration: only one outer loop may own speed targets at a time.
+11. Mode arbitration: only one outer loop may own speed targets at a time.
+
+Product code must submit wheel commands through `BoardWheelDrive_SetCommands`.
+Direct `AT8236_MotorSetCommand` and `MotorPwm_SetDuty` calls are internal to the
+BSP/device-driver path and are not control-loop APIs.
 
 The old tuned PID values are reference calibration data. They are promoted only
 after the corresponding new driver path produces matching units, signs, sample

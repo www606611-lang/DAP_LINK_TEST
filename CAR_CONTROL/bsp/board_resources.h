@@ -13,7 +13,7 @@
 
 #define BOARD_BUTTON_PIN_NAME         "PB21"
 
-/* Encoder channels are paired to motor A/B; wheel side remains unassigned. */
+/* Motor A/E0 is the left wheel; motor B/E1 is the right wheel. */
 #define BOARD_ENCODER_0_A_PIN_NAME    "PB0"
 #define BOARD_ENCODER_0_B_PIN_NAME    "PB1"
 #define BOARD_ENCODER_1_A_PIN_NAME    "PB2"

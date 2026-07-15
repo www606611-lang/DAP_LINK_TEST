@@ -246,11 +246,33 @@ stable, the delay has been removed and both motors share the same ramp command
 and start time. Remaining wheel-to-wheel mechanical mismatch will be handled by
 the speed loop, not by an open-loop start delay.
 
+## 2026-07-15: wheel-drive API promotion
+
+The verified open-loop behavior was promoted into a reusable board-facing API:
+
+```text
+BoardWheelDrive_SetCommands(left, right)
+range: -1000 to 1000 permille
+sign: positive is vehicle-forward for both wheels
+mapping: left -> motor A, right -> motor B
+failure behavior: zero both wheel commands and return an explicit result
+```
+
+Motor A/B selection and the motor-B polarity inversion now belong to the BSP,
+not the bring-up application. `MotorBringupTest` uses this public API, while
+AT8236 and TIMG6/TIMG7 functions remain internal driver details. Emergency stop
+zeros the public command state before disabling both PWM peripherals and
+returning all four motor pins to high impedance.
+
+This is a structural API migration over the already verified drive path. One
+dual-motor PB21 run, one operator-stop run, positive E0/E1 feedback, `INV=0/0`,
+and no reset are required before committing this milestone.
+
 ## Manual checks still required
 
 1. Press and release PB21 repeatedly. Confirm the counter changes and uptime
    does not restart.
-2. Complete the supervised dual-motor bench procedure above.
+2. Complete the wheel-drive API regression checks described above.
 3. Confirm the encoder supply voltage and whether A/B outputs are open-drain or
    push-pull before any powered motor test.
 

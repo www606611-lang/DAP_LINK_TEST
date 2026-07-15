@@ -36,6 +36,26 @@ The supervisor already defines future modes for open-loop, speed, position,
 yaw, and line tracking, but every non-idle request is blocked until its hardware
 bring-up milestone is explicitly enabled.
 
+## Reusable wheel-drive API
+
+`bsp/board_wheel_drive.h` is the single product-facing motor-output API:
+
+```c
+BoardWheelDrive_Init();
+BoardWheelDrive_SetCommands(left_permille, right_permille);
+BoardWheelDrive_SetZero();
+```
+
+Commands range from `-1000` to `1000`; positive always means vehicle-forward
+for both wheels. The BSP owns motor A/B mapping and the right-motor polarity
+correction. Both arguments are validated before output, and every rejected or
+failed command zeros both wheels. The caller must still pass non-OK results to
+`ControlSupervisor_EmergencyStop` to restore hardware high impedance.
+
+Application and control modules must not call `AT8236_MotorSetCommand` or
+`MotorPwm_SetDuty` directly. The open-loop bring-up test now uses the same
+wheel-drive API that the future speed loop will use.
+
 ## Build and flash
 
 From the repository root:

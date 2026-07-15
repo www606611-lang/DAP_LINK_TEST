@@ -1,6 +1,7 @@
 #include "control_supervisor.h"
 
 #include "board_motor_safe.h"
+#include "board_wheel_drive.h"
 
 static car_control_mode_t g_mode;
 static car_control_block_reason_t g_block_reason;
@@ -12,6 +13,7 @@ static bool control_supervisor_deadline_reached(
 
 void ControlSupervisor_Init(bool suspicious_reset)
 {
+    BoardWheelDrive_SetZero();
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
     g_reset_locked = suspicious_reset;
@@ -39,6 +41,7 @@ void ControlSupervisor_Task(uint32_t now_ms)
 
 void ControlSupervisor_EmergencyStop(car_control_block_reason_t reason)
 {
+    BoardWheelDrive_SetZero();
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
     g_block_reason = reason;
@@ -69,6 +72,7 @@ car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
         ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return CAR_CONTROL_REQUEST_BLOCKED;
     }
+    BoardWheelDrive_SetZero();
 
     g_mode = CAR_CONTROL_MODE_OPEN_LOOP;
     g_block_reason = CAR_CONTROL_BLOCK_NONE;

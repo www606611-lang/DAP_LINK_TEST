@@ -1,6 +1,7 @@
 #include "board_button.h"
 #include "board_motor_safe.h"
 #include "board_resources.h"
+#include "board_wheel_drive.h"
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
@@ -49,6 +50,7 @@ int main(void)
     SYSCFG_DL_init();
     ResetDiagnostics_Init();
     BoardMotorSafe_Init();
+    BoardWheelDrive_Init();
     BoardButton_Init(delay_get_ms());
     ControlSupervisor_Init(ResetDiagnostics_IsSuspicious());
     EncoderInput_Init(delay_get_ms());
