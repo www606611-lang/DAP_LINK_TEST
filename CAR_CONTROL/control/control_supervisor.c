@@ -4,19 +4,34 @@
 
 static car_control_mode_t g_mode;
 static car_control_block_reason_t g_block_reason;
+static bool g_reset_locked;
+static uint32_t g_open_loop_deadline_ms;
+
+static bool control_supervisor_deadline_reached(
+    uint32_t now_ms, uint32_t deadline_ms);
 
 void ControlSupervisor_Init(bool suspicious_reset)
 {
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
+    g_reset_locked = suspicious_reset;
+    g_open_loop_deadline_ms = 0U;
     g_block_reason = suspicious_reset ?
         CAR_CONTROL_BLOCK_SUSPICIOUS_RESET :
         CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED;
 }
 
-void ControlSupervisor_Task(void)
+void ControlSupervisor_Task(uint32_t now_ms)
 {
-    if (g_mode != CAR_CONTROL_MODE_SAFE_IDLE) {
+    if ((g_mode == CAR_CONTROL_MODE_OPEN_LOOP) &&
+        control_supervisor_deadline_reached(
+            now_ms, g_open_loop_deadline_ms)) {
+        ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_TEST_COMPLETE);
+        return;
+    }
+
+    if ((g_mode != CAR_CONTROL_MODE_SAFE_IDLE) &&
+        (g_mode != CAR_CONTROL_MODE_OPEN_LOOP)) {
         ControlSupervisor_EmergencyStop(
             CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED);
     }
@@ -27,6 +42,38 @@ void ControlSupervisor_EmergencyStop(car_control_block_reason_t reason)
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
     g_block_reason = reason;
+    g_open_loop_deadline_ms = 0U;
+}
+
+car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
+    car_control_motor_t motor, uint32_t now_ms, uint32_t duration_ms)
+{
+    board_motor_channel_t board_channel;
+
+    if (g_reset_locked ||
+        ((uint32_t) motor >= (uint32_t) CAR_CONTROL_MOTOR_COUNT) ||
+        (g_mode != CAR_CONTROL_MODE_SAFE_IDLE) ||
+        (duration_ms == 0U) ||
+        (duration_ms > CONTROL_SUPERVISOR_OPEN_LOOP_MAX_MS)) {
+        return CAR_CONTROL_REQUEST_BLOCKED;
+    }
+
+    if (motor == CAR_CONTROL_MOTOR_A) {
+        board_channel = BOARD_MOTOR_CHANNEL_A;
+    } else if (motor == CAR_CONTROL_MOTOR_B) {
+        board_channel = BOARD_MOTOR_CHANNEL_B;
+    } else {
+        board_channel = BOARD_MOTOR_CHANNEL_BOTH;
+    }
+    if (!BoardMotorSafe_Arm(board_channel)) {
+        ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_EMERGENCY_STOP);
+        return CAR_CONTROL_REQUEST_BLOCKED;
+    }
+
+    g_mode = CAR_CONTROL_MODE_OPEN_LOOP;
+    g_block_reason = CAR_CONTROL_BLOCK_NONE;
+    g_open_loop_deadline_ms = now_ms + duration_ms;
+    return CAR_CONTROL_REQUEST_OK;
 }
 
 car_control_request_result_t ControlSupervisor_RequestMode(
@@ -75,6 +122,8 @@ const char *ControlSupervisor_GetModeText(void)
 const char *ControlSupervisor_GetBlockReasonText(void)
 {
     switch (g_block_reason) {
+        case CAR_CONTROL_BLOCK_NONE:
+            return "NONE";
         case CAR_CONTROL_BLOCK_STARTUP:
             return "STARTUP";
         case CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED:
@@ -83,7 +132,17 @@ const char *ControlSupervisor_GetBlockReasonText(void)
             return "RESET_LOCK";
         case CAR_CONTROL_BLOCK_EMERGENCY_STOP:
             return "EMERGENCY";
+        case CAR_CONTROL_BLOCK_TEST_COMPLETE:
+            return "TEST_DONE";
+        case CAR_CONTROL_BLOCK_OPERATOR_STOP:
+            return "USER_STOP";
         default:
             return "UNKNOWN";
     }
+}
+
+static bool control_supervisor_deadline_reached(
+    uint32_t now_ms, uint32_t deadline_ms)
+{
+    return ((int32_t) (now_ms - deadline_ms) >= 0);
 }

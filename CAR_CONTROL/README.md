@@ -11,10 +11,19 @@ reference sources only; they are not copied wholesale into this target.
 - Motor control nets are confirmed as:
   - channel A: `PA29 -> AIN1`, `PA30 -> AIN2`
   - channel B: `PA23 -> BIN1`, `PA24 -> BIN2`
-- All four motor pins are configured as GPIO inputs and explicitly forced to
-  high impedance at startup.
-- No PWM peripheral is present in this build.
-- PB21 only updates diagnostics. It cannot arm or start a motor.
+- TIMG6 provides 20 kHz PWM for motor A, and TIMG7 provides 20 kHz PWM for
+  motor B. Both channels are enabled only during the supervised dual-motor
+  test.
+- All four motor pins return to high impedance at startup, on a second PB21
+  press, after the supervised test lease expires, and on every emergency stop.
+- Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
+  wheel. Pressing PB21 once starts both motors under one supervisor lease.
+  Both motors use the same 500 ms ramp and time base so they start together,
+  target 70%, stop automatically at 3 seconds, and stop immediately if PB21 is
+  pressed again.
+- Motor B drive polarity is inverted at the board configuration layer so a
+  positive command produces forward motion and positive E1 feedback, matching
+  motor A/E0. This sign was confirmed in the powered right-wheel retest.
 - PB0/PB1 and PB2/PB3 run as raw encoder channels 0 and 1 in shadow mode.
   Motor A is paired with encoder channel 0, and motor B is paired with encoder
   channel 1. The board configuration normalizes both encoder channels so
@@ -58,6 +67,14 @@ g_car_encoder_1_count
 g_car_encoder_1_speed_pps
 g_car_encoder_1_edges
 g_car_encoder_1_invalid
+g_car_motor_test_state
+g_car_motor_test_command
+g_car_motor_test_command_a
+g_car_motor_test_command_b
+g_car_motor_test_run_count
+g_car_motor_test_channel
+g_car_encoder_count_difference
+g_car_encoder_speed_difference_pps
 ```
 
 See `HARDWARE_MAP.md` before enabling any additional peripheral and

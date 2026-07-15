@@ -7,6 +7,7 @@ app/main
   -> bsp/board_button
   -> bsp/board_motor_safe
   -> drivers/mcu/encoder_input
+  -> drivers/device/at8236 -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
 
 future control loops
@@ -23,25 +24,31 @@ future control loops
 - `control`: reusable PID and mutually exclusive motion modes.
 - `diagnostics`: reset and first-fault evidence without initiating a second
   software reset.
-- `drivers/device`: external devices such as ST7789, AT8236, ICM20948, and line
-  sensors.
-- `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture. PWM, I2C, UART,
-  and CAN remain future work.
+- `drivers/device`: external devices such as ST7789 and the current AT8236
+  dual-channel command layer. ICM20948 and line sensors remain future work.
+- `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture and shared TIMG6/
+  TIMG7 motor PWM output. I2C, UART, and CAN remain future work.
 - `app`: scheduling, display, commands, and mode transitions.
 
 ## Integration gates
 
 1. Safe base: PB21/LCD/reset reporting, all motor pins high impedance.
 2. Encoder shadow mode: count and speed measurement with motor output disabled.
-3. Single-channel open loop: explicit arming, current-limited PWM and ramp.
-4. Dual-channel mapping: motor A/E0 and B/E1 pairing and encoder signs are
-   confirmed; establish chassis left/right naming during limited powered test.
-5. Speed loop: migrate the tuned loop through the new motor/encoder APIs.
-6. Position loop: cascade position output into the verified speed loop.
-7. Yaw loop: IMU validation, then yaw output into the speed loop.
-8. Line tracking: line sensor validation, then steering correction into the
+3. Single-channel open loop A: motor A/E0 is validated as the left wheel with
+   press-to-run, second-press stop, PWM ramp, supervised lease, and automatic
+   high-impedance stop.
+4. Single-channel open loop B: motor B/E1 is confirmed as the stable right
+   wheel without reset. Board-level motor polarity is corrected and a logical
+   positive command now produces positive E1 feedback.
+5. Dual-channel open loop: arm both channels under one lease, apply one shared
+   ramp time base, and compare E0/E1 signs, speeds, counts, invalid transitions,
+   and reset behavior.
+6. Speed loop: migrate the tuned loop through the new motor/encoder APIs.
+7. Position loop: cascade position output into the verified speed loop.
+8. Yaw loop: IMU validation, then yaw output into the speed loop.
+9. Line tracking: line sensor validation, then steering correction into the
    speed loop.
-9. Mode arbitration: only one outer loop may own speed targets at a time.
+10. Mode arbitration: only one outer loop may own speed targets at a time.
 
 The old tuned PID values are reference calibration data. They are promoted only
 after the corresponding new driver path produces matching units, signs, sample

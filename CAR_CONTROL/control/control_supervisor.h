@@ -2,6 +2,9 @@
 #define CONTROL_CONTROL_SUPERVISOR_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+#define CONTROL_SUPERVISOR_OPEN_LOOP_MAX_MS 3500U
 
 typedef enum {
     CAR_CONTROL_MODE_SAFE_IDLE = 0,
@@ -13,10 +16,20 @@ typedef enum {
 } car_control_mode_t;
 
 typedef enum {
-    CAR_CONTROL_BLOCK_STARTUP = 0,
+    CAR_CONTROL_MOTOR_A = 0,
+    CAR_CONTROL_MOTOR_B,
+    CAR_CONTROL_MOTOR_BOTH,
+    CAR_CONTROL_MOTOR_COUNT
+} car_control_motor_t;
+
+typedef enum {
+    CAR_CONTROL_BLOCK_NONE = 0,
+    CAR_CONTROL_BLOCK_STARTUP,
     CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED,
     CAR_CONTROL_BLOCK_SUSPICIOUS_RESET,
-    CAR_CONTROL_BLOCK_EMERGENCY_STOP
+    CAR_CONTROL_BLOCK_EMERGENCY_STOP,
+    CAR_CONTROL_BLOCK_TEST_COMPLETE,
+    CAR_CONTROL_BLOCK_OPERATOR_STOP
 } car_control_block_reason_t;
 
 typedef enum {
@@ -25,8 +38,10 @@ typedef enum {
 } car_control_request_result_t;
 
 void ControlSupervisor_Init(bool suspicious_reset);
-void ControlSupervisor_Task(void);
+void ControlSupervisor_Task(uint32_t now_ms);
 void ControlSupervisor_EmergencyStop(car_control_block_reason_t reason);
+car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
+    car_control_motor_t motor, uint32_t now_ms, uint32_t duration_ms);
 
 car_control_request_result_t ControlSupervisor_RequestMode(
     car_control_mode_t mode);

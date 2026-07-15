@@ -33,6 +33,14 @@ try {
         session.expression.evaluate("g_car_control_block_reason"));
     System.out.println("MOTOR_HIGH_IMPEDANCE=" +
         session.expression.evaluate("g_car_motor_high_impedance"));
+    System.out.println("MOTOR_TEST_STATE=" +
+        session.expression.evaluate("g_car_motor_test_state"));
+    System.out.println("MOTOR_TEST_COMMAND=" +
+        session.expression.evaluate("g_car_motor_test_command"));
+    System.out.println("MOTOR_TEST_RUN_COUNT=" +
+        session.expression.evaluate("g_car_motor_test_run_count"));
+    System.out.println("MOTOR_TEST_CHANNEL=" +
+        session.expression.evaluate("g_car_motor_test_channel"));
     System.out.println("ENCODER_SHADOW_ACTIVE=" +
         session.expression.evaluate("g_car_encoder_shadow_active"));
     System.out.println("ENCODER_0_COUNT=" +

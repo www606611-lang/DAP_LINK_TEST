@@ -8,10 +8,10 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | PB21 button | PB21 | Confirmed | Clean board test; active-low, pull-up |
 | ST7789 SPI | PB8 MOSI, PB9 SCLK | Confirmed | Clean board test |
 | ST7789 control | PB10 RESET, PB11 DC, PB14 CS, PB26 BLK | Confirmed | Clean board test |
-| Motor channel A | PA29 AIN1, PA30 AIN2 | Confirmed | Drives AOUT/U4; paired with encoder channel 0 |
-| Motor channel B | PA23 BIN1, PA24 BIN2 | Confirmed | Drives BOUT/U3; paired with encoder channel 1 |
-| Encoder channel 0 / motor A / legacy left | PB0 A, PB1 B; forward sign inverted | Confirmed | Physical board, legacy SysConfig, hand-turn test, and motor pairing confirmation |
-| Encoder channel 1 / motor B / legacy right | PB2 A, PB3 B; forward sign native | Confirmed | Physical board, legacy SysConfig, hand-turn test, and motor pairing confirmation |
+| Motor channel A / left wheel | PA29 TIMG6_CCP0/AIN1, PA30 TIMG6_CCP1/AIN2 | Bench confirmed | 20 kHz PWM; drives AOUT/U4; paired with encoder channel 0 |
+| Motor channel B / right wheel | PA23 TIMG7_CCP0/BIN1, PA24 TIMG7_CCP1/BIN2; forward command inverted | Bench confirmed | 20 kHz PWM; drives BOUT/U3; paired with encoder channel 1 |
+| Encoder channel 0 / motor A / left wheel | PB0 A, PB1 B; forward sign inverted | Bench confirmed | Physical board, hand-turn calibration, and powered left-wheel test |
+| Encoder channel 1 / motor B / right wheel | PB2 A, PB3 B; forward sign native | Bench confirmed | Hand-turn and corrected powered-motor tests both produce positive forward feedback |
 | Legacy direction key `up` | PB4 | Reference only | PB4 is not an encoder input |
 | IMU I2C | PA0 SDA, PA1 SCL | Pending | Old firmware only |
 | Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
@@ -21,10 +21,10 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 
 ## Motor naming rule
 
-Motor A is paired with encoder channel 0, and motor B is paired with encoder
-channel 1. Firmware will keep physical channel names `A` and `B` until chassis
-left/right orientation is explicitly confirmed. The older code's left/right
-names are retained only as historical hints.
+Motor A is paired with encoder channel 0 and is confirmed as the left wheel.
+Motor B is paired with encoder channel 1 and is confirmed as the right wheel.
+Its physical drive polarity is inverted in firmware so logical forward is
+positive on both the motor command and E1 feedback.
 
 The encoder pin pairs, motor pairing, and forward count signs are confirmed.
 
@@ -55,5 +55,7 @@ alignment; per-wheel correction is not justified by this test.
   MCU is powered from USB/J-Link while the Buck or AT8236 VM rail is off.
 - Motor outputs must remain high impedance until the AT8236, Buck, VM, 5 V,
   3.3 V, and common-ground power-up sequence is valid.
-- Future PWM bring-up starts with one physical channel, limited duration, and a
-  slew limiter. It must not be tied directly to the PB21 event handler.
+- The guarded dual-motor test enables both channels under one 3.2 second lease.
+  Both motors use one synchronized ramp, a second PB21 press stops both
+  immediately, and a 3 second automatic stop returns both channels to high
+  impedance.
