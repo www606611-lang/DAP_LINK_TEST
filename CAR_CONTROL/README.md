@@ -12,15 +12,15 @@ reference sources only; they are not copied wholesale into this target.
   - channel A: `PA29 -> AIN1`, `PA30 -> AIN2`
   - channel B: `PA23 -> BIN1`, `PA24 -> BIN2`
 - TIMG6 provides 20 kHz PWM for motor A, and TIMG7 provides 20 kHz PWM for
-  motor B. Both channels are enabled only during the supervised dual-motor
-  test.
+  motor B. Both channels are enabled only during a supervised motion mode.
 - All four motor pins return to high impedance at startup, on a second PB21
-  press, after the supervised test lease expires, and on every emergency stop.
+  press, after the speed-command lease expires, at the test endpoint, and on
+  every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. Pressing PB21 once starts both motors under one supervisor lease.
-  Both motors use the same 500 ms ramp and time base so they start together,
-  target 70%, stop automatically at 3 seconds, and stop immediately if PB21 is
-  pressed again.
+  wheel. The active firmware is a suspended-wheel speed-loop test: PB21 starts
+  a 1 second target ramp to 3500 pps, both PI outputs are capped at 700
+  permille, and the test returns to high impedance after 5 seconds. Pressing
+  PB21 again stops immediately.
 - Motor B drive polarity is inverted at the board configuration layer so a
   positive command produces forward motion and positive E1 feedback, matching
   motor A/E0. This sign was confirmed in the powered right-wheel retest.
@@ -31,10 +31,12 @@ reference sources only; they are not copied wholesale into this target.
   calibration established 1060 quadrature counts per wheel revolution.
 - Reset cause, control mode, block reason, and motor-safe state are visible on
   the LCD and as debugger globals.
+- UART3 provides detached speed-loop tuning at 9600 baud: PA26 is MCU TX and
+  PA25 is MCU RX. Applying parameters does not start either motor.
 
-The supervisor already defines future modes for open-loop, speed, position,
-yaw, and line tracking, but every non-idle request is blocked until its hardware
-bring-up milestone is explicitly enabled.
+The supervisor currently enables guarded open-loop and speed modes. Position,
+yaw, and line tracking requests remain blocked until their hardware and inner
+control dependencies are verified.
 
 ## Reusable wheel-drive API
 
@@ -53,8 +55,43 @@ failed command zeros both wheels. The caller must still pass non-OK results to
 `ControlSupervisor_EmergencyStop` to restore hardware high impedance.
 
 Application and control modules must not call `AT8236_MotorSetCommand` or
-`MotorPwm_SetDuty` directly. The open-loop bring-up test now uses the same
-wheel-drive API that the future speed loop will use.
+`MotorPwm_SetDuty` directly. Both open-loop diagnostics and the speed controller
+use this wheel-drive API.
+
+## Reusable speed-control API
+
+`control/wheel_speed_control.h` owns the two 50 ms PI loops:
+
+```c
+WheelSpeedControl_Start(now_ms);
+WheelSpeedControl_SetTunings(&tunings);
+WheelSpeedControl_SetTargets(left_pps, right_pps);
+WheelSpeedControl_Task(now_ms);
+WheelSpeedControl_Stop(reason);
+WheelSpeedControl_GetSnapshot(&snapshot);
+```
+
+Targets are encoder pulses per second and are limited to `-6000..6000`. A
+successful update submits both PWM commands together and refreshes a 200 ms
+supervisor lease. Invalid targets, encoder access failure, output failure, or a
+stale lease return the board to high impedance.
+
+## Bluetooth speed tuner
+
+`tools/speed_tuner/Launch-SpeedTuner.cmd` opens the Windows GUI. Connect a
+3.3 V compatible Bluetooth UART module as follows:
+
+```text
+PA26 / UART3 TX -> Bluetooth RX
+PA25 / UART3 RX <- Bluetooth TX
+GND             -- common GND
+```
+
+The tool reads and atomically applies symmetric Kp/Ki/Kd, target speed, and
+output limit values held in RAM. It can start or stop the supervised five
+second speed test and displays both measured speeds, outputs, invalid encoder
+transitions, result code, and final high-impedance state. A reset restores the
+compiled defaults.
 
 ## Build and flash
 
@@ -87,12 +124,16 @@ g_car_encoder_1_count
 g_car_encoder_1_speed_pps
 g_car_encoder_1_edges
 g_car_encoder_1_invalid
-g_car_motor_test_state
-g_car_motor_test_command
-g_car_motor_test_command_a
-g_car_motor_test_command_b
-g_car_motor_test_run_count
-g_car_motor_test_channel
+g_car_speed_test_state
+g_car_speed_test_run_count
+g_car_speed_left_target_pps
+g_car_speed_right_target_pps
+g_car_speed_left_error_pps
+g_car_speed_right_error_pps
+g_car_speed_left_output_permille
+g_car_speed_right_output_permille
+g_car_speed_update_count
+g_car_speed_last_result
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
 ```

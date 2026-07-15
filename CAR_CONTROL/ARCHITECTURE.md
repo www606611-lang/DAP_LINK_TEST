@@ -2,7 +2,10 @@
 
 ```text
 app/main
+  -> app/speed_bringup_test
+  -> app/speed_tuning_console -> drivers/mcu/bluetooth_uart
   -> control/control_supervisor
+  -> control/wheel_speed_control -> bsp/board_wheel_drive
   -> diagnostics/reset_diagnostics
   -> bsp/board_button
   -> bsp/board_motor_safe
@@ -12,8 +15,8 @@ app/main
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
 
-future control loops
-  -> speed loop
+control cascade
+  -> speed loop -> board wheel drive
   -> position loop -> speed loop
   -> yaw loop -> speed loop
   -> line loop -> speed loop
@@ -26,12 +29,14 @@ future control loops
 - `bsp`: board wiring, physical channel names, safe pin states, and the public
   left/right wheel-drive API. It owns A/B mapping and board polarity.
 - `control`: reusable PID and mutually exclusive motion modes.
+  `wheel_speed_control` owns the verified-unit left/right inner loops.
 - `diagnostics`: reset and first-fault evidence without initiating a second
   software reset.
 - `drivers/device`: external devices such as ST7789 and the current AT8236
   dual-channel command layer. ICM20948 and line sensors remain future work.
-- `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture and shared TIMG6/
-  TIMG7 motor PWM output. I2C, UART, and CAN remain future work.
+- `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
+  motor PWM output, and UART3 interrupt-RX/nonblocking-TX transport. I2C and CAN
+  remain future work.
 - `app`: scheduling, display, commands, and mode transitions.
 
 ## Integration gates
@@ -49,7 +54,10 @@ future control loops
    and reset behavior. Ten consecutive tests completed without reset.
 6. Wheel-drive API: promote left/right forward-positive commands into BSP,
    migrate the open-loop test to it, and repeat the bench test before reuse.
-7. Speed loop: migrate the tuned loop through the new motor/encoder APIs.
+   The regression passed and was committed as `3be24c2`.
+7. Speed loop: the 50 ms, pps-based dual PI API and supervised bench test are
+   implemented. Runtime tuning over Bluetooth UART3 is available; tuning and
+   the UART link still require the suspended-wheel bench test.
 8. Position loop: cascade position output into the verified speed loop.
 9. Yaw loop: IMU validation, then yaw output into the speed loop.
 10. Line tracking: line sensor validation, then steering correction into the

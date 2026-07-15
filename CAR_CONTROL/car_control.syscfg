@@ -13,6 +13,8 @@ const MOTOR_A_PWM   = PWM.addInstance();
 const MOTOR_B_PWM   = PWM.addInstance();
 const SPI           = scripting.addModule("/ti/driverlib/SPI", {}, false);
 const SPI_LCD       = SPI.addInstance();
+const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
+const BLUETOOTH_UART = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
 const SYSTICK       = scripting.addModule("/ti/driverlib/SYSTICK");
 const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
@@ -141,6 +143,24 @@ SPI_LCD.DMA_CHANNEL_EVENT2.dstLength          = "BYTE";
 SPI_LCD.DMA_CHANNEL_EVENT2.srcLength          = "BYTE";
 SPI_LCD.DMA_CHANNEL_EVENT2.addressMode        = "b2f";
 SPI_LCD.DMA_CHANNEL_EVENT2.peripheral.$assign = "DMA_CH2";
+
+BLUETOOTH_UART.$name                            = "BLUETOOTH_UART";
+BLUETOOTH_UART.targetBaudRate                   = 9600;
+BLUETOOTH_UART.enableFIFO                       = true;
+BLUETOOTH_UART.rxFifoThreshold                  = "DL_UART_RX_FIFO_LEVEL_ONE_ENTRY";
+BLUETOOTH_UART.enabledInterrupts                = ["RX"];
+BLUETOOTH_UART.peripheral.$assign               = "UART3";
+BLUETOOTH_UART.peripheral.rxPin.$assign         = "PA25";
+BLUETOOTH_UART.peripheral.txPin.$assign         = "PA26";
+BLUETOOTH_UART.txPinConfig.direction            = scripting.forceWrite("OUTPUT");
+BLUETOOTH_UART.txPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+BLUETOOTH_UART.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+BLUETOOTH_UART.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+BLUETOOTH_UART.txPinConfig.$name                = "BLUETOOTH_UART_TX_PIN";
+BLUETOOTH_UART.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+BLUETOOTH_UART.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+BLUETOOTH_UART.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+BLUETOOTH_UART.rxPinConfig.$name                = "BLUETOOTH_UART_RX_PIN";
 
 SYSCTL.clockTreeEn = true;
 

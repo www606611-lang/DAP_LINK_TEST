@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #define CONTROL_SUPERVISOR_OPEN_LOOP_MAX_MS 3500U
+#define CONTROL_SUPERVISOR_SPEED_LEASE_MS     200U
 
 typedef enum {
     CAR_CONTROL_MODE_SAFE_IDLE = 0,
@@ -42,6 +43,10 @@ void ControlSupervisor_Task(uint32_t now_ms);
 void ControlSupervisor_EmergencyStop(car_control_block_reason_t reason);
 car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
     car_control_motor_t motor, uint32_t now_ms, uint32_t duration_ms);
+car_control_request_result_t ControlSupervisor_BeginSpeedControl(
+    uint32_t now_ms);
+car_control_request_result_t ControlSupervisor_RefreshSpeedControl(
+    uint32_t now_ms);
 
 car_control_request_result_t ControlSupervisor_RequestMode(
     car_control_mode_t mode);

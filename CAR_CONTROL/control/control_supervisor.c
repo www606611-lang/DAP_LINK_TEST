@@ -6,7 +6,7 @@
 static car_control_mode_t g_mode;
 static car_control_block_reason_t g_block_reason;
 static bool g_reset_locked;
-static uint32_t g_open_loop_deadline_ms;
+static uint32_t g_mode_deadline_ms;
 
 static bool control_supervisor_deadline_reached(
     uint32_t now_ms, uint32_t deadline_ms);
@@ -17,7 +17,7 @@ void ControlSupervisor_Init(bool suspicious_reset)
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
     g_reset_locked = suspicious_reset;
-    g_open_loop_deadline_ms = 0U;
+    g_mode_deadline_ms = 0U;
     g_block_reason = suspicious_reset ?
         CAR_CONTROL_BLOCK_SUSPICIOUS_RESET :
         CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED;
@@ -25,15 +25,20 @@ void ControlSupervisor_Init(bool suspicious_reset)
 
 void ControlSupervisor_Task(uint32_t now_ms)
 {
-    if ((g_mode == CAR_CONTROL_MODE_OPEN_LOOP) &&
+    if (((g_mode == CAR_CONTROL_MODE_OPEN_LOOP) ||
+            (g_mode == CAR_CONTROL_MODE_SPEED)) &&
         control_supervisor_deadline_reached(
-            now_ms, g_open_loop_deadline_ms)) {
-        ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_TEST_COMPLETE);
+            now_ms, g_mode_deadline_ms)) {
+        ControlSupervisor_EmergencyStop(
+            (g_mode == CAR_CONTROL_MODE_OPEN_LOOP) ?
+                CAR_CONTROL_BLOCK_TEST_COMPLETE :
+                CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return;
     }
 
     if ((g_mode != CAR_CONTROL_MODE_SAFE_IDLE) &&
-        (g_mode != CAR_CONTROL_MODE_OPEN_LOOP)) {
+        (g_mode != CAR_CONTROL_MODE_OPEN_LOOP) &&
+        (g_mode != CAR_CONTROL_MODE_SPEED)) {
         ControlSupervisor_EmergencyStop(
             CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED);
     }
@@ -45,7 +50,7 @@ void ControlSupervisor_EmergencyStop(car_control_block_reason_t reason)
     BoardMotorSafe_EmergencyStop();
     g_mode = CAR_CONTROL_MODE_SAFE_IDLE;
     g_block_reason = reason;
-    g_open_loop_deadline_ms = 0U;
+    g_mode_deadline_ms = 0U;
 }
 
 car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
@@ -76,7 +81,38 @@ car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
 
     g_mode = CAR_CONTROL_MODE_OPEN_LOOP;
     g_block_reason = CAR_CONTROL_BLOCK_NONE;
-    g_open_loop_deadline_ms = now_ms + duration_ms;
+    g_mode_deadline_ms = now_ms + duration_ms;
+    return CAR_CONTROL_REQUEST_OK;
+}
+
+car_control_request_result_t ControlSupervisor_BeginSpeedControl(
+    uint32_t now_ms)
+{
+    if (g_reset_locked ||
+        (g_mode != CAR_CONTROL_MODE_SAFE_IDLE)) {
+        return CAR_CONTROL_REQUEST_BLOCKED;
+    }
+
+    if (!BoardMotorSafe_Arm(BOARD_MOTOR_CHANNEL_BOTH)) {
+        ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_EMERGENCY_STOP);
+        return CAR_CONTROL_REQUEST_BLOCKED;
+    }
+    BoardWheelDrive_SetZero();
+
+    g_mode = CAR_CONTROL_MODE_SPEED;
+    g_block_reason = CAR_CONTROL_BLOCK_NONE;
+    g_mode_deadline_ms = now_ms + CONTROL_SUPERVISOR_SPEED_LEASE_MS;
+    return CAR_CONTROL_REQUEST_OK;
+}
+
+car_control_request_result_t ControlSupervisor_RefreshSpeedControl(
+    uint32_t now_ms)
+{
+    if (g_mode != CAR_CONTROL_MODE_SPEED) {
+        return CAR_CONTROL_REQUEST_BLOCKED;
+    }
+
+    g_mode_deadline_ms = now_ms + CONTROL_SUPERVISOR_SPEED_LEASE_MS;
     return CAR_CONTROL_REQUEST_OK;
 }
 

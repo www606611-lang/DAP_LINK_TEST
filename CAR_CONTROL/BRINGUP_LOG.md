@@ -264,17 +264,128 @@ AT8236 and TIMG6/TIMG7 functions remain internal driver details. Emergency stop
 zeros the public command state before disabling both PWM peripherals and
 returning all four motor pins to high impedance.
 
-This is a structural API migration over the already verified drive path. One
-dual-motor PB21 run, one operator-stop run, positive E0/E1 feedback, `INV=0/0`,
-and no reset are required before committing this milestone.
+The API regression completed normally: full-run and operator-stop paths kept
+both feedback signs positive, `INV=0/0`, high-impedance stop, and stable uptime.
+The milestone was committed and pushed as `3be24c2`.
+
+## 2026-07-15: initial supervised speed-loop firmware
+
+The active firmware now exercises the formal dual-wheel speed-control API. It
+uses the existing 50 ms encoder snapshots and preserves the previously tuned
+pps-domain gains as reference calibration:
+
+```text
+left PI(D):  Kp 0.072, Ki 0.095, Kd 0.001, integral limit +/-5000
+right PI(D): Kp 0.13,  Ki 0.48,  Kd 0.001, integral limit +/-2500
+deadband: 12 pps
+formal target range: -6000 to 6000 pps
+formal default output range: -1000 to 1000 permille
+```
+
+The first bench application adds conservative test-only limits:
+
+```text
+target: both wheels ramp 0 to 3500 pps over 1000 ms
+output cap: both wheels 700 permille
+total run time: 5000 ms
+speed-command lease: 200 ms, refreshed after each valid control update
+```
+
+The PI implementation, PB21 workflow, and display are separate modules. The
+test application only changes targets and decides when to stop; PID state,
+encoder feedback, paired output, and command-lease refresh belong to
+`WheelSpeedControl`.
+
+### Initial speed-loop bench procedure
+
+1. Suspend both wheels. Do not perform this first test on the floor because the
+   inherited left/right gains and motor dead zones may start at different times.
+2. Verify VM, 5 V, 3.3 V, VREF, common ground, and `HIGH-Z`, then press PB21.
+3. Confirm the display enters `SPEED/RUN`, both targets reach 3500, `RES` stays
+   zero, both encoder signs remain positive, and `INV` remains `0/0`.
+4. During the final two seconds, record both `V`, `E`, and `O` values. Note any
+   delayed start, output pinned at 700, oscillation, or persistent speed error.
+5. Confirm the test reaches `DONE/TEST_DONE` after 5 seconds without reset and
+   returns to `HIGH-Z`.
+6. Run again and press PB21 during motion. Both wheels must stop immediately
+   with `ABORT/USER_STOP` and stable uptime.
+
+### Inherited-tuning bench result
+
+The first speed-loop run was not acceptable. The left wheel lagged severely
+and peaked near 2000 pps. The right wheel approached the target more closely
+but oscillated. The inherited gains were intentionally not committed:
+
+```text
+left:  Kp 0.072, Ki 0.095, Kd 0.001
+right: Kp 0.13,  Ki 0.48,  Kd 0.001
+```
+
+This board and corrected PWM path require fresh identification. The next build
+uses a symmetric P-only baseline on both wheels:
+
+```text
+Kp 0.18, Ki 0, Kd 0
+target: 3500 pps
+output cap: 700 permille
+```
+
+At zero speed the proportional command is approximately 630 permille, just
+above the observed starting region. Steady-state error is expected; this test
+only compares the two wheel plants and identifies a usable proportional gain.
+
+### Symmetric P-only bench result
+
+Both wheels started and moved with similar timing, confirming that a symmetric
+baseline is appropriate for the current board. The response remained near the
+600-permille dead-zone boundary and could not continue toward the target. This
+is expected because proportional output falls as measured speed rises.
+
+The next build keeps `Kp=0.18` and `Kd=0` on both wheels and adds the same
+conservative `Ki=0.10`. With an integral limit of 5000, integral contribution
+is capped at 500 permille. No per-wheel compensation is introduced in this
+iteration.
+
+## 2026-07-15: detached Bluetooth speed tuner
+
+The current working baseline was advanced to symmetric `Kp=0.25`, `Ki=0.10`,
+and `Kd=0`. A RAM-only tuning path now avoids reflashing for every change:
+
+```text
+UART3: PA26 TX -> Bluetooth RX, PA25 RX <- Bluetooth TX
+format: 9600 8N1, matching the legacy UART3 generated configuration
+commands: spd get, spd set, spd run, spd stop, spd stat
+runtime fields: Kp, Ki, Kd, target pps, output limit permille
+```
+
+Configuration is range-checked in full before it is applied to both loops.
+Changing configuration never starts motion and is rejected while a run is
+active. PB21 operator stop, remote stop, the five-second endpoint, the 200 ms
+lease, control faults, and suspicious-reset lockout retain their existing
+high-impedance behavior. The Windows tool is in `tools/speed_tuner`.
+
+This implementation has passed the GCC build and SysConfig validation. The
+Bluetooth link and resulting motor response remain pending bench confirmation.
+
+### UART3 sustained-command correction
+
+The first Bluetooth GUI test received valid status frames mixed with repeated
+command errors. Raw-line diagnostics showed each failed `spd stat` arrived as
+hex `746174`, or only the final `tat`. The polling receiver lost the leading
+bytes while the main loop was occupied by LCD updates and the four-entry UART
+FIFO overflowed.
+
+UART3 RX now uses the one-entry FIFO interrupt threshold and a 128-byte MCU
+driver ring buffer. Parsing remains in the application task, and TX uses the
+existing nonblocking 512-byte queue. A six-second 400 ms polling stress test
+returned one valid configuration and 15 complete status frames with no command
+errors, `INV=0/0`, `RES=0`, and `HIGH-Z` throughout.
 
 ## Manual checks still required
 
-1. Press and release PB21 repeatedly. Confirm the counter changes and uptime
-   does not restart.
-2. Complete the wheel-drive API regression checks described above.
-3. Confirm the encoder supply voltage and whether A/B outputs are open-drain or
+1. Complete the initial speed-loop bench procedure above.
+2. Confirm the encoder supply voltage and whether A/B outputs are open-drain or
    push-pull before any powered motor test.
 
 Both motor-output peripherals remain disabled and high impedance until the
-supervised PB21 test is started.
+supervised PB21 speed test is started.

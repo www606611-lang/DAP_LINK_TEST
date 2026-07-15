@@ -16,8 +16,8 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | IMU I2C | PA0 SDA, PA1 SCL | Pending | Old firmware only |
 | Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
 | K230 UART | PA21 TX, PA22 RX in old firmware | Pending | Legacy firmware mapping; not enabled yet |
-| Bluetooth UART | PA25/PA26 or PA13/PA14 | Conflict | Old projects disagree; do not configure |
-| CAN | PA12/PA13 or PA26/PA27 | Conflict | Old projects disagree; do not configure |
+| Bluetooth UART3 | PA26 TX, PA25 RX | Configured; bench pending | Reuses the `DAP_LINK_TEST` mapping and generated 9600 baud setting; all Tianmengxing pins are available on the headers |
+| CAN | PA12/PA13 or PA26/PA27 | Conflict | PA26 is now reserved for Bluetooth UART3 TX; CAN remains disabled |
 
 ## Motor naming rule
 
@@ -55,7 +55,7 @@ alignment; per-wheel correction is not justified by this test.
   MCU is powered from USB/J-Link while the Buck or AT8236 VM rail is off.
 - Motor outputs must remain high impedance until the AT8236, Buck, VM, 5 V,
   3.3 V, and common-ground power-up sequence is valid.
-- The guarded dual-motor test enables both channels under one 3.2 second lease.
-  Both motors use one synchronized ramp, a second PB21 press stops both
-  immediately, and a 3 second automatic stop returns both channels to high
-  impedance.
+- The guarded speed-loop test enables both channels with a 200 ms command
+  lease. The target ramps to 3500 pps, PWM is capped at 700 permille, a second
+  PB21 press stops both immediately, and a 5 second automatic stop returns both
+  channels to high impedance.

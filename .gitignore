@@ -15,6 +15,7 @@
 /CAR_CONTROL/Debug/
 /CAR_CONTROL/DebugTiclang/
 /CAR_CONTROL/**/Event.dot
+/CAR_CONTROL/tools/speed_tuner/runtime/
 
 # clangd caches
 /DAP_LINK_TEST/.clangd/
