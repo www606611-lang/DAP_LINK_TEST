@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<?ccsproject version="1.0"?>
+<projectOptions>
+	<ccsVariant value="50:Theia-based"/>
+	<ccsVersion value="70.4.0"/>
+	<deviceFamily value="TMS470"/>
+	<connection value="common/targetdb/connections/segger_j-link_connection.xml"/>
+	<executableActions value=""/>
+	<createSlaveProjects value=""/>
+	<ignoreDefaultDeviceSettings value="true"/>
+	<ignoreDefaultCCSSettings value="true"/>
+	<templateProperties value="id=pb21_spi_lcd_test_MSPM0G3507_nortos_ticlang.projectspec.PB21_SPI_LCD_TEST,buildProfile=release,isHybrid=true"/>
+	<activeTargetConfiguration value="targetConfigs/MSPM0G3507.ccxml"/>
+	<isTargetConfigurationManual value="false"/>
+	<sourceLookupPath value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/ti/driverlib"/>
+	<origin value="C:\Users\ASUS\Desktop\mspm0_Project\PB21_SPI_LCD_TEST"/>
+	<filesToOpen value="README.md,pb21_spi_lcd_test.syscfg,app/main.c"/>
+</projectOptions>

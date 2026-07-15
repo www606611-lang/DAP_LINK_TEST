@@ -1,0 +1,30 @@
+#ifndef BSP_BOARD_RESOURCES_H
+#define BSP_BOARD_RESOURCES_H
+
+/* Confirmed from the local JLCEDA hardware audit and clean bring-up project. */
+#define BOARD_MOTOR_A_IN1_PIN_NAME    "PA29"
+#define BOARD_MOTOR_A_IN2_PIN_NAME    "PA30"
+#define BOARD_MOTOR_B_IN1_PIN_NAME    "PA23"
+#define BOARD_MOTOR_B_IN2_PIN_NAME    "PA24"
+#define BOARD_MOTOR_A_ENCODER_CHANNEL  0U
+#define BOARD_MOTOR_B_ENCODER_CHANNEL  1U
+
+#define BOARD_BUTTON_PIN_NAME         "PB21"
+
+/* Encoder channels are paired to motor A/B; wheel side remains unassigned. */
+#define BOARD_ENCODER_0_A_PIN_NAME    "PB0"
+#define BOARD_ENCODER_0_B_PIN_NAME    "PB1"
+#define BOARD_ENCODER_1_A_PIN_NAME    "PB2"
+#define BOARD_ENCODER_1_B_PIN_NAME    "PB3"
+#define BOARD_ENCODER_0_FORWARD_INVERTED  1
+#define BOARD_ENCODER_1_FORWARD_INVERTED  0
+#define BOARD_ENCODER_COUNTS_PER_WHEEL_REV  1060U
+
+#define BOARD_LCD_MOSI_PIN_NAME       "PB8"
+#define BOARD_LCD_SCLK_PIN_NAME       "PB9"
+#define BOARD_LCD_RESET_PIN_NAME      "PB10"
+#define BOARD_LCD_DC_PIN_NAME         "PB11"
+#define BOARD_LCD_CS_PIN_NAME         "PB14"
+#define BOARD_LCD_BACKLIGHT_PIN_NAME  "PB26"
+
+#endif

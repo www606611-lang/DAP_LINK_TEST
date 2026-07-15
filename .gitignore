@@ -9,6 +9,12 @@
 /DIANSAI_MOTOR_DRIVER_BOARD/Debug/
 /DIANSAI_MOTOR_DRIVER_BOARD/DebugTiclang/
 /DIANSAI_MOTOR_DRIVER_BOARD/**/Event.dot
+/PB21_SPI_LCD_TEST/Debug/
+/PB21_SPI_LCD_TEST/DebugTiclang/
+/PB21_SPI_LCD_TEST/**/Event.dot
+/CAR_CONTROL/Debug/
+/CAR_CONTROL/DebugTiclang/
+/CAR_CONTROL/**/Event.dot
 
 # clangd caches
 /DAP_LINK_TEST/.clangd/

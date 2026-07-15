@@ -29,7 +29,51 @@
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Flash (OpenOCD + DAPLink)",
+      "label": "Build Target (GCC)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build-gcc",
+        "--target",
+        "car_control",
+        "-j"
+      ],
+      "dependsOn": "Configure (GCC)",
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Flash (J-Link)",
+      "type": "process",
+      "command": "${env:USERPROFILE}/SEGGER/JLink/JLink.exe",
+      "args": [
+        "-NoGui",
+        "1",
+        "-CommandFile",
+        "${workspaceFolder}/CAR_CONTROL/tools/flash_gcc.jlink"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build + Flash (J-Link)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Build Target (GCC)",
+        "Flash (J-Link)"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash CAR_CONTROL (OpenOCD + DAPLink)",
       "type": "shell",
       "command": "${config:mspm0.openocdPath}",
       "args": [
@@ -38,9 +82,9 @@
         "-f",
         "${workspaceFolder}/DAP_LINK_TEST/openocd/daplink_ti_mspm0.cfg",
         "-c",
-        "program {${workspaceFolder}/build-gcc/DAP_LINK_TEST/dap_link_test.elf} verify reset exit"
+        "program {${workspaceFolder}/build-gcc/CAR_CONTROL/car_control.elf} verify reset exit"
       ],
-      "dependsOn": "Build (GCC)",
+      "dependsOn": "Build Target (GCC)",
       "problemMatcher": []
     }
   ]

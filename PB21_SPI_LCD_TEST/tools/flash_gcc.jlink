@@ -1,0 +1,17 @@
+device MSPM0G3507
+if SWD
+speed 100
+EoE 0
+connect
+connect
+connect
+connect
+connect
+EoE 1
+r
+h
+erase 0x00000000, 0x0001FFFF
+loadfile build-gcc/PB21_SPI_LCD_TEST/pb21_spi_lcd_test.elf
+r
+g
+exit
