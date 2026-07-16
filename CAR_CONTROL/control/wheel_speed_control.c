@@ -23,6 +23,9 @@ static wheel_speed_control_snapshot_t g_snapshot;
 static uint16_t g_left_output_limit;
 static uint16_t g_right_output_limit;
 static uint32_t g_last_update_ms;
+static uint32_t g_last_command_ms;
+static uint32_t g_command_deadline_ms;
+static car_control_mode_t g_owner_mode;
 static float g_left_requested_pps;
 static float g_right_requested_pps;
 
@@ -34,9 +37,12 @@ static int16_t wheel_speed_control_round_output(float output);
 static float wheel_speed_control_slew_target(
     float current, float requested, float max_delta);
 static bool wheel_speed_control_crossed_zero(float previous, float current);
+static bool wheel_speed_control_deadline_reached(
+    uint32_t now_ms, uint32_t deadline_ms);
 static void wheel_speed_control_reset_pid_state(void);
 static void wheel_speed_control_deactivate(void);
-static void wheel_speed_control_fault(wheel_speed_control_result_t result);
+static void wheel_speed_control_fault(wheel_speed_control_result_t result,
+    car_control_block_reason_t reason);
 
 void WheelSpeedControl_Init(uint32_t now_ms)
 {
@@ -72,11 +78,16 @@ void WheelSpeedControl_Init(uint32_t now_ms)
     g_snapshot.left_output_permille = 0;
     g_snapshot.right_output_permille = 0;
     g_snapshot.update_count = 0U;
+    g_snapshot.command_age_ms = 0U;
     g_snapshot.last_result = WHEEL_SPEED_CONTROL_OK;
+    g_snapshot.owner_mode = CAR_CONTROL_MODE_SPEED;
     g_snapshot.running = false;
+    g_owner_mode = CAR_CONTROL_MODE_SPEED;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
     g_last_update_ms = now_ms;
+    g_last_command_ms = now_ms;
+    g_command_deadline_ms = now_ms;
 }
 
 bool WheelSpeedControl_TuningsAreValid(
@@ -128,10 +139,26 @@ bool WheelSpeedControl_GetTunings(
 
 wheel_speed_control_result_t WheelSpeedControl_Start(uint32_t now_ms)
 {
-    if (g_snapshot.running) {
-        return WHEEL_SPEED_CONTROL_OK;
+    return WheelSpeedControl_StartForMode(
+        CAR_CONTROL_MODE_SPEED, now_ms);
+}
+
+wheel_speed_control_result_t WheelSpeedControl_StartForMode(
+    car_control_mode_t owner_mode, uint32_t now_ms)
+{
+    if (!ControlSupervisor_ModeCanOwnSpeedControl(owner_mode)) {
+        g_snapshot.last_result = WHEEL_SPEED_CONTROL_BAD_OWNER;
+        return g_snapshot.last_result;
     }
-    if (ControlSupervisor_BeginSpeedControl(now_ms) !=
+    if (g_snapshot.running) {
+        if ((g_owner_mode == owner_mode) &&
+            (ControlSupervisor_GetMode() == owner_mode)) {
+            return WHEEL_SPEED_CONTROL_OK;
+        }
+        g_snapshot.last_result = WHEEL_SPEED_CONTROL_BUSY;
+        return g_snapshot.last_result;
+    }
+    if (ControlSupervisor_BeginClosedLoop(owner_mode, now_ms) !=
         CAR_CONTROL_REQUEST_OK) {
         g_snapshot.last_result =
             WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED;
@@ -148,29 +175,46 @@ wheel_speed_control_result_t WheelSpeedControl_Start(uint32_t now_ms)
     g_snapshot.left_output_permille = 0;
     g_snapshot.right_output_permille = 0;
     g_snapshot.update_count = 0U;
+    g_snapshot.command_age_ms = 0U;
     g_snapshot.last_result = WHEEL_SPEED_CONTROL_OK;
+    g_snapshot.owner_mode = owner_mode;
     g_snapshot.running = true;
+    g_owner_mode = owner_mode;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
     g_last_update_ms = now_ms;
+    g_last_command_ms = now_ms;
+    g_command_deadline_ms = now_ms +
+        WHEEL_SPEED_CONTROL_COMMAND_LEASE_MS;
     return WHEEL_SPEED_CONTROL_OK;
 }
 
 wheel_speed_control_result_t WheelSpeedControl_SetTargets(
-    float left_pps, float right_pps)
+    float left_pps, float right_pps, uint32_t now_ms)
 {
     if (!g_snapshot.running) {
         g_snapshot.last_result = WHEEL_SPEED_CONTROL_NOT_RUNNING;
         return g_snapshot.last_result;
     }
+    if (ControlSupervisor_GetMode() != g_owner_mode) {
+        wheel_speed_control_fault(
+            WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
+        return WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED;
+    }
     if (!wheel_speed_control_target_is_valid(left_pps) ||
         !wheel_speed_control_target_is_valid(right_pps)) {
-        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_BAD_TARGET);
+        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_BAD_TARGET,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return WHEEL_SPEED_CONTROL_BAD_TARGET;
     }
 
     g_left_requested_pps = left_pps;
     g_right_requested_pps = right_pps;
+    g_last_command_ms = now_ms;
+    g_command_deadline_ms = now_ms +
+        WHEEL_SPEED_CONTROL_COMMAND_LEASE_MS;
+    g_snapshot.command_age_ms = 0U;
     if ((left_pps == 0.0f) && (right_pps == 0.0f)) {
         g_snapshot.left_target_pps = 0.0f;
         g_snapshot.right_target_pps = 0.0f;
@@ -179,7 +223,9 @@ wheel_speed_control_result_t WheelSpeedControl_SetTargets(
         g_snapshot.right_output_permille = 0;
         if (BoardWheelDrive_SetCommands(0, 0) !=
             BOARD_WHEEL_DRIVE_OK) {
-            wheel_speed_control_fault(WHEEL_SPEED_CONTROL_OUTPUT_ERROR);
+            wheel_speed_control_fault(
+                WHEEL_SPEED_CONTROL_OUTPUT_ERROR,
+                CAR_CONTROL_BLOCK_EMERGENCY_STOP);
             return WHEEL_SPEED_CONTROL_OUTPUT_ERROR;
         }
     }
@@ -224,10 +270,18 @@ void WheelSpeedControl_Task(uint32_t now_ms)
     if (!g_snapshot.running) {
         return;
     }
-    if (ControlSupervisor_GetMode() != CAR_CONTROL_MODE_SPEED) {
-        g_snapshot.last_result =
-            WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED;
-        wheel_speed_control_deactivate();
+    g_snapshot.command_age_ms = now_ms - g_last_command_ms;
+    if (wheel_speed_control_deadline_reached(
+            now_ms, g_command_deadline_ms)) {
+        wheel_speed_control_fault(
+            WHEEL_SPEED_CONTROL_COMMAND_TIMEOUT,
+            CAR_CONTROL_BLOCK_COMMAND_TIMEOUT);
+        return;
+    }
+    if (ControlSupervisor_GetMode() != g_owner_mode) {
+        wheel_speed_control_fault(
+            WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return;
     }
 
@@ -237,7 +291,8 @@ void WheelSpeedControl_Task(uint32_t now_ms)
     }
     if (!EncoderInput_GetSnapshot(ENCODER_INPUT_0, &left_encoder) ||
         !EncoderInput_GetSnapshot(ENCODER_INPUT_1, &right_encoder)) {
-        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_ENCODER_ERROR);
+        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_ENCODER_ERROR,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return;
     }
 
@@ -281,13 +336,15 @@ void WheelSpeedControl_Task(uint32_t now_ms)
     if (BoardWheelDrive_SetCommands(
             g_snapshot.left_output_permille,
             g_snapshot.right_output_permille) != BOARD_WHEEL_DRIVE_OK) {
-        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_OUTPUT_ERROR);
+        wheel_speed_control_fault(WHEEL_SPEED_CONTROL_OUTPUT_ERROR,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return;
     }
-    if (ControlSupervisor_RefreshSpeedControl(now_ms) !=
+    if (ControlSupervisor_RefreshClosedLoop(g_owner_mode, now_ms) !=
         CAR_CONTROL_REQUEST_OK) {
         wheel_speed_control_fault(
-            WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED);
+            WHEEL_SPEED_CONTROL_SUPERVISOR_BLOCKED,
+            CAR_CONTROL_BLOCK_EMERGENCY_STOP);
         return;
     }
 
@@ -377,6 +434,12 @@ static bool wheel_speed_control_crossed_zero(float previous, float current)
         ((previous < 0.0f) && (current >= 0.0f));
 }
 
+static bool wheel_speed_control_deadline_reached(
+    uint32_t now_ms, uint32_t deadline_ms)
+{
+    return ((int32_t) (now_ms - deadline_ms) >= 0);
+}
+
 static void wheel_speed_control_reset_pid_state(void)
 {
     PID_Reset(&g_left_pid);
@@ -394,13 +457,15 @@ static void wheel_speed_control_deactivate(void)
     g_snapshot.right_output_permille = 0;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
+    g_command_deadline_ms = 0U;
     wheel_speed_control_reset_pid_state();
     BoardWheelDrive_SetZero();
 }
 
-static void wheel_speed_control_fault(wheel_speed_control_result_t result)
+static void wheel_speed_control_fault(wheel_speed_control_result_t result,
+    car_control_block_reason_t reason)
 {
     wheel_speed_control_deactivate();
     g_snapshot.last_result = result;
-    ControlSupervisor_EmergencyStop(CAR_CONTROL_BLOCK_EMERGENCY_STOP);
+    ControlSupervisor_EmergencyStop(reason);
 }

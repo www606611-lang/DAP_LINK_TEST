@@ -10,6 +10,8 @@
 #define SPEED_BRINGUP_STEP_RUN_MS         7000U
 #define SPEED_BRINGUP_REVERSE_RUN_MS      9000U
 #define SPEED_BRINGUP_SWEEP_RUN_MS       11000U
+#define SPEED_BRINGUP_LEASE_RUN_MS         3000U
+#define SPEED_BRINGUP_LEASE_STALE_MS       1500U
 #define SPEED_BRINGUP_DEFAULT_TARGET_PPS   3500.0f
 #define SPEED_BRINGUP_DEFAULT_OUTPUT_LIMIT  650U
 
@@ -31,6 +33,8 @@ static uint32_t speed_bringup_profile_duration_ms(
     speed_bringup_profile_t profile);
 static float speed_bringup_profile_target(
     speed_bringup_profile_t profile, uint32_t elapsed_ms);
+static car_control_mode_t speed_bringup_profile_owner(
+    speed_bringup_profile_t profile);
 
 void SpeedBringupTest_Init(bool reset_locked)
 {
@@ -93,9 +97,26 @@ void SpeedBringupTest_Task(uint32_t now_ms, bool press_event)
                 return;
             }
 
-            if (!WheelSpeedControl_GetSnapshot(&snapshot) ||
-                !snapshot.running ||
-                (ControlSupervisor_GetMode() != CAR_CONTROL_MODE_SPEED)) {
+            if (!WheelSpeedControl_GetSnapshot(&snapshot)) {
+                g_state = SPEED_BRINGUP_TEST_ABORTED;
+                return;
+            }
+            if (!snapshot.running) {
+                if ((g_active_profile ==
+                        SPEED_BRINGUP_PROFILE_LEASE_TEST) &&
+                    (snapshot.last_result ==
+                        WHEEL_SPEED_CONTROL_COMMAND_TIMEOUT) &&
+                    (ControlSupervisor_GetBlockReason() ==
+                        CAR_CONTROL_BLOCK_COMMAND_TIMEOUT)) {
+                    g_state = SPEED_BRINGUP_TEST_COMPLETE;
+                } else {
+                    g_state = SPEED_BRINGUP_TEST_ABORTED;
+                }
+                return;
+            }
+            if ((snapshot.owner_mode !=
+                    speed_bringup_profile_owner(g_active_profile)) ||
+                (ControlSupervisor_GetMode() != snapshot.owner_mode)) {
                 g_state = SPEED_BRINGUP_TEST_ABORTED;
                 return;
             }
@@ -111,7 +132,14 @@ void SpeedBringupTest_Task(uint32_t now_ms, bool press_event)
             target_pps = speed_bringup_profile_target(
                 g_active_profile, elapsed_ms);
 
-            if (WheelSpeedControl_SetTargets(target_pps, target_pps) !=
+            if ((g_active_profile ==
+                    SPEED_BRINGUP_PROFILE_LEASE_TEST) &&
+                (elapsed_ms >= SPEED_BRINGUP_LEASE_STALE_MS)) {
+                return;
+            }
+
+            if (WheelSpeedControl_SetTargets(
+                    target_pps, target_pps, now_ms) !=
                 WHEEL_SPEED_CONTROL_OK) {
                 g_state = SPEED_BRINGUP_TEST_ABORTED;
             }
@@ -220,6 +248,8 @@ const char *SpeedBringupTest_GetProfileText(void)
             return "REV";
         case SPEED_BRINGUP_PROFILE_SWEEP:
             return "SWEEP";
+        case SPEED_BRINGUP_PROFILE_LEASE_TEST:
+            return "LEASE";
         default:
             return "UNKNOWN";
     }
@@ -233,6 +263,8 @@ uint32_t SpeedBringupTest_GetRunCount(void)
 static void speed_bringup_start(
     uint32_t now_ms, speed_bringup_profile_t profile)
 {
+    car_control_mode_t owner_mode;
+
     if (!speed_bringup_profile_is_valid(profile)) {
         g_state = SPEED_BRINGUP_TEST_ABORTED;
         return;
@@ -245,11 +277,13 @@ static void speed_bringup_start(
     }
 
     EncoderInput_ResetAll();
-    if (WheelSpeedControl_Start(now_ms) != WHEEL_SPEED_CONTROL_OK) {
+    owner_mode = speed_bringup_profile_owner(profile);
+    if (WheelSpeedControl_StartForMode(owner_mode, now_ms) !=
+        WHEEL_SPEED_CONTROL_OK) {
         g_state = SPEED_BRINGUP_TEST_ABORTED;
         return;
     }
-    if (WheelSpeedControl_SetTargets(0.0f, 0.0f) !=
+    if (WheelSpeedControl_SetTargets(0.0f, 0.0f, now_ms) !=
         WHEEL_SPEED_CONTROL_OK) {
         g_state = SPEED_BRINGUP_TEST_ABORTED;
         return;
@@ -270,7 +304,7 @@ static void speed_bringup_stop(car_control_block_reason_t reason,
 
 static bool speed_bringup_profile_is_valid(speed_bringup_profile_t profile)
 {
-    return profile <= SPEED_BRINGUP_PROFILE_SWEEP;
+    return profile <= SPEED_BRINGUP_PROFILE_LEASE_TEST;
 }
 
 static uint32_t speed_bringup_profile_duration_ms(
@@ -283,6 +317,8 @@ static uint32_t speed_bringup_profile_duration_ms(
             return SPEED_BRINGUP_REVERSE_RUN_MS;
         case SPEED_BRINGUP_PROFILE_SWEEP:
             return SPEED_BRINGUP_SWEEP_RUN_MS;
+        case SPEED_BRINGUP_PROFILE_LEASE_TEST:
+            return SPEED_BRINGUP_LEASE_RUN_MS;
         case SPEED_BRINGUP_PROFILE_RAMP:
         default:
             return SPEED_BRINGUP_RUN_MS;
@@ -357,6 +393,13 @@ static float speed_bringup_profile_target(
                 (float) (SPEED_BRINGUP_SWEEP_RUN_MS - elapsed_ms) /
                 1000.0f;
 
+        case SPEED_BRINGUP_PROFILE_LEASE_TEST:
+            target *= 0.5f;
+            if (elapsed_ms < 1000U) {
+                return target * (float) elapsed_ms / 1000.0f;
+            }
+            return target;
+
         case SPEED_BRINGUP_PROFILE_RAMP:
         default:
             if (elapsed_ms < SPEED_BRINGUP_RAMP_MS) {
@@ -365,4 +408,11 @@ static float speed_bringup_profile_target(
             }
             return target;
     }
+}
+
+static car_control_mode_t speed_bringup_profile_owner(
+    speed_bringup_profile_t profile)
+{
+    return (profile == SPEED_BRINGUP_PROFILE_LEASE_TEST) ?
+        CAR_CONTROL_MODE_YAW : CAR_CONTROL_MODE_SPEED;
 }

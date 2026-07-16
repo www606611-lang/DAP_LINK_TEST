@@ -18,7 +18,7 @@ reference sources only; they are not copied wholesale into this target.
   every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
   wheel. The active firmware is a suspended-wheel speed-loop test: PB21 starts
-  a 1 second target ramp to 3500 pps, both PI outputs are capped at 700
+  a 1 second target ramp to 3500 pps, both PI outputs are capped at 650
   permille, and the test returns to high impedance after 5 seconds. Pressing
   PB21 again stops immediately.
 - Motor B drive polarity is inverted at the board configuration layer so a
@@ -34,9 +34,9 @@ reference sources only; they are not copied wholesale into this target.
 - UART3 provides detached speed-loop tuning at 9600 baud: PA26 is MCU TX and
   PA25 is MCU RX. Applying parameters does not start either motor.
 
-The supervisor currently enables guarded open-loop and speed modes. Position,
-yaw, and line tracking requests remain blocked until their hardware and inner
-control dependencies are verified.
+Direct mode requests remain blocked. Verified outer controllers enter
+position, yaw, or line-tracking mode only through the supervised speed-loop
+owner API, so unimplemented modules cannot arm the motors by changing a mode.
 
 ## Reusable wheel-drive API
 
@@ -60,21 +60,26 @@ use this wheel-drive API.
 
 ## Reusable speed-control API
 
-`control/wheel_speed_control.h` owns the two 50 ms PI loops:
+`control/wheel_speed_control.h` owns the two 100 Hz PI loops. Encoder speed is
+updated every 10 ms through a four-sample moving average:
 
 ```c
 WheelSpeedControl_Start(now_ms);
+WheelSpeedControl_StartForMode(CAR_CONTROL_MODE_YAW, now_ms);
 WheelSpeedControl_SetTunings(&tunings);
-WheelSpeedControl_SetTargets(left_pps, right_pps);
+WheelSpeedControl_SetTargets(left_pps, right_pps, now_ms);
 WheelSpeedControl_Task(now_ms);
 WheelSpeedControl_Stop(reason);
 WheelSpeedControl_GetSnapshot(&snapshot);
 ```
 
 Targets are encoder pulses per second and are limited to `-6000..6000`. A
-successful update submits both PWM commands together and refreshes a 200 ms
-supervisor lease. Invalid targets, encoder access failure, output failure, or a
-stale lease return the board to high impedance.
+successful update submits both PWM commands together. Exactly one of `SPEED`,
+`POSITION`, `YAW`, or `LINE_TRACKING` owns the inner loop. The owner must submit
+fresh targets at least every 100 ms; the inner loop refreshes a separate 200 ms
+hardware supervisor lease only while it remains healthy. Invalid targets,
+stale outer-loop commands, encoder access failure, output failure, or ownership
+loss return the board to high impedance.
 
 ## Bluetooth speed tuner
 

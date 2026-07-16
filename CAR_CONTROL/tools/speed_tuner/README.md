@@ -57,6 +57,7 @@ powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Run
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Step
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Reverse
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Sweep -Target 6000 -Limit 750 -ApplyConfig
+powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Lease
 ```
 
 The CLI never starts a run unless `-Action Run` is explicitly selected.
@@ -70,6 +71,7 @@ spd run
 spd run step
 spd run reverse
 spd run sweep
+spd run lease
 spd stop
 spd stat
 ```
@@ -79,6 +81,9 @@ The normal ramp uses the configured target. `step` switches between 50%,
 `sweep` tests 40%, 60%, 80%, and 100% target. The wheel controller adds a
 signed board-specific feedforward term before the PID correction so low-speed
 starts do not wait for the integrator to overcome the motor dead zone.
+`lease` starts the inner speed loop under the `YAW` owner, then deliberately
+stops refreshing targets. A passing regression reaches `CMD_TIMEOUT` within
+100 ms and returns both motor channels to high impedance.
 
 The firmware also publishes a 100 ms telemetry frame:
 

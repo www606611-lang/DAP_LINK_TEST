@@ -5,7 +5,9 @@
 #include <stdint.h>
 
 #define CONTROL_SUPERVISOR_OPEN_LOOP_MAX_MS 3500U
-#define CONTROL_SUPERVISOR_SPEED_LEASE_MS     200U
+#define CONTROL_SUPERVISOR_CLOSED_LOOP_LEASE_MS 200U
+#define CONTROL_SUPERVISOR_SPEED_LEASE_MS \
+    CONTROL_SUPERVISOR_CLOSED_LOOP_LEASE_MS
 
 typedef enum {
     CAR_CONTROL_MODE_SAFE_IDLE = 0,
@@ -30,7 +32,8 @@ typedef enum {
     CAR_CONTROL_BLOCK_SUSPICIOUS_RESET,
     CAR_CONTROL_BLOCK_EMERGENCY_STOP,
     CAR_CONTROL_BLOCK_TEST_COMPLETE,
-    CAR_CONTROL_BLOCK_OPERATOR_STOP
+    CAR_CONTROL_BLOCK_OPERATOR_STOP,
+    CAR_CONTROL_BLOCK_COMMAND_TIMEOUT
 } car_control_block_reason_t;
 
 typedef enum {
@@ -47,6 +50,11 @@ car_control_request_result_t ControlSupervisor_BeginSpeedControl(
     uint32_t now_ms);
 car_control_request_result_t ControlSupervisor_RefreshSpeedControl(
     uint32_t now_ms);
+bool ControlSupervisor_ModeCanOwnSpeedControl(car_control_mode_t mode);
+car_control_request_result_t ControlSupervisor_BeginClosedLoop(
+    car_control_mode_t owner_mode, uint32_t now_ms);
+car_control_request_result_t ControlSupervisor_RefreshClosedLoop(
+    car_control_mode_t owner_mode, uint32_t now_ms);
 
 car_control_request_result_t ControlSupervisor_RequestMode(
     car_control_mode_t mode);

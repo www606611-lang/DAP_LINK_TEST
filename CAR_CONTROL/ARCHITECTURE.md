@@ -55,14 +55,16 @@ control cascade
 6. Wheel-drive API: promote left/right forward-positive commands into BSP,
    migrate the open-loop test to it, and repeat the bench test before reuse.
    The regression passed and was committed as `3be24c2`.
-7. Speed loop: the 50 ms, pps-based dual PI API and supervised bench test are
-   implemented. Runtime tuning over Bluetooth UART3 is available; tuning and
-   the UART link still require the suspended-wheel bench test.
+7. Speed loop: the 100 Hz, pps-based dual PI API, four-sample encoder-speed
+   filter, supervised bench profiles, Bluetooth tuning, and full-battery
+   regression are verified.
 8. Position loop: cascade position output into the verified speed loop.
 9. Yaw loop: IMU validation, then yaw output into the speed loop.
 10. Line tracking: line sensor validation, then steering correction into the
    speed loop.
-11. Mode arbitration: only one outer loop may own speed targets at a time.
+11. Mode arbitration: only one outer loop may own speed targets at a time. The
+    owner must refresh its target command within 100 ms; the speed loop then
+    refreshes the independent 200 ms hardware lease.
 
 Product code must submit wheel commands through `BoardWheelDrive_SetCommands`.
 Direct `AT8236_MotorSetCommand` and `MotorPwm_SetDuty` calls are internal to the

@@ -25,20 +25,22 @@ void ControlSupervisor_Init(bool suspicious_reset)
 
 void ControlSupervisor_Task(uint32_t now_ms)
 {
-    if (((g_mode == CAR_CONTROL_MODE_OPEN_LOOP) ||
-            (g_mode == CAR_CONTROL_MODE_SPEED)) &&
+    bool closed_loop_active =
+        ControlSupervisor_ModeCanOwnSpeedControl(g_mode);
+
+    if (((g_mode == CAR_CONTROL_MODE_OPEN_LOOP) || closed_loop_active) &&
         control_supervisor_deadline_reached(
             now_ms, g_mode_deadline_ms)) {
         ControlSupervisor_EmergencyStop(
             (g_mode == CAR_CONTROL_MODE_OPEN_LOOP) ?
                 CAR_CONTROL_BLOCK_TEST_COMPLETE :
-                CAR_CONTROL_BLOCK_EMERGENCY_STOP);
+                CAR_CONTROL_BLOCK_COMMAND_TIMEOUT);
         return;
     }
 
     if ((g_mode != CAR_CONTROL_MODE_SAFE_IDLE) &&
         (g_mode != CAR_CONTROL_MODE_OPEN_LOOP) &&
-        (g_mode != CAR_CONTROL_MODE_SPEED)) {
+        !closed_loop_active) {
         ControlSupervisor_EmergencyStop(
             CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED);
     }
@@ -88,7 +90,30 @@ car_control_request_result_t ControlSupervisor_BeginOpenLoopTest(
 car_control_request_result_t ControlSupervisor_BeginSpeedControl(
     uint32_t now_ms)
 {
+    return ControlSupervisor_BeginClosedLoop(
+        CAR_CONTROL_MODE_SPEED, now_ms);
+}
+
+car_control_request_result_t ControlSupervisor_RefreshSpeedControl(
+    uint32_t now_ms)
+{
+    return ControlSupervisor_RefreshClosedLoop(
+        CAR_CONTROL_MODE_SPEED, now_ms);
+}
+
+bool ControlSupervisor_ModeCanOwnSpeedControl(car_control_mode_t mode)
+{
+    return (mode == CAR_CONTROL_MODE_SPEED) ||
+        (mode == CAR_CONTROL_MODE_POSITION) ||
+        (mode == CAR_CONTROL_MODE_YAW) ||
+        (mode == CAR_CONTROL_MODE_LINE_TRACKING);
+}
+
+car_control_request_result_t ControlSupervisor_BeginClosedLoop(
+    car_control_mode_t owner_mode, uint32_t now_ms)
+{
     if (g_reset_locked ||
+        !ControlSupervisor_ModeCanOwnSpeedControl(owner_mode) ||
         (g_mode != CAR_CONTROL_MODE_SAFE_IDLE)) {
         return CAR_CONTROL_REQUEST_BLOCKED;
     }
@@ -99,20 +124,23 @@ car_control_request_result_t ControlSupervisor_BeginSpeedControl(
     }
     BoardWheelDrive_SetZero();
 
-    g_mode = CAR_CONTROL_MODE_SPEED;
+    g_mode = owner_mode;
     g_block_reason = CAR_CONTROL_BLOCK_NONE;
-    g_mode_deadline_ms = now_ms + CONTROL_SUPERVISOR_SPEED_LEASE_MS;
+    g_mode_deadline_ms = now_ms +
+        CONTROL_SUPERVISOR_CLOSED_LOOP_LEASE_MS;
     return CAR_CONTROL_REQUEST_OK;
 }
 
-car_control_request_result_t ControlSupervisor_RefreshSpeedControl(
-    uint32_t now_ms)
+car_control_request_result_t ControlSupervisor_RefreshClosedLoop(
+    car_control_mode_t owner_mode, uint32_t now_ms)
 {
-    if (g_mode != CAR_CONTROL_MODE_SPEED) {
+    if (!ControlSupervisor_ModeCanOwnSpeedControl(owner_mode) ||
+        (g_mode != owner_mode)) {
         return CAR_CONTROL_REQUEST_BLOCKED;
     }
 
-    g_mode_deadline_ms = now_ms + CONTROL_SUPERVISOR_SPEED_LEASE_MS;
+    g_mode_deadline_ms = now_ms +
+        CONTROL_SUPERVISOR_CLOSED_LOOP_LEASE_MS;
     return CAR_CONTROL_REQUEST_OK;
 }
 
@@ -176,6 +204,8 @@ const char *ControlSupervisor_GetBlockReasonText(void)
             return "TEST_DONE";
         case CAR_CONTROL_BLOCK_OPERATOR_STOP:
             return "USER_STOP";
+        case CAR_CONTROL_BLOCK_COMMAND_TIMEOUT:
+            return "CMD_TIMEOUT";
         default:
             return "UNKNOWN";
     }

@@ -129,7 +129,7 @@ static void speed_tuning_process_line(char *line)
     }
 
     BluetoothUart_WriteText(
-        "ERR command use: spd get|set|run [step|reverse|sweep]|stop|stat\r\n");
+        "ERR command use: spd get|set|run [step|reverse|sweep|lease]|stop|stat\r\n");
 }
 
 static uint16_t speed_tuning_tokenize(
@@ -229,6 +229,10 @@ static bool speed_tuning_parse_profile(
     }
     if (strcmp(text, "sweep") == 0) {
         *profile = SPEED_BRINGUP_PROFILE_SWEEP;
+        return true;
+    }
+    if (strcmp(text, "lease") == 0) {
+        *profile = SPEED_BRINGUP_PROFILE_LEASE_TEST;
         return true;
     }
     return false;

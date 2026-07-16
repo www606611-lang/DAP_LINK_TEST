@@ -130,7 +130,7 @@ function Broadcast-ControlLine([string]$line) {
 
 function Test-ControlCommand([string]$line) {
     if ($line -match '^spd (get|stop|stat)$' -or
-        $line -match '^spd run(?: (?:step|reverse|sweep))?$') {
+        $line -match '^spd run(?: (?:step|reverse|sweep|lease))?$') {
         return $true
     }
     return $line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$'

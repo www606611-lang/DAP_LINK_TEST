@@ -381,11 +381,16 @@ existing nonblocking 512-byte queue. A six-second 400 ms polling stress test
 returned one valid configuration and 15 complete status frames with no command
 errors, `INV=0/0`, `RES=0`, and `HIGH-Z` throughout.
 
-## Manual checks still required
+## 2026-07-16: verified 100 Hz speed loop and cascade contract
 
-1. Complete the initial speed-loop bench procedure above.
-2. Confirm the encoder supply voltage and whether A/B outputs are open-drain or
-   push-pull before any powered motor test.
+The final suspended-wheel regression uses symmetric `Kp=0.12`, `Ki=0.05`,
+`Kd=0`, a signed `487 + 0.031 * abs(target_pps)` feedforward term, 100 Hz PID
+updates, and a four-sample encoder-speed moving average. Step, reverse, and
+6000 pps sweep profiles completed on a full battery without reset or invalid
+encoder transitions. Stable platform peak-to-peak speed was 28 to 125 pps.
 
-Both motor-output peripherals remain disabled and high impedance until the
-supervised PB21 speed test is started.
+The reusable inner loop now records one owner mode: `SPEED`, `POSITION`, `YAW`,
+or `LINE_TRACKING`. Every target submission includes `now_ms` and renews a
+100 ms outer-command lease. The healthy inner loop independently refreshes the
+200 ms hardware lease. Ownership loss, a stale outer target, or a control fault
+stops both channels and restores high impedance.

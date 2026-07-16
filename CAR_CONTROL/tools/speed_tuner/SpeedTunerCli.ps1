@@ -2,7 +2,7 @@
 param(
     [string]$Port = "COM6",
     [ValidateSet(
-        "Get", "Set", "Run", "Step", "Reverse", "Sweep",
+        "Get", "Set", "Run", "Step", "Reverse", "Sweep", "Lease",
         "Stop", "Status")]
     [string]$Action = "Status",
     [switch]$Takeover,
@@ -132,6 +132,9 @@ function Invoke-Protocol([string]$command, [string[]]$prefixes) {
         Start-Sleep -Milliseconds 120
         Send-Line $command
         $response = Read-Expected $prefixes
+    }
+    if ($response.StartsWith("ERR ")) {
+        throw "Command '$command' was rejected: $response"
     }
     return $response
 }
@@ -269,6 +272,9 @@ try {
         }
         "Sweep" {
             $runCommand = "spd run sweep"
+        }
+        "Lease" {
+            $runCommand = "spd run lease"
         }
     }
 
