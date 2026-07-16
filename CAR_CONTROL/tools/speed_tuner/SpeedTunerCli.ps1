@@ -3,7 +3,8 @@ param(
     [string]$Port = "COM6",
     [ValidateSet(
         "Get", "Set", "Run", "Step", "Reverse", "Sweep", "Lease",
-        "Stop", "Status")]
+        "Stop", "Status", "PositionGet", "PositionSet", "PositionRun",
+        "PositionStress", "PositionStop", "PositionStatus")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -15,6 +16,11 @@ param(
     [single]$Kd = 0.0,
     [single]$Target = 3500.0,
     [uint16]$Limit = 650,
+    [single]$PositionKp = 3.0,
+    [int32]$PositionTarget = 1060,
+    [single]$PositionMaxSpeed = 2000.0,
+    [uint16]$PositionLimit = 650,
+    [uint16]$PositionTolerance = 24,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -159,6 +165,24 @@ function Get-SetCommand {
         $Limit.ToString($culture))
 }
 
+function Get-PositionSetCommand {
+    if (($PositionKp -le 0) -or ($PositionKp -gt 20) -or
+        ($PositionTarget -eq 0) -or
+        ($PositionTarget -lt -100000) -or
+        ($PositionTarget -gt 100000) -or
+        ($PositionMaxSpeed -lt 100) -or ($PositionMaxSpeed -gt 6000) -or
+        ($PositionLimit -lt 100) -or ($PositionLimit -gt 1000) -or
+        ($PositionTolerance -lt 1) -or ($PositionTolerance -gt 200)) {
+        throw "Position configuration is outside firmware range."
+    }
+    return ('pos set {0} {1} {2} {3} {4}' -f
+        $PositionKp.ToString('0.####', $culture),
+        $PositionTarget.ToString($culture),
+        $PositionMaxSpeed.ToString('0.####', $culture),
+        $PositionLimit.ToString($culture),
+        $PositionTolerance.ToString($culture))
+}
+
 function Parse-Status([string]$line) {
     $values = @{}
     foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
@@ -260,6 +284,24 @@ try {
             if ($statusLine.StartsWith("STAT ")) {
                 Save-DirectStatus (Parse-Status $statusLine) ""
             }
+        }
+        "PositionGet" {
+            [void](Invoke-Protocol "pos get" @("OK PCFG ", "ERR "))
+        }
+        "PositionSet" {
+            [void](Invoke-Protocol (Get-PositionSetCommand) @("OK PCFG ", "ERR "))
+        }
+        "PositionRun" {
+            [void](Invoke-Protocol "pos run" @("OK POS RUN SINGLE", "ERR "))
+        }
+        "PositionStress" {
+            [void](Invoke-Protocol "pos run stress" @("OK POS RUN STRESS", "ERR "))
+        }
+        "PositionStop" {
+            [void](Invoke-Protocol "pos stop" @("OK POS STOP", "ERR "))
+        }
+        "PositionStatus" {
+            [void](Invoke-Protocol "pos stat" @("PSTAT ", "ERR "))
         }
         "Run" {
             $runCommand = "spd run"

@@ -2,9 +2,11 @@
 
 ```text
 app/main
+  -> app/position_bringup_test
   -> app/speed_bringup_test
   -> app/speed_tuning_console -> drivers/mcu/bluetooth_uart
   -> control/control_supervisor
+  -> control/wheel_position_control -> control/wheel_speed_control
   -> control/wheel_speed_control -> bsp/board_wheel_drive
   -> diagnostics/reset_diagnostics
   -> bsp/board_button
@@ -58,7 +60,11 @@ control cascade
 7. Speed loop: the 100 Hz, pps-based dual PI API, four-sample encoder-speed
    filter, supervised bench profiles, Bluetooth tuning, and full-battery
    regression are verified.
-8. Position loop: cascade position output into the verified speed loop.
+8. Position loop: a 50 Hz proportional position outer loop now converts each
+   wheel's encoder-count error into a bounded speed target. One-revolution
+   forward/reverse and a 24-segment multi-distance alternating suspended-wheel
+   regression are validated. Position-specific slew and bounded stall recovery
+   handle low-speed static friction without changing the verified speed mode.
 9. Yaw loop: IMU validation, then yaw output into the speed loop.
 10. Line tracking: line sensor validation, then steering correction into the
    speed loop.

@@ -52,6 +52,7 @@ add_custom_target(car_control_syscfg
 
 add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/position_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/speed_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/speed_tuning_console.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_button.c"
@@ -59,6 +60,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_wheel_drive.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/control_supervisor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/pid.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_position_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_speed_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/diagnostics/reset_diagnostics.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/mcu/bluetooth_uart.c"

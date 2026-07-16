@@ -17,10 +17,10 @@ reference sources only; they are not copied wholesale into this target.
   press, after the speed-command lease expires, at the test endpoint, and on
   every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. The active firmware is a suspended-wheel speed-loop test: PB21 starts
-  a 1 second target ramp to 3500 pps, both PI outputs are capped at 650
-  permille, and the test returns to high impedance after 5 seconds. Pressing
-  PB21 again stops immediately.
+  wheel. PB21 now starts the initial suspended-wheel position-loop test. Both
+  wheels move forward by 1060 encoder counts, equivalent to one calibrated
+  wheel revolution, through a 50 Hz position outer loop and the verified
+  100 Hz speed inner loop. Pressing PB21 again stops immediately.
 - Motor B drive polarity is inverted at the board configuration layer so a
   positive command produces forward motion and positive E1 feedback, matching
   motor A/E0. This sign was confirmed in the powered right-wheel retest.
@@ -81,6 +81,28 @@ hardware supervisor lease only while it remains healthy. Invalid targets,
 stale outer-loop commands, encoder access failure, output failure, or ownership
 loss return the board to high impedance.
 
+## Reusable position-control API
+
+`control/wheel_position_control.h` owns the dual-wheel position outer loop:
+
+```c
+WheelPositionControl_SetConfig(&config);
+WheelPositionControl_StartRelative(left_delta, right_delta, timeout_ms, now_ms);
+WheelPositionControl_StartAbsolute(left_target, right_target, timeout_ms, now_ms);
+WheelPositionControl_Task(now_ms);
+WheelPositionControl_Stop(reason);
+WheelPositionControl_GetSnapshot(&snapshot);
+```
+
+Position uses raw quadrature counts and converts independent left/right errors
+to speed targets. The validated symmetric configuration is `Kp=3.0`, maximum
+speed `2000 pps`, tolerance `24 counts`, settle speed `120 pps`, and settle time
+`200 ms`. A completed move and every stop or fault path return both motor
+channels to high impedance. Position targets never bypass the speed inner loop.
+Position ownership uses a `4000 pps/s` speed-target slew. If a wheel remains
+below `40 pps` for 300 ms while still outside tolerance, the controller issues
+a bounded recovery request, never exceeding the configured maximum speed.
+
 ## Bluetooth speed tuner
 
 `tools/speed_tuner/Launch-SpeedTuner.cmd` opens the Windows GUI. Connect a
@@ -96,7 +118,12 @@ The tool reads and atomically applies symmetric Kp/Ki/Kd, target speed, and
 output limit values held in RAM. It can start or stop the supervised five
 second speed test and displays both measured speeds, outputs, invalid encoder
 transitions, result code, and final high-impedance state. A reset restores the
-compiled defaults.
+compiled defaults. The TCP bridge also accepts `pos get`, `pos set`, `pos run`,
+`pos run stress`, `pos stop`, and `pos stat`. The GUI has separate speed and
+position tabs with position configuration, live progress, recovery totals, and
+a 24-segment stress button. During a position run, VOFA+ receives the
+six-channel `position` group and the tool records `latest_position_wave.json`
+plus `latest_position_telemetry.csv` under `tools/speed_tuner/runtime`.
 
 ## Build and flash
 
@@ -139,6 +166,17 @@ g_car_speed_left_output_permille
 g_car_speed_right_output_permille
 g_car_speed_update_count
 g_car_speed_last_result
+g_car_position_test_state
+g_car_position_test_run_count
+g_car_position_left_target_count
+g_car_position_right_target_count
+g_car_position_left_error_count
+g_car_position_right_error_count
+g_car_position_left_speed_target_pps
+g_car_position_right_speed_target_pps
+g_car_position_update_count
+g_car_position_last_result
+g_car_position_settled
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
 ```

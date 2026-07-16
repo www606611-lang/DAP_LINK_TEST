@@ -1,7 +1,7 @@
-# CAR Speed Loop Tuner
+# CAR Control Tuner
 
-This tool changes the symmetric left/right speed-loop configuration over the
-Bluetooth UART without a J-Link debug session.
+This tool changes the speed-loop configuration and carries position-loop
+commands and telemetry over one Bluetooth UART connection.
 
 ## Wiring
 
@@ -17,9 +17,12 @@ The serial format is `9600 8N1`. The Bluetooth module's UART side must use a
 ## Run
 
 Open `Launch-SpeedTuner.cmd`, select the Bluetooth serial COM port, and connect.
-The GUI supports read, atomic apply, a five-second run, stop, live status, and
-two loopback TCP bridges. The GUI is the only process that owns the physical
-serial port.
+The GUI has separate speed-loop and position-loop tabs. The position tab edits
+Kp, relative target counts, maximum speed, output limit, and tolerance, and
+provides Run, Stress 24, and Stop controls. Its live panel shows position target,
+actual count, error, current step, completed moves, worst error, wheel speeds,
+recovery totals, invalid transitions, result, and high-impedance state. The GUI
+is the only process that owns the physical serial port.
 
 | Consumer | Connection | Data |
 | --- | --- | --- |
@@ -33,6 +36,21 @@ Configure VOFA+ with the FireWater engine and TCP client
 ```text
 L_Target,L_Speed,R_Target,R_Speed,L_Output,R_Output
 ```
+
+During a position move the firmware emits a `position` group instead:
+
+```text
+Left_Position_Target_Count
+Left_Position_Actual_Count
+Right_Position_Target_Count
+Right_Position_Actual_Count
+Left_Cascade_Speed_Target_PPS
+Right_Cascade_Speed_Target_PPS
+```
+
+The position samples are mirrored into
+`runtime/latest_position_wave.json` and
+`runtime/latest_position_telemetry.csv`.
 
 The values are stored in RAM. A reset restores the firmware defaults. Applying
 a configuration never starts the motors, and applying while a test is running
@@ -74,6 +92,13 @@ spd run sweep
 spd run lease
 spd stop
 spd stat
+
+pos get
+pos set KP TARGET_COUNTS MAX_SPEED_PPS OUTPUT_LIMIT_PERMILLE TOLERANCE_COUNTS
+pos run
+pos run stress
+pos stop
+pos stat
 ```
 
 The normal ramp uses the configured target. `step` switches between 50%,
@@ -89,7 +114,13 @@ The firmware also publishes a 100 ms telemetry frame:
 
 ```text
 wave:LEFT_TARGET,LEFT_SPEED,RIGHT_TARGET,RIGHT_SPEED,LEFT_OUTPUT,RIGHT_OUTPUT
+poswave:LEFT_TARGET_COUNT,LEFT_COUNT,RIGHT_TARGET_COUNT,RIGHT_COUNT,LEFT_SPEED_TARGET,RIGHT_SPEED_TARGET
 ```
+
+`pos run stress` executes 24 supervised moves: three repetitions of `+1`, `-1`,
+`+0.5`, `-0.5`, `+2`, `-2`, `+0.25`, and `-0.25` times the configured target.
+Every segment must settle and return to high impedance before the next begins.
+Any failed segment stops the full sequence.
 
 Accepted ranges:
 

@@ -13,7 +13,8 @@
 #define WHEEL_SPEED_DEADBAND_PPS        12.0f
 #define WHEEL_SPEED_FEEDFORWARD_OFFSET  487.0f
 #define WHEEL_SPEED_FEEDFORWARD_GAIN      0.031f
-#define WHEEL_SPEED_TARGET_SLEW_PPS_PER_S 2000.0f
+#define WHEEL_SPEED_TARGET_SLEW_PPS_PER_S          2000.0f
+#define WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S 4000.0f
 #define WHEEL_SPEED_DEFAULT_OUTPUT_MAX  1000U
 
 static pid_controller_t g_left_pid;
@@ -37,6 +38,7 @@ static int16_t wheel_speed_control_round_output(float output);
 static float wheel_speed_control_slew_target(
     float current, float requested, float max_delta);
 static bool wheel_speed_control_crossed_zero(float previous, float current);
+static float wheel_speed_control_target_slew_rate(void);
 static bool wheel_speed_control_deadline_reached(
     uint32_t now_ms, uint32_t deadline_ms);
 static void wheel_speed_control_reset_pid_state(void);
@@ -298,7 +300,7 @@ void WheelSpeedControl_Task(uint32_t now_ms)
 
     dt_s = (float) elapsed_ms / 1000.0f;
     g_last_update_ms = now_ms;
-    target_max_delta = WHEEL_SPEED_TARGET_SLEW_PPS_PER_S * dt_s;
+    target_max_delta = wheel_speed_control_target_slew_rate() * dt_s;
     previous_left_target = g_snapshot.left_target_pps;
     previous_right_target = g_snapshot.right_target_pps;
     g_snapshot.left_target_pps = wheel_speed_control_slew_target(
@@ -432,6 +434,13 @@ static bool wheel_speed_control_crossed_zero(float previous, float current)
 {
     return ((previous > 0.0f) && (current <= 0.0f)) ||
         ((previous < 0.0f) && (current >= 0.0f));
+}
+
+static float wheel_speed_control_target_slew_rate(void)
+{
+    return (g_owner_mode == CAR_CONTROL_MODE_POSITION) ?
+        WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S :
+        WHEEL_SPEED_TARGET_SLEW_PPS_PER_S;
 }
 
 static bool wheel_speed_control_deadline_reached(

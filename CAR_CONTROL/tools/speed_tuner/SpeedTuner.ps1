@@ -16,6 +16,7 @@ $script:lastExternalCommandAt = [DateTime]::MinValue
 $script:connectionReadyAt = [DateTime]::MinValue
 $script:initialReadPending = $false
 $script:primePending = $false
+$script:activeMode = "speed"
 $script:baudRate = 9600
 $script:captureActive = $false
 $script:runCsvPath = $null
@@ -32,22 +33,34 @@ $script:latestStatusPath = Join-Path $script:runtimeDir "latest_status.json"
 $script:latestRunPath = Join-Path $script:runtimeDir "latest_run.csv"
 $script:latestWavePath = Join-Path $script:runtimeDir "latest_wave.json"
 $script:latestTelemetryPath = Join-Path $script:runtimeDir "latest_telemetry.csv"
+$script:latestPositionWavePath = Join-Path $script:runtimeDir "latest_position_wave.json"
+$script:latestPositionStatusPath = Join-Path $script:runtimeDir "latest_position_status.json"
+$script:latestPositionTelemetryPath = Join-Path $script:runtimeDir "latest_position_telemetry.csv"
 $script:lastPortPath = Join-Path $script:runtimeDir "last_port.txt"
 $script:sessionLogPath = Join-Path $script:runtimeDir (
     "session_{0}.log" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
 $script:telemetryCsvPath = Join-Path $script:runtimeDir (
     "telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
+$script:positionTelemetryCsvPath = Join-Path $script:runtimeDir (
+    "position_telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
 $telemetryHeader = "timestamp,left_target_pps,left_speed_pps,right_target_pps,right_speed_pps,left_output_permille,right_output_permille`r`n"
+$positionTelemetryHeader = "timestamp,left_target_count,left_count,right_target_count,right_count,left_speed_target_pps,right_speed_target_pps`r`n"
 [System.IO.File]::WriteAllText(
     $script:telemetryCsvPath, $telemetryHeader, $script:utf8NoBom)
 [System.IO.File]::WriteAllText(
     $script:latestTelemetryPath, $telemetryHeader, $script:utf8NoBom)
+[System.IO.File]::WriteAllText(
+    $script:positionTelemetryCsvPath,
+    $positionTelemetryHeader, $script:utf8NoBom)
+[System.IO.File]::WriteAllText(
+    $script:latestPositionTelemetryPath,
+    $positionTelemetryHeader, $script:utf8NoBom)
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "CAR Speed Loop Tuner | VOFA 13470 | MCP 13471"
-$form.ClientSize = New-Object System.Drawing.Size(760, 608)
+$form.Text = "CAR Control Tuner | VOFA 13470 | MCP 13471"
+$form.ClientSize = New-Object System.Drawing.Size(760, 632)
 $form.StartPosition = "CenterScreen"
-$form.MinimumSize = New-Object System.Drawing.Size(776, 647)
+$form.MinimumSize = New-Object System.Drawing.Size(776, 671)
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 
 function New-Label([string]$text, [int]$x, [int]$y, [int]$width = 100) {
@@ -130,10 +143,15 @@ function Broadcast-ControlLine([string]$line) {
 
 function Test-ControlCommand([string]$line) {
     if ($line -match '^spd (get|stop|stat)$' -or
-        $line -match '^spd run(?: (?:step|reverse|sweep|lease))?$') {
+        $line -match '^spd run(?: (?:step|reverse|sweep|lease))?$' -or
+        $line -match '^pos (get|stop|stat)$' -or
+        $line -match '^pos run(?: stress)?$') {
         return $true
     }
-    return $line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$'
+    if ($line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
+        return $true
+    }
+    return $line -match '^pos set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?\d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+$'
 }
 
 function Process-ControlLine($entry, [string]$line) {
@@ -361,6 +379,59 @@ function Forward-Wave([hashtable]$values) {
     Save-Wave $values
 }
 
+function Parse-PositionWaveLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        '^poswave:(?<lt>-?\d+),(?<lc>-?\d+),(?<rt>-?\d+),(?<rc>-?\d+),(?<lv>-?\d+),(?<rv>-?\d+)$')
+    if (-not $match.Success) { return $null }
+    return @{
+        left_target_count = [int]$match.Groups['lt'].Value
+        left_count = [int]$match.Groups['lc'].Value
+        right_target_count = [int]$match.Groups['rt'].Value
+        right_count = [int]$match.Groups['rc'].Value
+        left_speed_target_pps = [int]$match.Groups['lv'].Value
+        right_speed_target_pps = [int]$match.Groups['rv'].Value
+    }
+}
+
+function Forward-PositionWave([hashtable]$values) {
+    $timestamp = [DateTime]::Now.ToString("o")
+    $fireWater = "position: {0}, {1}, {2}, {3}, {4}, {5}" -f
+        $values['left_target_count'],
+        $values['left_count'],
+        $values['right_target_count'],
+        $values['right_count'],
+        $values['left_speed_target_pps'],
+        $values['right_speed_target_pps']
+    $positionWave = [ordered]@{
+        timestamp = $timestamp
+        left_target_count = $values['left_target_count']
+        left_count = $values['left_count']
+        right_target_count = $values['right_target_count']
+        right_count = $values['right_count']
+        left_speed_target_pps = $values['left_speed_target_pps']
+        right_speed_target_pps = $values['right_speed_target_pps']
+    }
+    $row = @(
+        $timestamp,
+        $values['left_target_count'], $values['left_count'],
+        $values['right_target_count'], $values['right_count'],
+        $values['left_speed_target_pps'],
+        $values['right_speed_target_pps']) -join ','
+    Broadcast-VofaLine $fireWater
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestPositionWavePath,
+            ($positionWave | ConvertTo-Json), $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:positionTelemetryCsvPath,
+            "$row`r`n", $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:latestPositionTelemetryPath,
+            "$row`r`n", $script:utf8NoBom)
+    } catch {}
+}
+
 function Refresh-Ports {
     $selected = $portCombo.Text
     if (($selected -eq "") -and (Test-Path $script:lastPortPath)) {
@@ -429,6 +500,94 @@ function Update-ConfigFromLine([string]$line) {
     }
 }
 
+function Update-PositionConfigFromLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        'kp=(?<kp>[-0-9.]+)\s+target=(?<target>-?\d+)\s+max=(?<max>[-0-9.]+)\s+limit=(?<limit>\d+)\s+tol=(?<tol>\d+)')
+    if ($match.Success) {
+        $posKpBox.Text = $match.Groups['kp'].Value
+        $posTargetBox.Text = $match.Groups['target'].Value
+        $posMaxSpeedBox.Text = $match.Groups['max'].Value
+        $posLimitBox.Text = $match.Groups['limit'].Value
+        $posToleranceBox.Text = $match.Groups['tol'].Value
+        foreach ($box in @(
+            $posKpBox, $posTargetBox, $posMaxSpeedBox,
+            $posLimitBox, $posToleranceBox)) {
+            $box.SelectionStart = 0
+            $box.SelectionLength = 0
+        }
+    }
+}
+
+function Save-PositionStatus([hashtable]$values) {
+    $status = [ordered]@{
+        timestamp = [DateTime]::Now.ToString("o")
+        state = $values['state']
+        profile = $values['profile']
+        step = [int]$values['step']
+        step_count = [int]$values['steps']
+        completed_moves = [int]$values['done']
+        worst_final_error_count = [int]$values['worst']
+        left_recovery_count = [int]$values['recL']
+        right_recovery_count = [int]$values['recR']
+        left_target_count = [int]$values['tL']
+        left_count = [int]$values['cL']
+        left_error_count = [int]$values['eL']
+        right_target_count = [int]$values['tR']
+        right_count = [int]$values['cR']
+        right_error_count = [int]$values['eR']
+        left_speed_pps = [int]$values['vL']
+        right_speed_pps = [int]$values['vR']
+        invalid_left = [int]$values['invL']
+        invalid_right = [int]$values['invR']
+        result = [int]$values['res']
+        high_impedance = ($values['hz'] -eq '1')
+    }
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestPositionStatusPath,
+            ($status | ConvertTo-Json), $script:utf8NoBom)
+    } catch {}
+}
+
+function Update-PositionStatusFromLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        '^PSTAT state=(?<state>[A-Z]+) profile=(?<profile>[A-Z]+) step=(?<step>\d+)/(?<steps>\d+) done=(?<done>\d+) worst=(?<worst>\d+) recL=(?<recL>\d+) recR=(?<recR>\d+) tL=(?<tL>-?\d+) cL=(?<cL>-?\d+) eL=(?<eL>-?\d+) tR=(?<tR>-?\d+) cR=(?<cR>-?\d+) eR=(?<eR>-?\d+) vL=(?<vL>-?\d+) vR=(?<vR>-?\d+) invL=(?<invL>\d+) invR=(?<invR>\d+) res=(?<res>\d+) hz=(?<hz>[01])$')
+    if (-not $match.Success) { return $false }
+
+    $values = @{}
+    foreach ($key in @(
+        'state', 'profile', 'step', 'steps', 'done', 'worst', 'recL', 'recR',
+        'tL', 'cL', 'eL', 'tR', 'cR', 'eR', 'vL', 'vR',
+        'invL', 'invR', 'res', 'hz')) {
+        $values[$key] = $match.Groups[$key].Value
+    }
+    $posStateValue.Text = $values['state']
+    $posStepValue.Text = "{0} {1}/{2} ({3} done)" -f
+        $values['profile'], $values['step'], $values['steps'], $values['done']
+    $posResultValue.Text = $values['res']
+    $posLeftTargetValue.Text = $values['tL']
+    $posLeftActualValue.Text = $values['cL']
+    $posLeftErrorValue.Text = $values['eL']
+    $posRightTargetValue.Text = $values['tR']
+    $posRightActualValue.Text = $values['cR']
+    $posRightErrorValue.Text = $values['eR']
+    $posWorstValue.Text = $values['worst'] + " counts"
+    $posSpeedValue.Text = $values['vL'] + " / " + $values['vR'] + " pps"
+    $posInvalidValue.Text = $values['invL'] + " / " + $values['invR']
+    $posRecoveryValue.Text = $values['recL'] + " / " + $values['recR']
+    if ($values['hz'] -eq '1') {
+        $posHighZValue.Text = "HIGH-Z"
+        $posHighZValue.ForeColor = [System.Drawing.Color]::ForestGreen
+    } else {
+        $posHighZValue.Text = "ARMED"
+        $posHighZValue.ForeColor = [System.Drawing.Color]::DarkOrange
+    }
+    Save-PositionStatus $values
+    return $true
+}
+
 function Update-StatusFromLine([string]$line) {
     $match = [System.Text.RegularExpressions.Regex]::Match(
         $line,
@@ -476,6 +635,16 @@ function Process-Line([string]$line) {
         }
         return
     }
+    if ($line.StartsWith('poswave:')) {
+        $positionWave = Parse-PositionWaveLine $line
+        if ($null -ne $positionWave) {
+            Broadcast-ControlLine $line
+            Forward-PositionWave $positionWave
+        } else {
+            Add-Log "RX dropped malformed position frame." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
     if ($line.StartsWith('STAT ')) {
         if (Update-StatusFromLine $line) {
             Broadcast-ControlLine $line
@@ -484,9 +653,19 @@ function Process-Line([string]$line) {
         }
         return
     }
+    if ($line.StartsWith('PSTAT ')) {
+        if (Update-PositionStatusFromLine $line) {
+            Broadcast-ControlLine $line
+        } else {
+            Add-Log "RX dropped malformed position status." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
     Broadcast-ControlLine $line
     if ($line.StartsWith('OK CFG ')) {
         Update-ConfigFromLine $line
+    } elseif ($line.StartsWith('OK PCFG ')) {
+        Update-PositionConfigFromLine $line
     }
     $color = if ($line.StartsWith('ERR ')) {
         [System.Drawing.Color]::Firebrick
@@ -531,6 +710,43 @@ function Read-UiConfig {
         $limit.ToString($culture))
 }
 
+function Read-PositionUiConfig {
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $style = [System.Globalization.NumberStyles]::Float
+    [single]$kp = 0
+    [int32]$target = 0
+    [single]$maxSpeed = 0
+    [uint16]$limit = 0
+    [uint16]$tolerance = 0
+
+    $valid = [single]::TryParse(
+            $posKpBox.Text, $style, $culture, [ref]$kp) -and
+        [int32]::TryParse($posTargetBox.Text, [ref]$target) -and
+        [single]::TryParse(
+            $posMaxSpeedBox.Text, $style, $culture, [ref]$maxSpeed) -and
+        [uint16]::TryParse($posLimitBox.Text, [ref]$limit) -and
+        [uint16]::TryParse($posToleranceBox.Text, [ref]$tolerance)
+    if (-not $valid) {
+        Add-Log "Position parameter format error." ([System.Drawing.Color]::Firebrick)
+        return $null
+    }
+    if (($kp -le 0) -or ($kp -gt 20) -or
+        ($target -eq 0) -or ($target -lt -100000) -or ($target -gt 100000) -or
+        ($maxSpeed -lt 100) -or ($maxSpeed -gt 6000) -or
+        ($limit -lt 100) -or ($limit -gt 1000) -or
+        ($tolerance -lt 1) -or ($tolerance -gt 200)) {
+        Add-Log "Position parameter outside firmware range." ([System.Drawing.Color]::Firebrick)
+        return $null
+    }
+
+    return ('pos set {0} {1} {2} {3} {4}' -f
+        $kp.ToString('0.####', $culture),
+        $target.ToString($culture),
+        $maxSpeed.ToString('0.####', $culture),
+        $limit.ToString($culture),
+        $tolerance.ToString($culture))
+}
+
 $connectionGroup = New-Object System.Windows.Forms.GroupBox
 $connectionGroup.Text = "Connection"
 $connectionGroup.Location = New-Object System.Drawing.Point(12, 10)
@@ -562,11 +778,18 @@ $connectionValue.ForeColor = [System.Drawing.Color]::Firebrick
 $connectionValue.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
 $connectionGroup.Controls.Add($connectionValue)
 
-$parameterGroup = New-Object System.Windows.Forms.GroupBox
-$parameterGroup.Text = "Speed-loop configuration"
-$parameterGroup.Location = New-Object System.Drawing.Point(12, 90)
-$parameterGroup.Size = New-Object System.Drawing.Size(736, 130)
-$form.Controls.Add($parameterGroup)
+$parameterTabs = New-Object System.Windows.Forms.TabControl
+$parameterTabs.Location = New-Object System.Drawing.Point(12, 90)
+$parameterTabs.Size = New-Object System.Drawing.Size(736, 154)
+$form.Controls.Add($parameterTabs)
+
+$speedTab = New-Object System.Windows.Forms.TabPage
+$speedTab.Text = "Speed loop"
+$positionTab = New-Object System.Windows.Forms.TabPage
+$positionTab.Text = "Position loop"
+[void]$parameterTabs.TabPages.Add($speedTab)
+[void]$parameterTabs.TabPages.Add($positionTab)
+$parameterGroup = $speedTab
 
 $parameterGroup.Controls.Add((New-Label "Kp" 15 23 105))
 $kpBox = New-TextBox "0.1200" 15 46 105
@@ -610,9 +833,58 @@ $stopButton.Size = New-Object System.Drawing.Size(98, 29)
 $stopButton.BackColor = [System.Drawing.Color]::MistyRose
 $parameterGroup.Controls.Add($stopButton)
 
+$positionTab.Controls.Add((New-Label "Kp" 15 23 105))
+$posKpBox = New-TextBox "3.0000" 15 46 105
+$positionTab.Controls.Add($posKpBox)
+$positionTab.Controls.Add((New-Label "Target (count)" 135 23 110))
+$posTargetBox = New-TextBox "1060" 135 46 105
+$positionTab.Controls.Add($posTargetBox)
+$positionTab.Controls.Add((New-Label "Max speed" 255 23 105))
+$posMaxSpeedBox = New-TextBox "2000" 255 46 105
+$positionTab.Controls.Add($posMaxSpeedBox)
+$positionTab.Controls.Add((New-Label "Output limit" 375 23 105))
+$posLimitBox = New-TextBox "650" 375 46 105
+$positionTab.Controls.Add($posLimitBox)
+$positionTab.Controls.Add((New-Label "Tolerance" 495 23 105))
+$posToleranceBox = New-TextBox "24" 495 46 105
+$positionTab.Controls.Add($posToleranceBox)
+
+$posReadButton = New-Object System.Windows.Forms.Button
+$posReadButton.Text = "Read"
+$posReadButton.Location = New-Object System.Drawing.Point(15, 88)
+$posReadButton.Size = New-Object System.Drawing.Size(92, 29)
+$positionTab.Controls.Add($posReadButton)
+
+$posApplyButton = New-Object System.Windows.Forms.Button
+$posApplyButton.Text = "Apply"
+$posApplyButton.Location = New-Object System.Drawing.Point(117, 88)
+$posApplyButton.Size = New-Object System.Drawing.Size(92, 29)
+$positionTab.Controls.Add($posApplyButton)
+
+$posRunButton = New-Object System.Windows.Forms.Button
+$posRunButton.Text = "Run"
+$posRunButton.Location = New-Object System.Drawing.Point(407, 88)
+$posRunButton.Size = New-Object System.Drawing.Size(98, 29)
+$posRunButton.BackColor = [System.Drawing.Color]::Honeydew
+$positionTab.Controls.Add($posRunButton)
+
+$posStressButton = New-Object System.Windows.Forms.Button
+$posStressButton.Text = "Stress 24"
+$posStressButton.Location = New-Object System.Drawing.Point(515, 88)
+$posStressButton.Size = New-Object System.Drawing.Size(98, 29)
+$posStressButton.BackColor = [System.Drawing.Color]::LightCyan
+$positionTab.Controls.Add($posStressButton)
+
+$posStopButton = New-Object System.Windows.Forms.Button
+$posStopButton.Text = "Stop"
+$posStopButton.Location = New-Object System.Drawing.Point(623, 88)
+$posStopButton.Size = New-Object System.Drawing.Size(98, 29)
+$posStopButton.BackColor = [System.Drawing.Color]::MistyRose
+$positionTab.Controls.Add($posStopButton)
+
 $statusGroup = New-Object System.Windows.Forms.GroupBox
 $statusGroup.Text = "Live status"
-$statusGroup.Location = New-Object System.Drawing.Point(12, 228)
+$statusGroup.Location = New-Object System.Drawing.Point(12, 252)
 $statusGroup.Size = New-Object System.Drawing.Size(736, 142)
 $form.Controls.Add($statusGroup)
 
@@ -651,9 +923,65 @@ $rightOutputValue = New-Label "--" 340 89 115
 $rightOutputValue.Font = New-Object System.Drawing.Font("Consolas", 10)
 $statusGroup.Controls.Add($rightOutputValue)
 
+$positionStatusGroup = New-Object System.Windows.Forms.GroupBox
+$positionStatusGroup.Text = "Position live status"
+$positionStatusGroup.Location = New-Object System.Drawing.Point(12, 252)
+$positionStatusGroup.Size = New-Object System.Drawing.Size(736, 142)
+$positionStatusGroup.Visible = $false
+$form.Controls.Add($positionStatusGroup)
+
+$positionStatusGroup.Controls.Add((New-Label "State" 15 20 55))
+$posStateValue = New-Label "--" 70 20 85
+$posStateValue.Font = New-Object System.Drawing.Font("Consolas", 10, [System.Drawing.FontStyle]::Bold)
+$positionStatusGroup.Controls.Add($posStateValue)
+$positionStatusGroup.Controls.Add((New-Label "Progress" 165 20 65))
+$posStepValue = New-Label "--" 230 20 205
+$posStepValue.Font = New-Object System.Drawing.Font("Consolas", 9)
+$positionStatusGroup.Controls.Add($posStepValue)
+$positionStatusGroup.Controls.Add((New-Label "Motor" 445 20 55))
+$posHighZValue = New-Label "--" 500 20 85
+$posHighZValue.Font = New-Object System.Drawing.Font("Consolas", 10, [System.Drawing.FontStyle]::Bold)
+$positionStatusGroup.Controls.Add($posHighZValue)
+$positionStatusGroup.Controls.Add((New-Label "Result" 590 20 55))
+$posResultValue = New-Label "--" 645 20 65
+$positionStatusGroup.Controls.Add($posResultValue)
+
+$positionStatusGroup.Controls.Add((New-Label "Left  target" 15 49 85))
+$posLeftTargetValue = New-Label "--" 100 49 85
+$positionStatusGroup.Controls.Add($posLeftTargetValue)
+$positionStatusGroup.Controls.Add((New-Label "actual" 190 49 50))
+$posLeftActualValue = New-Label "--" 240 49 85
+$positionStatusGroup.Controls.Add($posLeftActualValue)
+$positionStatusGroup.Controls.Add((New-Label "error" 335 49 50))
+$posLeftErrorValue = New-Label "--" 385 49 75
+$positionStatusGroup.Controls.Add($posLeftErrorValue)
+$positionStatusGroup.Controls.Add((New-Label "Worst" 475 49 50))
+$posWorstValue = New-Label "--" 525 49 150
+$positionStatusGroup.Controls.Add($posWorstValue)
+
+$positionStatusGroup.Controls.Add((New-Label "Right target" 15 76 85))
+$posRightTargetValue = New-Label "--" 100 76 85
+$positionStatusGroup.Controls.Add($posRightTargetValue)
+$positionStatusGroup.Controls.Add((New-Label "actual" 190 76 50))
+$posRightActualValue = New-Label "--" 240 76 85
+$positionStatusGroup.Controls.Add($posRightActualValue)
+$positionStatusGroup.Controls.Add((New-Label "error" 335 76 50))
+$posRightErrorValue = New-Label "--" 385 76 75
+$positionStatusGroup.Controls.Add($posRightErrorValue)
+$positionStatusGroup.Controls.Add((New-Label "Speed L/R" 475 76 75))
+$posSpeedValue = New-Label "--" 550 76 150
+$positionStatusGroup.Controls.Add($posSpeedValue)
+
+$positionStatusGroup.Controls.Add((New-Label "Invalid L/R" 15 105 85))
+$posInvalidValue = New-Label "--" 100 105 120
+$positionStatusGroup.Controls.Add($posInvalidValue)
+$positionStatusGroup.Controls.Add((New-Label "Recovery L/R" 250 105 95))
+$posRecoveryValue = New-Label "--" 345 105 120
+$positionStatusGroup.Controls.Add($posRecoveryValue)
+
 $logGroup = New-Object System.Windows.Forms.GroupBox
 $logGroup.Text = "Command log"
-$logGroup.Location = New-Object System.Drawing.Point(12, 378)
+$logGroup.Location = New-Object System.Drawing.Point(12, 402)
 $logGroup.Size = New-Object System.Drawing.Size(736, 218)
 $logGroup.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Bottom -bor
@@ -727,6 +1055,34 @@ $runButton.Add_Click({
 })
 $stopButton.Add_Click({ [void](Send-Command "spd stop") })
 
+$posReadButton.Add_Click({ [void](Send-Command "pos get") })
+$posApplyButton.Add_Click({
+    $command = Read-PositionUiConfig
+    if ($null -ne $command) {
+        [void](Send-Command $command)
+    }
+})
+$posRunButton.Add_Click({ [void](Send-Command "pos run") })
+$posStressButton.Add_Click({ [void](Send-Command "pos run stress") })
+$posStopButton.Add_Click({ [void](Send-Command "pos stop") })
+
+$parameterTabs.Add_SelectedIndexChanged({
+    $isPosition = ($parameterTabs.SelectedTab -eq $positionTab)
+    $script:activeMode = if ($isPosition) { "position" } else { "speed" }
+    $statusGroup.Visible = -not $isPosition
+    $positionStatusGroup.Visible = $isPosition
+    $script:lastStatusPoll = [DateTime]::Now
+    if (($null -ne $script:serial) -and $script:serial.IsOpen) {
+        if ($isPosition) {
+            [void](Send-Command "pos get")
+            [void](Send-Command "pos stat" $true)
+        } else {
+            [void](Send-Command "spd get")
+            [void](Send-Command "spd stat" $true)
+        }
+    }
+})
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 80
 $timer.Add_Tick({
@@ -752,14 +1108,23 @@ $timer.Add_Tick({
         }
         if ($script:initialReadPending) {
             $script:serial.DiscardInBuffer()
-            [void](Send-Command "spd get")
+            if ($script:activeMode -eq "position") {
+                [void](Send-Command "pos get")
+            } else {
+                [void](Send-Command "spd get")
+            }
             $script:initialReadPending = $false
         }
         $externalControlActive =
             (($now - $script:lastExternalCommandAt).TotalMilliseconds -lt 900)
+        $statusPollMs = if ($script:activeMode -eq "position") { 600 } else { 400 }
         if ((-not $externalControlActive) -and
-            (($now - $script:lastStatusPoll).TotalMilliseconds -ge 400)) {
-            [void](Send-Command "spd stat" $true)
+            (($now - $script:lastStatusPoll).TotalMilliseconds -ge $statusPollMs)) {
+            if ($script:activeMode -eq "position") {
+                [void](Send-Command "pos stat" $true)
+            } else {
+                [void](Send-Command "spd stat" $true)
+            }
             $script:lastStatusPoll = $now
         }
     } catch {

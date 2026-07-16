@@ -394,3 +394,106 @@ or `LINE_TRACKING`. Every target submission includes `now_ms` and renews a
 100 ms outer-command lease. The healthy inner loop independently refreshes the
 200 ms hardware lease. Ownership loss, a stale outer target, or a control fault
 stops both channels and restores high impedance.
+
+## 2026-07-16: initial position-loop cascade firmware
+
+The first formal position outer loop is isolated from PWM and submits bounded
+left/right speed targets to the validated speed controller:
+
+```text
+outer update: 50 Hz
+position gain: Kp 2.4 pps/count, P only
+relative test target: +1060/+1060 counts (one wheel revolution)
+maximum speed target: 800 pps
+speed-loop output cap: 650 permille
+position tolerance: 24 counts
+settle condition: both speeds <= 120 pps for 200 ms while in tolerance
+motion timeout: 8000 ms
+```
+
+PB21 starts the relative move and a second press stops it. Completion, timeout,
+owner loss, encoder failure, speed-loop failure, or operator stop returns both
+motor channels to high impedance. GCC and TIClang builds pass.
+
+### Initial position-loop tuning result
+
+The first `Kp=4`, `1200 pps`, `12-count` run completed but overshot by 123
+counts on the left and 145 counts on the right before reversing. Reducing the
+outer loop to `Kp=2`, `800 pps` removed overshoot but left the left wheel 22
+counts short, where a 44 pps target could not overcome static friction before
+the eight-second timeout.
+
+The selected suspended-wheel baseline is:
+
+```text
+Kp: 2.4 pps/count
+maximum speed: 800 pps
+tolerance: 24 counts
+settle speed/time: 120 pps / 200 ms
+```
+
+At this setting the positive one-revolution test finished at `+21/+10` counts
+of remaining error, and the negative test finished at `-21/-13`. Both tests
+reached `DONE`, reported zero terminal speed, and restored high impedance.
+There was no corrective direction reversal. The 50 Hz outer rate is retained:
+the failed cases were bounded by mechanical overshoot and low-speed static
+friction, not by the 20 ms position update interval.
+
+After writing these values into the compiled defaults, a cold-start positive
+run finished at `+21/+13` counts of remaining error. Three subsequent
+alternating runs finished at `-23/+1`, `+21/+13`, and `-20/-10`. Every run
+reached `DONE`, ended at `0/0 pps`, reported zero invalid encoder transitions,
+and restored `HIGH-Z`. The RAM test target was returned to the compiled
+positive `+1060` default after the sequence.
+
+### Position response and endurance regression
+
+The first 8-segment pressure profile exposed long low-speed waits even though
+all segments eventually completed:
+
+```text
+reverse half revolution:    6.96 s
+reverse quarter revolution: 5.08 s
+```
+
+The position owner now uses a `4000 pps/s` target slew. A wheel that remains at
+or below 40 pps for 300 ms while outside tolerance receives a bounded 800 pps
+recovery request, also capped by the configured position maximum. Recovery ends
+as soon as motion resumes. The pressure inter-segment high-impedance pause is
+100 ms.
+
+With this change, the same two segments completed in 1.95 s and 1.88 s. A final
+24-segment run repeated the `+1/-1/+0.5/-0.5/+2/-2/+0.25/-0.25` revolution
+sequence three times and produced:
+
+```text
+completed moves: 24/24
+worst final error: 24 counts
+final error: left -21, right -16 counts
+recovery count: left 9, right 0
+invalid encoder transitions: 0/0
+terminal speed: 0/0 pps
+terminal state: DONE, HIGH-Z
+```
+
+No segment timed out and the board did not reset. The 50 Hz position outer-loop
+rate remains appropriate relative to the 100 Hz speed inner loop; the observed
+response limit was low-speed static friction rather than the 20 ms outer update.
+
+### Higher-speed position baseline
+
+The user-observed low motion intensity came from the conservative 800 pps cap,
+not the position-loop update rate. Online tests raised the cap and position gain:
+
+```text
+position Kp: 3.0 pps/count
+maximum cascade speed: 2000 pps
+speed output limit: 650 permille
+tolerance: 24 counts
+```
+
+A one-revolution run reached the 2000 pps target, completed in approximately
+1.78 s, and stopped with only `3/2` counts of error. The subsequent 24-segment
+stress run completed in approximately 27 s with worst error 24 counts, final
+error `-23/-15`, recovery count `1/0`, invalid transitions `0/0`, and terminal
+`DONE/HIGH-Z`. These values replace the initial 800 pps compiled baseline.

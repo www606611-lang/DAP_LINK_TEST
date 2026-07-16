@@ -6,11 +6,13 @@
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
+#include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "speed_bringup_test.h"
 #include "speed_tuning_console.h"
 #include "st7789.h"
 #include "ti_msp_dl_config.h"
+#include "wheel_position_control.h"
 #include "wheel_speed_control.h"
 
 #include <stdbool.h>
@@ -41,6 +43,17 @@ volatile int32_t g_car_speed_left_output_permille;
 volatile int32_t g_car_speed_right_output_permille;
 volatile uint32_t g_car_speed_update_count;
 volatile uint32_t g_car_speed_last_result;
+volatile uint32_t g_car_position_test_state;
+volatile uint32_t g_car_position_test_run_count;
+volatile int32_t g_car_position_left_target_count;
+volatile int32_t g_car_position_right_target_count;
+volatile int32_t g_car_position_left_error_count;
+volatile int32_t g_car_position_right_error_count;
+volatile int32_t g_car_position_left_speed_target_pps;
+volatile int32_t g_car_position_right_speed_target_pps;
+volatile uint32_t g_car_position_update_count;
+volatile uint32_t g_car_position_last_result;
+volatile bool g_car_position_settled;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 
@@ -67,7 +80,9 @@ int main(void)
     EncoderInput_SetInverted(ENCODER_INPUT_1,
         BOARD_ENCODER_1_FORWARD_INVERTED != 0);
     WheelSpeedControl_Init(delay_get_ms());
+    WheelPositionControl_Init(delay_get_ms());
     SpeedBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    PositionBringupTest_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     SpeedTuningConsole_Init();
 
@@ -81,6 +96,8 @@ int main(void)
         uint32_t now_encoder_period = now_ms / 200U;
         bool press_event;
         bool release_event;
+        bool speed_press_event = false;
+        bool position_press_event = false;
 
         BoardButton_Task(now_ms);
         press_event = BoardButton_GetPressEvent();
@@ -89,7 +106,16 @@ int main(void)
         BluetoothUart_Task(now_ms);
         SpeedTuningConsole_Task(now_ms);
         ControlSupervisor_Task(now_ms);
-        SpeedBringupTest_Task(now_ms, press_event);
+        if (press_event &&
+            (SpeedBringupTest_GetState() ==
+                SPEED_BRINGUP_TEST_RUNNING)) {
+            speed_press_event = true;
+        } else {
+            position_press_event = press_event;
+        }
+        SpeedBringupTest_Task(now_ms, speed_press_event);
+        PositionBringupTest_Task(now_ms, position_press_event);
+        WheelPositionControl_Task(now_ms);
         WheelSpeedControl_Task(now_ms);
 
         if (press_event) {
@@ -123,7 +149,7 @@ static void app_display_init(void)
 {
     ST7789_Fill(ST7789_COLOR_BLACK);
     ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U, ST7789_COLOR_BLUE);
-    ST7789_ShowString(8U, 5U, "CAR SPEED SYM PI TEST", ST7789_8X16,
+    ST7789_ShowString(8U, 5U, "CAR POSITION CASCADE", ST7789_8X16,
         ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
 }
 
@@ -142,36 +168,37 @@ static void app_display_update(uint32_t now_ms)
         g_car_pb21_pressed ? "PRESSED" : "RELEASED",
         (unsigned long) g_car_pb21_press_count);
     ST7789_Printf(8U, 66U, ST7789_8X16, ST7789_COLOR_YELLOW,
-        ST7789_COLOR_BLACK, "S:%-6s %-6s O:%4ld/%4ld",
-        SpeedBringupTest_GetStateText(),
+        ST7789_COLOR_BLACK, "P:%-6s %-6s O:%4ld/%4ld",
+        PositionBringupTest_GetStateText(),
         g_car_motor_high_impedance ? "HIGH-Z" : "ARMED",
         (long) g_car_speed_left_output_permille,
         (long) g_car_speed_right_output_permille);
     ST7789_Printf(8U, 84U, ST7789_8X16, ST7789_COLOR_CYAN,
-        ST7789_COLOR_BLACK, "L T:%5ld V:%6ld E:%6ld",
-        (long) g_car_speed_left_target_pps,
-        (long) g_car_encoder_0_speed_pps,
-        (long) g_car_speed_left_error_pps);
-    ST7789_Printf(8U, 102U, ST7789_8X16, ST7789_COLOR_CYAN,
-        ST7789_COLOR_BLACK, "R T:%5ld V:%6ld E:%6ld",
-        (long) g_car_speed_right_target_pps,
-        (long) g_car_encoder_1_speed_pps,
-        (long) g_car_speed_right_error_pps);
-    ST7789_Printf(8U, 120U, ST7789_8X16, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "CNT:%7ld/%-7ld U:%5lu",
+        ST7789_COLOR_BLACK, "L T:%7ld C:%7ld E:%6ld",
+        (long) g_car_position_left_target_count,
         (long) g_car_encoder_0_count,
+        (long) g_car_position_left_error_count);
+    ST7789_Printf(8U, 102U, ST7789_8X16, ST7789_COLOR_CYAN,
+        ST7789_COLOR_BLACK, "R T:%7ld C:%7ld E:%6ld",
+        (long) g_car_position_right_target_count,
         (long) g_car_encoder_1_count,
-        (unsigned long) g_car_speed_update_count);
+        (long) g_car_position_right_error_count);
+    ST7789_Printf(8U, 120U, ST7789_8X16, ST7789_COLOR_WHITE,
+        ST7789_COLOR_BLACK, "VT:%5ld/%-5ld V:%5ld/%-5ld",
+        (long) g_car_position_left_speed_target_pps,
+        (long) g_car_position_right_speed_target_pps,
+        (long) g_car_encoder_0_speed_pps,
+        (long) g_car_encoder_1_speed_pps);
     ST7789_Printf(8U, 138U, ST7789_8X16, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "INV:%5lu/%-5lu RES:%2lu",
+        ST7789_COLOR_BLACK, "INV:%5lu/%-5lu PRES:%2lu",
         (unsigned long) g_car_encoder_0_invalid,
         (unsigned long) g_car_encoder_1_invalid,
-        (unsigned long) g_car_speed_last_result);
+        (unsigned long) g_car_position_last_result);
     ST7789_Printf(8U, 157U, ST7789_6X8, ST7789_COLOR_WHITE,
         ST7789_COLOR_BLACK, "M:%s B:%s R:%lu UP:%08lu",
         ControlSupervisor_GetModeText(),
         ControlSupervisor_GetBlockReasonText(),
-        (unsigned long) g_car_speed_test_run_count,
+        (unsigned long) g_car_position_test_run_count,
         (unsigned long) (now_ms / 1000U));
 }
 
@@ -180,6 +207,7 @@ static void app_update_debug_state(void)
     encoder_input_snapshot_t encoder_0;
     encoder_input_snapshot_t encoder_1;
     wheel_speed_control_snapshot_t speed;
+    wheel_position_control_snapshot_t position;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
     g_car_reset_cause = ResetDiagnostics_GetCause();
@@ -189,6 +217,9 @@ static void app_update_debug_state(void)
     g_car_motor_high_impedance = BoardMotorSafe_IsHighImpedance();
     g_car_speed_test_state = (uint32_t) SpeedBringupTest_GetState();
     g_car_speed_test_run_count = SpeedBringupTest_GetRunCount();
+    g_car_position_test_state =
+        (uint32_t) PositionBringupTest_GetState();
+    g_car_position_test_run_count = PositionBringupTest_GetRunCount();
 
     if (WheelSpeedControl_GetSnapshot(&speed)) {
         g_car_speed_left_target_pps =
@@ -203,6 +234,20 @@ static void app_update_debug_state(void)
         g_car_speed_right_output_permille = speed.right_output_permille;
         g_car_speed_update_count = speed.update_count;
         g_car_speed_last_result = (uint32_t) speed.last_result;
+    }
+
+    if (WheelPositionControl_GetSnapshot(&position)) {
+        g_car_position_left_target_count = position.left_target_count;
+        g_car_position_right_target_count = position.right_target_count;
+        g_car_position_left_error_count = position.left_error_count;
+        g_car_position_right_error_count = position.right_error_count;
+        g_car_position_left_speed_target_pps =
+            app_round_float(position.left_speed_target_pps);
+        g_car_position_right_speed_target_pps =
+            app_round_float(position.right_speed_target_pps);
+        g_car_position_update_count = position.update_count;
+        g_car_position_last_result = (uint32_t) position.last_result;
+        g_car_position_settled = position.settled;
     }
 
     if (EncoderInput_GetSnapshot(ENCODER_INPUT_0, &encoder_0) &&
