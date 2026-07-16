@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 
-#define WHEEL_SPEED_KP                  0.25f
-#define WHEEL_SPEED_KI                  0.10f
+#define WHEEL_SPEED_KP                  0.12f
+#define WHEEL_SPEED_KI                  0.05f
 #define WHEEL_SPEED_KD                  0.0f
 #define WHEEL_SPEED_I_LIMIT             5000.0f
 #define WHEEL_SPEED_DEADBAND_PPS        12.0f
+#define WHEEL_SPEED_FEEDFORWARD_OFFSET  487.0f
+#define WHEEL_SPEED_FEEDFORWARD_GAIN      0.031f
+#define WHEEL_SPEED_TARGET_SLEW_PPS_PER_S 2000.0f
 #define WHEEL_SPEED_DEFAULT_OUTPUT_MAX  1000U
 
 static pid_controller_t g_left_pid;
@@ -20,11 +23,17 @@ static wheel_speed_control_snapshot_t g_snapshot;
 static uint16_t g_left_output_limit;
 static uint16_t g_right_output_limit;
 static uint32_t g_last_update_ms;
+static float g_left_requested_pps;
+static float g_right_requested_pps;
 
 static bool wheel_speed_control_target_is_valid(float target_pps);
 static float wheel_speed_control_update_one(pid_controller_t *pid,
-    float target_pps, float measured_pps, float dt_s);
+    float target_pps, float measured_pps, float dt_s,
+    uint16_t output_limit);
 static int16_t wheel_speed_control_round_output(float output);
+static float wheel_speed_control_slew_target(
+    float current, float requested, float max_delta);
+static bool wheel_speed_control_crossed_zero(float previous, float current);
 static void wheel_speed_control_reset_pid_state(void);
 static void wheel_speed_control_deactivate(void);
 static void wheel_speed_control_fault(wheel_speed_control_result_t result);
@@ -65,6 +74,8 @@ void WheelSpeedControl_Init(uint32_t now_ms)
     g_snapshot.update_count = 0U;
     g_snapshot.last_result = WHEEL_SPEED_CONTROL_OK;
     g_snapshot.running = false;
+    g_left_requested_pps = 0.0f;
+    g_right_requested_pps = 0.0f;
     g_last_update_ms = now_ms;
 }
 
@@ -139,6 +150,8 @@ wheel_speed_control_result_t WheelSpeedControl_Start(uint32_t now_ms)
     g_snapshot.update_count = 0U;
     g_snapshot.last_result = WHEEL_SPEED_CONTROL_OK;
     g_snapshot.running = true;
+    g_left_requested_pps = 0.0f;
+    g_right_requested_pps = 0.0f;
     g_last_update_ms = now_ms;
     return WHEEL_SPEED_CONTROL_OK;
 }
@@ -156,9 +169,11 @@ wheel_speed_control_result_t WheelSpeedControl_SetTargets(
         return WHEEL_SPEED_CONTROL_BAD_TARGET;
     }
 
-    g_snapshot.left_target_pps = left_pps;
-    g_snapshot.right_target_pps = right_pps;
+    g_left_requested_pps = left_pps;
+    g_right_requested_pps = right_pps;
     if ((left_pps == 0.0f) && (right_pps == 0.0f)) {
+        g_snapshot.left_target_pps = 0.0f;
+        g_snapshot.right_target_pps = 0.0f;
         wheel_speed_control_reset_pid_state();
         g_snapshot.left_output_permille = 0;
         g_snapshot.right_output_permille = 0;
@@ -200,6 +215,9 @@ void WheelSpeedControl_Task(uint32_t now_ms)
     encoder_input_snapshot_t right_encoder;
     uint32_t elapsed_ms;
     float dt_s;
+    float target_max_delta;
+    float previous_left_target;
+    float previous_right_target;
     float left_output;
     float right_output;
 
@@ -225,6 +243,21 @@ void WheelSpeedControl_Task(uint32_t now_ms)
 
     dt_s = (float) elapsed_ms / 1000.0f;
     g_last_update_ms = now_ms;
+    target_max_delta = WHEEL_SPEED_TARGET_SLEW_PPS_PER_S * dt_s;
+    previous_left_target = g_snapshot.left_target_pps;
+    previous_right_target = g_snapshot.right_target_pps;
+    g_snapshot.left_target_pps = wheel_speed_control_slew_target(
+        previous_left_target, g_left_requested_pps, target_max_delta);
+    g_snapshot.right_target_pps = wheel_speed_control_slew_target(
+        previous_right_target, g_right_requested_pps, target_max_delta);
+    if (wheel_speed_control_crossed_zero(
+            previous_left_target, g_snapshot.left_target_pps)) {
+        PID_Reset(&g_left_pid);
+    }
+    if (wheel_speed_control_crossed_zero(
+            previous_right_target, g_snapshot.right_target_pps)) {
+        PID_Reset(&g_right_pid);
+    }
     g_snapshot.left_measured_pps = left_encoder.speed_pps;
     g_snapshot.right_measured_pps = right_encoder.speed_pps;
     g_snapshot.left_error_pps = g_snapshot.left_target_pps -
@@ -234,10 +267,12 @@ void WheelSpeedControl_Task(uint32_t now_ms)
 
     left_output = wheel_speed_control_update_one(&g_left_pid,
         g_snapshot.left_target_pps,
-        (float) g_snapshot.left_measured_pps, dt_s);
+        (float) g_snapshot.left_measured_pps, dt_s,
+        g_left_output_limit);
     right_output = wheel_speed_control_update_one(&g_right_pid,
         g_snapshot.right_target_pps,
-        (float) g_snapshot.right_measured_pps, dt_s);
+        (float) g_snapshot.right_measured_pps, dt_s,
+        g_right_output_limit);
     g_snapshot.left_output_permille =
         wheel_speed_control_round_output(left_output);
     g_snapshot.right_output_permille =
@@ -284,23 +319,36 @@ static bool wheel_speed_control_target_is_valid(float target_pps)
 }
 
 static float wheel_speed_control_update_one(pid_controller_t *pid,
-    float target_pps, float measured_pps, float dt_s)
+    float target_pps, float measured_pps, float dt_s,
+    uint16_t output_limit)
 {
-    float output;
+    float feedforward;
+    float correction;
+    float target_magnitude;
 
     if (target_pps == 0.0f) {
         PID_Reset(pid);
         return 0.0f;
     }
 
-    output = PID_Update(pid, target_pps, measured_pps, dt_s);
-    if ((target_pps > 0.0f) && (output < 0.0f)) {
-        return 0.0f;
+    target_magnitude = (target_pps > 0.0f) ? target_pps : -target_pps;
+    feedforward = WHEEL_SPEED_FEEDFORWARD_OFFSET +
+        WHEEL_SPEED_FEEDFORWARD_GAIN * target_magnitude;
+    if (feedforward > (float) output_limit) {
+        feedforward = (float) output_limit;
     }
-    if ((target_pps < 0.0f) && (output > 0.0f)) {
-        return 0.0f;
+
+    if (target_pps > 0.0f) {
+        PID_SetOutputLimits(pid, -feedforward,
+            (float) output_limit - feedforward);
+    } else {
+        feedforward = -feedforward;
+        PID_SetOutputLimits(pid,
+            -(float) output_limit - feedforward, -feedforward);
     }
-    return output;
+
+    correction = PID_Update(pid, target_pps, measured_pps, dt_s);
+    return feedforward + correction;
 }
 
 static int16_t wheel_speed_control_round_output(float output)
@@ -309,6 +357,24 @@ static int16_t wheel_speed_control_round_output(float output)
         return (int16_t) (output + 0.5f);
     }
     return (int16_t) (output - 0.5f);
+}
+
+static float wheel_speed_control_slew_target(
+    float current, float requested, float max_delta)
+{
+    if (requested > (current + max_delta)) {
+        return current + max_delta;
+    }
+    if (requested < (current - max_delta)) {
+        return current - max_delta;
+    }
+    return requested;
+}
+
+static bool wheel_speed_control_crossed_zero(float previous, float current)
+{
+    return ((previous > 0.0f) && (current <= 0.0f)) ||
+        ((previous < 0.0f) && (current >= 0.0f));
 }
 
 static void wheel_speed_control_reset_pid_state(void)
@@ -326,6 +392,8 @@ static void wheel_speed_control_deactivate(void)
     g_snapshot.right_error_pps = 0.0f;
     g_snapshot.left_output_permille = 0;
     g_snapshot.right_output_permille = 0;
+    g_left_requested_pps = 0.0f;
+    g_right_requested_pps = 0.0f;
     wheel_speed_control_reset_pid_state();
     BoardWheelDrive_SetZero();
 }

@@ -1,3 +1,9 @@
+[CmdletBinding()]
+param(
+    [switch]$AutoConnect,
+    [switch]$StartMinimized
+)
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -6,23 +12,39 @@ Add-Type -AssemblyName System.Drawing
 $script:serial = $null
 $script:rxBuffer = ""
 $script:lastStatusPoll = [DateTime]::MinValue
+$script:lastExternalCommandAt = [DateTime]::MinValue
 $script:connectionReadyAt = [DateTime]::MinValue
 $script:initialReadPending = $false
 $script:primePending = $false
 $script:baudRate = 9600
 $script:captureActive = $false
 $script:runCsvPath = $null
+$script:vofaPort = 13470
+$script:controlPort = 13471
+$script:vofaListener = $null
+$script:controlListener = $null
+$script:vofaClients = New-Object System.Collections.ArrayList
+$script:controlClients = New-Object System.Collections.ArrayList
 $script:utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:runtimeDir = Join-Path $PSScriptRoot "runtime"
 [void](New-Item -ItemType Directory -Force -Path $script:runtimeDir)
 $script:latestStatusPath = Join-Path $script:runtimeDir "latest_status.json"
 $script:latestRunPath = Join-Path $script:runtimeDir "latest_run.csv"
+$script:latestWavePath = Join-Path $script:runtimeDir "latest_wave.json"
+$script:latestTelemetryPath = Join-Path $script:runtimeDir "latest_telemetry.csv"
 $script:lastPortPath = Join-Path $script:runtimeDir "last_port.txt"
 $script:sessionLogPath = Join-Path $script:runtimeDir (
     "session_{0}.log" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
+$script:telemetryCsvPath = Join-Path $script:runtimeDir (
+    "telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
+$telemetryHeader = "timestamp,left_target_pps,left_speed_pps,right_target_pps,right_speed_pps,left_output_permille,right_output_permille`r`n"
+[System.IO.File]::WriteAllText(
+    $script:telemetryCsvPath, $telemetryHeader, $script:utf8NoBom)
+[System.IO.File]::WriteAllText(
+    $script:latestTelemetryPath, $telemetryHeader, $script:utf8NoBom)
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "CAR Speed Loop Tuner"
+$form.Text = "CAR Speed Loop Tuner | VOFA 13470 | MCP 13471"
 $form.ClientSize = New-Object System.Drawing.Size(760, 608)
 $form.StartPosition = "CenterScreen"
 $form.MinimumSize = New-Object System.Drawing.Size(776, 647)
@@ -59,6 +81,173 @@ function Add-Log([string]$text, [System.Drawing.Color]$color) {
         [System.IO.File]::AppendAllText(
             $script:sessionLogPath, "$entry`r`n", $script:utf8NoBom)
     } catch {}
+}
+
+function Send-TcpText(
+    [System.Net.Sockets.TcpClient]$client, [string]$text) {
+    try {
+        if (($null -eq $client) -or (-not $client.Connected)) {
+            return $false
+        }
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($text)
+        $stream = $client.GetStream()
+        $stream.Write($bytes, 0, $bytes.Length)
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Close-TcpClient([System.Net.Sockets.TcpClient]$client) {
+    if ($null -eq $client) { return }
+    try { $client.Close() } catch {}
+    try { $client.Dispose() } catch {}
+}
+
+function Broadcast-VofaLine([string]$line) {
+    $alive = New-Object System.Collections.ArrayList
+    foreach ($client in @($script:vofaClients)) {
+        if (Send-TcpText $client ($line + "`n")) {
+            [void]$alive.Add($client)
+        } else {
+            Close-TcpClient $client
+        }
+    }
+    $script:vofaClients = $alive
+}
+
+function Broadcast-ControlLine([string]$line) {
+    $alive = New-Object System.Collections.ArrayList
+    foreach ($entry in @($script:controlClients)) {
+        if (Send-TcpText $entry.Client ($line + "`n")) {
+            [void]$alive.Add($entry)
+        } else {
+            Close-TcpClient $entry.Client
+        }
+    }
+    $script:controlClients = $alive
+}
+
+function Test-ControlCommand([string]$line) {
+    if ($line -match '^spd (get|stop|stat)$' -or
+        $line -match '^spd run(?: (?:step|reverse|sweep))?$') {
+        return $true
+    }
+    return $line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$'
+}
+
+function Process-ControlLine($entry, [string]$line) {
+    $line = $line.Trim()
+    if ($line.Length -eq 0) { return }
+    if ($line -eq 'bridge ping') {
+        [void](Send-TcpText $entry.Client "BRIDGE PONG`n")
+        return
+    }
+    if (-not (Test-ControlCommand $line)) {
+        [void](Send-TcpText $entry.Client "ERR bridge_command`n")
+        return
+    }
+    $script:lastExternalCommandAt = [DateTime]::Now
+    if (-not (Send-Command $line $true)) {
+        [void](Send-TcpText $entry.Client "ERR bridge_disconnected`n")
+    }
+}
+
+function Test-TcpClientClosed([System.Net.Sockets.TcpClient]$client) {
+    try {
+        return $client.Client.Poll(
+            0, [System.Net.Sockets.SelectMode]::SelectRead) -and
+            ($client.Available -eq 0)
+    } catch {
+        return $true
+    }
+}
+
+function Process-ControlClients {
+    $alive = New-Object System.Collections.ArrayList
+    foreach ($entry in @($script:controlClients)) {
+        $client = $entry.Client
+        try {
+            if (Test-TcpClientClosed $client) {
+                Close-TcpClient $client
+                continue
+            }
+            while ($client.Available -gt 0) {
+                $length = [Math]::Min($client.Available, 4096)
+                $buffer = New-Object byte[] $length
+                $read = $client.GetStream().Read($buffer, 0, $buffer.Length)
+                if ($read -le 0) { break }
+                $entry.Buffer += [System.Text.Encoding]::ASCII.GetString(
+                    $buffer, 0, $read)
+                while (($newline = $entry.Buffer.IndexOf("`n")) -ge 0) {
+                    $line = $entry.Buffer.Substring(0, $newline).TrimEnd("`r")
+                    $entry.Buffer = $entry.Buffer.Substring($newline + 1)
+                    Process-ControlLine $entry $line
+                }
+            }
+            [void]$alive.Add($entry)
+        } catch {
+            Close-TcpClient $client
+        }
+    }
+    $script:controlClients = $alive
+}
+
+function Accept-TcpClients {
+    try {
+        while (($null -ne $script:vofaListener) -and
+            $script:vofaListener.Pending()) {
+            $client = $script:vofaListener.AcceptTcpClient()
+            $client.NoDelay = $true
+            [void]$script:vofaClients.Add($client)
+            Add-Log "VOFA+ connected on 127.0.0.1:$script:vofaPort." ([System.Drawing.Color]::DarkCyan)
+        }
+        while (($null -ne $script:controlListener) -and
+            $script:controlListener.Pending()) {
+            $client = $script:controlListener.AcceptTcpClient()
+            $client.NoDelay = $true
+            $entry = [pscustomobject]@{ Client = $client; Buffer = "" }
+            [void]$script:controlClients.Add($entry)
+            [void](Send-TcpText $client (
+                "BRIDGE READY control=$script:controlPort wave=6`n"))
+        }
+    } catch {
+        Add-Log "Bridge accept error: $($_.Exception.Message)" ([System.Drawing.Color]::Firebrick)
+    }
+}
+
+function Stop-TcpBridge {
+    foreach ($client in @($script:vofaClients)) {
+        Close-TcpClient $client
+    }
+    foreach ($entry in @($script:controlClients)) {
+        Close-TcpClient $entry.Client
+    }
+    $script:vofaClients.Clear()
+    $script:controlClients.Clear()
+    if ($null -ne $script:vofaListener) {
+        try { $script:vofaListener.Stop() } catch {}
+        $script:vofaListener = $null
+    }
+    if ($null -ne $script:controlListener) {
+        try { $script:controlListener.Stop() } catch {}
+        $script:controlListener = $null
+    }
+}
+
+function Start-TcpBridge {
+    try {
+        $script:vofaListener = New-Object System.Net.Sockets.TcpListener(
+            [System.Net.IPAddress]::Loopback, $script:vofaPort)
+        $script:controlListener = New-Object System.Net.Sockets.TcpListener(
+            [System.Net.IPAddress]::Loopback, $script:controlPort)
+        $script:vofaListener.Start()
+        $script:controlListener.Start()
+        Add-Log "Bridge ready: VOFA=$script:vofaPort MCP=$script:controlPort." ([System.Drawing.Color]::DarkCyan)
+    } catch {
+        Add-Log "Bridge start error: $($_.Exception.Message)" ([System.Drawing.Color]::Firebrick)
+        Stop-TcpBridge
+    }
 }
 
 function Start-RunCapture {
@@ -115,6 +304,61 @@ function Save-Status([hashtable]$values) {
             $script:captureActive = $false
         }
     }
+}
+
+function Parse-WaveLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        '^wave:(?<lt>-?\d+),(?<ls>-?\d+),(?<rt>-?\d+),(?<rs>-?\d+),(?<lo>-?\d+),(?<ro>-?\d+)$')
+    if (-not $match.Success) { return $null }
+    return @{
+        left_target_pps = [int]$match.Groups['lt'].Value
+        left_speed_pps = [int]$match.Groups['ls'].Value
+        right_target_pps = [int]$match.Groups['rt'].Value
+        right_speed_pps = [int]$match.Groups['rs'].Value
+        left_output_permille = [int]$match.Groups['lo'].Value
+        right_output_permille = [int]$match.Groups['ro'].Value
+    }
+}
+
+function Save-Wave([hashtable]$values) {
+    $timestamp = [DateTime]::Now.ToString("o")
+    $wave = [ordered]@{
+        timestamp = $timestamp
+        left_target_pps = $values['left_target_pps']
+        left_speed_pps = $values['left_speed_pps']
+        right_target_pps = $values['right_target_pps']
+        right_speed_pps = $values['right_speed_pps']
+        left_output_permille = $values['left_output_permille']
+        right_output_permille = $values['right_output_permille']
+    }
+    $row = @(
+        $timestamp,
+        $values['left_target_pps'], $values['left_speed_pps'],
+        $values['right_target_pps'], $values['right_speed_pps'],
+        $values['left_output_permille'],
+        $values['right_output_permille']) -join ','
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestWavePath,
+            ($wave | ConvertTo-Json), $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:telemetryCsvPath, "$row`r`n", $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:latestTelemetryPath, "$row`r`n", $script:utf8NoBom)
+    } catch {}
+}
+
+function Forward-Wave([hashtable]$values) {
+    $fireWater = "wave: {0}, {1}, {2}, {3}, {4}, {5}" -f
+        $values['left_target_pps'],
+        $values['left_speed_pps'],
+        $values['right_target_pps'],
+        $values['right_speed_pps'],
+        $values['left_output_permille'],
+        $values['right_output_permille']
+    Broadcast-VofaLine $fireWater
+    Save-Wave $values
 }
 
 function Refresh-Ports {
@@ -186,10 +430,17 @@ function Update-ConfigFromLine([string]$line) {
 }
 
 function Update-StatusFromLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        '^STAT state=(?<state>[A-Z]+) left=(?<left>-?\d+) right=(?<right>-?\d+) outL=(?<outL>-?\d+) outR=(?<outR>-?\d+) invL=(?<invL>\d+) invR=(?<invR>\d+) res=(?<res>\d+) hz=(?<hz>[01])$')
+    if (-not $match.Success) {
+        return $false
+    }
     $values = @{}
-    foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
-        $line, '(?<key>[A-Za-z][A-Za-z0-9]*)=(?<value>[^\s]+)')) {
-        $values[$match.Groups['key'].Value] = $match.Groups['value'].Value
+    foreach ($key in @(
+        'state', 'left', 'right', 'outL', 'outR',
+        'invL', 'invR', 'res', 'hz')) {
+        $values[$key] = $match.Groups[$key].Value
     }
     if ($values.ContainsKey('state')) { $stateValue.Text = $values['state'] }
     if ($values.ContainsKey('left')) { $leftSpeedValue.Text = $values['left'] + " pps" }
@@ -209,15 +460,31 @@ function Update-StatusFromLine([string]$line) {
         }
     }
     Save-Status $values
+    return $true
 }
 
 function Process-Line([string]$line) {
     $line = $line.Trim()
     if ($line.Length -eq 0) { return }
-    if ($line.StartsWith('STAT ')) {
-        Update-StatusFromLine $line
+    if ($line.StartsWith('wave:')) {
+        $wave = Parse-WaveLine $line
+        if ($null -ne $wave) {
+            Broadcast-ControlLine $line
+            Forward-Wave $wave
+        } else {
+            Add-Log "RX dropped malformed wave frame." ([System.Drawing.Color]::DarkOrange)
+        }
         return
     }
+    if ($line.StartsWith('STAT ')) {
+        if (Update-StatusFromLine $line) {
+            Broadcast-ControlLine $line
+        } else {
+            Add-Log "RX dropped malformed status frame." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
+    Broadcast-ControlLine $line
     if ($line.StartsWith('OK CFG ')) {
         Update-ConfigFromLine $line
     }
@@ -302,10 +569,10 @@ $parameterGroup.Size = New-Object System.Drawing.Size(736, 130)
 $form.Controls.Add($parameterGroup)
 
 $parameterGroup.Controls.Add((New-Label "Kp" 15 23 105))
-$kpBox = New-TextBox "0.2500" 15 46 105
+$kpBox = New-TextBox "0.1200" 15 46 105
 $parameterGroup.Controls.Add($kpBox)
 $parameterGroup.Controls.Add((New-Label "Ki" 135 23 105))
-$kiBox = New-TextBox "0.1000" 135 46 105
+$kiBox = New-TextBox "0.0500" 135 46 105
 $parameterGroup.Controls.Add($kiBox)
 $parameterGroup.Controls.Add((New-Label "Kd" 255 23 105))
 $kdBox = New-TextBox "0.0000" 255 46 105
@@ -314,7 +581,7 @@ $parameterGroup.Controls.Add((New-Label "Target (pps)" 390 23 120))
 $targetBox = New-TextBox "3500" 390 46 120
 $parameterGroup.Controls.Add($targetBox)
 $parameterGroup.Controls.Add((New-Label "Limit" 540 23 80))
-$limitBox = New-TextBox "700" 540 46 80
+$limitBox = New-TextBox "650" 540 46 80
 $parameterGroup.Controls.Add($limitBox)
 
 $readButton = New-Object System.Windows.Forms.Button
@@ -463,6 +730,8 @@ $stopButton.Add_Click({ [void](Send-Command "spd stop") })
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 80
 $timer.Add_Tick({
+    Accept-TcpClients
+    Process-ControlClients
     if (($null -eq $script:serial) -or (-not $script:serial.IsOpen)) { return }
     try {
         if ($script:serial.BytesToRead -gt 0) {
@@ -486,7 +755,10 @@ $timer.Add_Tick({
             [void](Send-Command "spd get")
             $script:initialReadPending = $false
         }
-        if (($now - $script:lastStatusPoll).TotalMilliseconds -ge 400) {
+        $externalControlActive =
+            (($now - $script:lastExternalCommandAt).TotalMilliseconds -lt 900)
+        if ((-not $externalControlActive) -and
+            (($now - $script:lastStatusPoll).TotalMilliseconds -ge 400)) {
             [void](Send-Command "spd stat" $true)
             $script:lastStatusPoll = $now
         }
@@ -495,12 +767,20 @@ $timer.Add_Tick({
         Disconnect-Serial
     }
 })
+Start-TcpBridge
 $timer.Start()
 
 $form.Add_FormClosing({
     $timer.Stop()
     Disconnect-Serial
+    Stop-TcpBridge
 })
 
 Refresh-Ports
+if ($StartMinimized) {
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
+}
+if ($AutoConnect) {
+    $form.Add_Shown({ $connectButton.PerformClick() })
+}
 [void]$form.ShowDialog()

@@ -20,6 +20,13 @@ typedef enum {
 } speed_bringup_test_state_t;
 
 typedef enum {
+    SPEED_BRINGUP_PROFILE_RAMP = 0,
+    SPEED_BRINGUP_PROFILE_STEP,
+    SPEED_BRINGUP_PROFILE_REVERSE,
+    SPEED_BRINGUP_PROFILE_SWEEP
+} speed_bringup_profile_t;
+
+typedef enum {
     SPEED_BRINGUP_CONFIG_OK = 0,
     SPEED_BRINGUP_CONFIG_BAD_ARGUMENT,
     SPEED_BRINGUP_CONFIG_BAD_RANGE,
@@ -38,9 +45,12 @@ speed_bringup_config_result_t SpeedBringupTest_SetConfig(
     const speed_bringup_config_t *config);
 bool SpeedBringupTest_GetConfig(speed_bringup_config_t *config);
 bool SpeedBringupTest_RequestStart(void);
+bool SpeedBringupTest_RequestProfile(speed_bringup_profile_t profile);
 void SpeedBringupTest_RequestStop(void);
 speed_bringup_test_state_t SpeedBringupTest_GetState(void);
 const char *SpeedBringupTest_GetStateText(void);
+speed_bringup_profile_t SpeedBringupTest_GetProfile(void);
+const char *SpeedBringupTest_GetProfileText(void);
 uint32_t SpeedBringupTest_GetRunCount(void);
 
 #endif

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ENCODER_INPUT_SAMPLE_INTERVAL_MS 50U
+#define ENCODER_INPUT_SAMPLE_INTERVAL_MS 10U
 
 typedef enum {
     ENCODER_INPUT_0 = 0,

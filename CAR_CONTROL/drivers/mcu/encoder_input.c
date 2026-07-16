@@ -15,6 +15,7 @@
 
 #define ENCODER_GPIOB_IRQN ENCODER_GPIOB_INT_IRQN
 #define ENCODER_GPIOB_GROUP_IIDX ENCODER_GPIOB_INT_IIDX
+#define ENCODER_INPUT_SPEED_FILTER_SAMPLES 4U
 
 typedef struct {
     volatile int32_t count;
@@ -24,6 +25,10 @@ typedef struct {
     int32_t last_sample_count;
     int32_t delta;
     int32_t speed_pps;
+    int32_t speed_history[ENCODER_INPUT_SPEED_FILTER_SAMPLES];
+    int64_t speed_sum;
+    uint8_t speed_history_index;
+    uint8_t speed_history_count;
     int8_t direction;
     bool inverted;
 } encoder_input_state_t;
@@ -39,6 +44,8 @@ static uint32_t encoder_input_gpiob_pin_mask(void);
 static uint32_t encoder_input_enter_critical(void);
 static void encoder_input_exit_critical(uint32_t primask);
 static int8_t encoder_input_direction_from_delta(int32_t delta);
+static int32_t encoder_input_filter_speed(
+    encoder_input_state_t *encoder, int32_t raw_speed_pps);
 
 void EncoderInput_Init(uint32_t now_ms)
 {
@@ -77,11 +84,14 @@ void EncoderInput_Task(uint32_t now_ms)
     for (i = 0U; i < (uint32_t) ENCODER_INPUT_COUNT; i++) {
         encoder_input_state_t *encoder = &g_encoder[i];
         int32_t delta = counts[i] - encoder->last_sample_count;
+        int32_t raw_speed_pps;
 
         encoder->last_sample_count = counts[i];
         encoder->delta = delta;
-        encoder->speed_pps =
+        raw_speed_pps =
             (int32_t) (((int64_t) delta * 1000) / elapsed_ms);
+        encoder->speed_pps = encoder_input_filter_speed(
+            encoder, raw_speed_pps);
         encoder->direction = encoder_input_direction_from_delta(delta);
     }
 
@@ -104,6 +114,7 @@ void EncoderInput_SetInverted(encoder_input_id_t id, bool inverted)
 void EncoderInput_Reset(encoder_input_id_t id)
 {
     uint32_t primask;
+    uint32_t i;
 
     if (!encoder_input_is_valid_id(id)) {
         return;
@@ -119,6 +130,12 @@ void EncoderInput_Reset(encoder_input_id_t id)
     g_encoder[id].last_sample_count = 0;
     g_encoder[id].delta = 0;
     g_encoder[id].speed_pps = 0;
+    for (i = 0U; i < ENCODER_INPUT_SPEED_FILTER_SAMPLES; i++) {
+        g_encoder[id].speed_history[i] = 0;
+    }
+    g_encoder[id].speed_sum = 0;
+    g_encoder[id].speed_history_index = 0U;
+    g_encoder[id].speed_history_count = 0U;
     g_encoder[id].direction = 0;
 }
 
@@ -264,4 +281,28 @@ static int8_t encoder_input_direction_from_delta(int32_t delta)
         return -1;
     }
     return 0;
+}
+
+static int32_t encoder_input_filter_speed(
+    encoder_input_state_t *encoder, int32_t raw_speed_pps)
+{
+    uint8_t index = encoder->speed_history_index;
+
+    if (encoder->speed_history_count <
+        ENCODER_INPUT_SPEED_FILTER_SAMPLES) {
+        encoder->speed_history_count++;
+    } else {
+        encoder->speed_sum -= encoder->speed_history[index];
+    }
+
+    encoder->speed_history[index] = raw_speed_pps;
+    encoder->speed_sum += raw_speed_pps;
+    index++;
+    if (index >= ENCODER_INPUT_SPEED_FILTER_SAMPLES) {
+        index = 0U;
+    }
+    encoder->speed_history_index = index;
+
+    return (int32_t) (encoder->speed_sum /
+        encoder->speed_history_count);
 }

@@ -13,22 +13,29 @@
 
 #define SPEED_TUNING_LINE_SIZE  96U
 #define SPEED_TUNING_TOKEN_MAX   8U
+#define SPEED_TUNING_WAVE_INTERVAL_MS 100U
 
 static char g_line[SPEED_TUNING_LINE_SIZE];
+static uint32_t g_last_wave_ms;
 
 static void speed_tuning_process_line(char *line);
 static uint16_t speed_tuning_tokenize(
     char *line, char **tokens, uint16_t capacity);
 static bool speed_tuning_parse_float(const char *text, float *value);
 static bool speed_tuning_parse_u16(const char *text, uint16_t *value);
+static bool speed_tuning_parse_profile(
+    const char *text, speed_bringup_profile_t *profile);
 static void speed_tuning_send_config(void);
 static void speed_tuning_send_status(void);
+static void speed_tuning_send_wave(uint32_t now_ms);
 static void speed_tuning_write_u32(uint32_t value);
 static void speed_tuning_write_i32(int32_t value);
 static void speed_tuning_write_float4(float value);
+static int32_t speed_tuning_round_float(float value);
 
 void SpeedTuningConsole_Init(void)
 {
+    g_last_wave_ms = 0U;
     BluetoothUart_WriteText("OK READY v=1\r\n");
 }
 
@@ -36,16 +43,14 @@ void SpeedTuningConsole_Task(uint32_t now_ms)
 {
     bluetooth_uart_line_result_t result;
 
-    (void) now_ms;
     result = BluetoothUart_ReadLine(g_line, sizeof(g_line));
-    if (result == BLUETOOTH_UART_LINE_NONE) {
-        return;
-    }
     if (result == BLUETOOTH_UART_LINE_OVERFLOW) {
         BluetoothUart_WriteText("ERR line\r\n");
-        return;
+    } else if (result == BLUETOOTH_UART_LINE_READY) {
+        speed_tuning_process_line(g_line);
     }
-    speed_tuning_process_line(g_line);
+
+    speed_tuning_send_wave(now_ms);
 }
 
 static void speed_tuning_process_line(char *line)
@@ -70,11 +75,20 @@ static void speed_tuning_process_line(char *line)
         speed_tuning_send_status();
         return;
     }
-    if ((token_count == 2U) &&
+    if (((token_count == 2U) || (token_count == 3U)) &&
         (strcmp(tokens[0], "spd") == 0) &&
         (strcmp(tokens[1], "run") == 0)) {
-        if (SpeedBringupTest_RequestStart()) {
-            BluetoothUart_WriteText("OK RUN\r\n");
+        speed_bringup_profile_t profile = SPEED_BRINGUP_PROFILE_RAMP;
+
+        if ((token_count == 3U) &&
+            !speed_tuning_parse_profile(tokens[2], &profile)) {
+            BluetoothUart_WriteText("ERR profile\r\n");
+            return;
+        }
+        if (SpeedBringupTest_RequestProfile(profile)) {
+            BluetoothUart_WriteText("OK RUN ");
+            BluetoothUart_WriteText(SpeedBringupTest_GetProfileText());
+            BluetoothUart_WriteText("\r\n");
         } else {
             BluetoothUart_WriteText("ERR run_state\r\n");
         }
@@ -115,7 +129,7 @@ static void speed_tuning_process_line(char *line)
     }
 
     BluetoothUart_WriteText(
-        "ERR command use: spd get|set|run|stop|stat\r\n");
+        "ERR command use: spd get|set|run [step|reverse|sweep]|stop|stat\r\n");
 }
 
 static uint16_t speed_tuning_tokenize(
@@ -199,6 +213,27 @@ static bool speed_tuning_parse_u16(const char *text, uint16_t *value)
     return true;
 }
 
+static bool speed_tuning_parse_profile(
+    const char *text, speed_bringup_profile_t *profile)
+{
+    if ((text == NULL) || (profile == NULL)) {
+        return false;
+    }
+    if (strcmp(text, "step") == 0) {
+        *profile = SPEED_BRINGUP_PROFILE_STEP;
+        return true;
+    }
+    if (strcmp(text, "reverse") == 0) {
+        *profile = SPEED_BRINGUP_PROFILE_REVERSE;
+        return true;
+    }
+    if (strcmp(text, "sweep") == 0) {
+        *profile = SPEED_BRINGUP_PROFILE_SWEEP;
+        return true;
+    }
+    return false;
+}
+
 static void speed_tuning_send_config(void)
 {
     speed_bringup_config_t config;
@@ -256,6 +291,37 @@ static void speed_tuning_send_status(void)
     BluetoothUart_WriteText("\r\n");
 }
 
+static void speed_tuning_send_wave(uint32_t now_ms)
+{
+    wheel_speed_control_snapshot_t speed;
+
+    if ((uint32_t) (now_ms - g_last_wave_ms) <
+        SPEED_TUNING_WAVE_INTERVAL_MS) {
+        return;
+    }
+    g_last_wave_ms = now_ms;
+
+    if (!WheelSpeedControl_GetSnapshot(&speed)) {
+        return;
+    }
+
+    BluetoothUart_WriteText("wave:");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(speed.left_target_pps));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(speed.left_measured_pps);
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(speed.right_target_pps));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(speed.right_measured_pps);
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(speed.left_output_permille);
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(speed.right_output_permille);
+    BluetoothUart_WriteText("\r\n");
+}
+
 static void speed_tuning_write_u32(uint32_t value)
 {
     char buffer[12];
@@ -297,4 +363,12 @@ static void speed_tuning_write_float4(float value)
     digits[3] = (char) ('0' + (fraction % 10U));
     digits[4] = '\0';
     BluetoothUart_WriteText(digits);
+}
+
+static int32_t speed_tuning_round_float(float value)
+{
+    if (value >= 0.0f) {
+        return (int32_t) (value + 0.5f);
+    }
+    return (int32_t) (value - 0.5f);
 }

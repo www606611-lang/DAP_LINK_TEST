@@ -1,22 +1,31 @@
 [CmdletBinding()]
 param(
     [string]$Port = "COM6",
-    [ValidateSet("Get", "Set", "Run", "Stop", "Status")]
+    [ValidateSet(
+        "Get", "Set", "Run", "Step", "Reverse", "Sweep",
+        "Stop", "Status")]
     [string]$Action = "Status",
     [switch]$Takeover,
+    [switch]$DirectSerial,
+    [string]$BridgeHost = "127.0.0.1",
+    [uint16]$BridgePort = 13471,
     [switch]$ApplyConfig,
-    [single]$Kp = 0.25,
-    [single]$Ki = 0.10,
+    [single]$Kp = 0.12,
+    [single]$Ki = 0.05,
     [single]$Kd = 0.0,
     [single]$Target = 3500.0,
-    [uint16]$Limit = 700,
+    [uint16]$Limit = 650,
     [uint32]$PollMs = 300,
-    [uint32]$RunTimeoutMs = 7000
+    [uint32]$RunTimeoutMs = 15000
 )
 
 $ErrorActionPreference = "Stop"
 $baudRate = 9600
 $serial = $null
+$bridgeClient = $null
+$bridgeReader = $null
+$bridgeWriter = $null
+$transport = "direct_serial"
 $culture = [System.Globalization.CultureInfo]::InvariantCulture
 $runtimeDir = Join-Path $PSScriptRoot "runtime"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -34,8 +43,56 @@ function Stop-GuiOwner {
     }
 }
 
+function Connect-Bridge {
+    try {
+        $script:bridgeClient = New-Object System.Net.Sockets.TcpClient
+        $async = $script:bridgeClient.BeginConnect(
+            $BridgeHost, [int]$BridgePort, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne(500)) {
+            Close-Bridge
+            return $false
+        }
+        $script:bridgeClient.EndConnect($async)
+        $script:bridgeClient.NoDelay = $true
+        $stream = $script:bridgeClient.GetStream()
+        $stream.ReadTimeout = 250
+        $stream.WriteTimeout = 1500
+        $script:bridgeReader = New-Object System.IO.StreamReader(
+            $stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+        $script:bridgeWriter = New-Object System.IO.StreamWriter(
+            $stream, [System.Text.Encoding]::ASCII, 1024, $true)
+        $script:bridgeWriter.NewLine = "`n"
+        $script:bridgeWriter.AutoFlush = $true
+        $script:transport = "tcp_bridge"
+        return $true
+    } catch {
+        Close-Bridge
+        return $false
+    }
+}
+
+function Close-Bridge {
+    if ($null -ne $script:bridgeReader) {
+        try { $script:bridgeReader.Dispose() } catch {}
+        $script:bridgeReader = $null
+    }
+    if ($null -ne $script:bridgeWriter) {
+        try { $script:bridgeWriter.Dispose() } catch {}
+        $script:bridgeWriter = $null
+    }
+    if ($null -ne $script:bridgeClient) {
+        try { $script:bridgeClient.Close() } catch {}
+        try { $script:bridgeClient.Dispose() } catch {}
+        $script:bridgeClient = $null
+    }
+}
+
 function Send-Line([string]$line) {
-    $serial.Write($line + "`n")
+    if ($transport -eq "tcp_bridge") {
+        $bridgeWriter.WriteLine($line)
+    } else {
+        $serial.Write($line + "`n")
+    }
     Write-Host "TX $line"
 }
 
@@ -43,15 +100,27 @@ function Read-Expected([string[]]$prefixes, [uint32]$timeoutMs = 2500) {
     $deadline = [DateTime]::Now.AddMilliseconds($timeoutMs)
     while ([DateTime]::Now -lt $deadline) {
         try {
-            $line = $serial.ReadLine().Trim()
+            if ($transport -eq "tcp_bridge") {
+                $line = $bridgeReader.ReadLine()
+                if ($null -eq $line) {
+                    throw "Bridge connection closed."
+                }
+                $line = $line.Trim()
+            } else {
+                $line = $serial.ReadLine().Trim()
+            }
             if ($line.Length -eq 0) { continue }
+            if ($line.StartsWith("wave:")) { continue }
             Write-Host "RX $line"
             foreach ($prefix in $prefixes) {
                 if ($line.StartsWith($prefix)) {
                     return $line
                 }
             }
-        } catch [System.TimeoutException] {}
+        } catch [System.TimeoutException] {
+        } catch [System.IO.IOException] {
+            if ($transport -ne "tcp_bridge") { throw }
+        }
     }
     throw "Timed out waiting for: $($prefixes -join ', ')"
 }
@@ -100,8 +169,10 @@ function Save-DirectStatus([hashtable]$values, [string]$csvPath) {
     $timestamp = [DateTime]::Now.ToString("o")
     $status = [ordered]@{
         timestamp = $timestamp
-        source = "direct_serial"
-        port = $Port
+        source = $transport
+        port = if ($transport -eq "tcp_bridge") {
+            "$BridgeHost`:$BridgePort"
+        } else { $Port }
         baud = $baudRate
         state = $values['state']
         left_speed_pps = [int]$values['left']
@@ -135,26 +206,36 @@ if ($Takeover) {
 }
 
 try {
-    $serial = New-Object System.IO.Ports.SerialPort(
-        $Port, $baudRate, [System.IO.Ports.Parity]::None, 8,
-        [System.IO.Ports.StopBits]::One)
-    $serial.Encoding = [System.Text.Encoding]::ASCII
-    $serial.DtrEnable = $false
-    $serial.RtsEnable = $false
-    $serial.NewLine = "`n"
-    $serial.ReadTimeout = 250
-    $serial.WriteTimeout = 1500
-    $serial.Open()
-    Write-Host "OPEN port=$Port baud=$baudRate"
-    [System.IO.File]::WriteAllText(
-        (Join-Path $runtimeDir "last_port.txt"),
-        $Port, [System.Text.Encoding]::ASCII)
-    Start-Sleep -Milliseconds 800
-    $serial.DiscardInBuffer()
-    $serial.Write("`n")
-    Start-Sleep -Milliseconds 180
-    $serial.DiscardInBuffer()
-    $serial.DiscardOutBuffer()
+    $runCommand = $null
+    $bridgeConnected = $false
+    if ((-not $Takeover) -and (-not $DirectSerial)) {
+        $bridgeConnected = Connect-Bridge
+    }
+    if ($bridgeConnected) {
+        Write-Host "OPEN bridge=$BridgeHost`:$BridgePort"
+    } else {
+        $transport = "direct_serial"
+        $serial = New-Object System.IO.Ports.SerialPort(
+            $Port, $baudRate, [System.IO.Ports.Parity]::None, 8,
+            [System.IO.Ports.StopBits]::One)
+        $serial.Encoding = [System.Text.Encoding]::ASCII
+        $serial.DtrEnable = $false
+        $serial.RtsEnable = $false
+        $serial.NewLine = "`n"
+        $serial.ReadTimeout = 250
+        $serial.WriteTimeout = 1500
+        $serial.Open()
+        Write-Host "OPEN port=$Port baud=$baudRate"
+        [System.IO.File]::WriteAllText(
+            (Join-Path $runtimeDir "last_port.txt"),
+            $Port, [System.Text.Encoding]::ASCII)
+        Start-Sleep -Milliseconds 800
+        $serial.DiscardInBuffer()
+        $serial.Write("`n")
+        Start-Sleep -Milliseconds 180
+        $serial.DiscardInBuffer()
+        $serial.DiscardOutBuffer()
+    }
 
     switch ($Action) {
         "Get" {
@@ -178,15 +259,31 @@ try {
             }
         }
         "Run" {
+            $runCommand = "spd run"
+        }
+        "Step" {
+            $runCommand = "spd run step"
+        }
+        "Reverse" {
+            $runCommand = "spd run reverse"
+        }
+        "Sweep" {
+            $runCommand = "spd run sweep"
+        }
+    }
+
+    if ($null -ne $runCommand) {
             if ($ApplyConfig) {
                 [void](Invoke-Protocol (Get-SetCommand) @("OK CFG ", "ERR "))
             } else {
                 [void](Invoke-Protocol "spd get" @("OK CFG ", "ERR "))
             }
-            [void](Invoke-Protocol "spd run" @("OK RUN", "ERR "))
+            [void](Invoke-Protocol $runCommand @("OK RUN", "ERR "))
 
             $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
-            $csvPath = Join-Path $runtimeDir "direct_run_$stamp.csv"
+            $profileName = $Action.ToLowerInvariant()
+            $csvPath = Join-Path $runtimeDir (
+                "direct_${profileName}_$stamp.csv")
             $latestCsvPath = Join-Path $runtimeDir "latest_direct_run.csv"
             $header = "timestamp,state,left_pps,right_pps,left_output,right_output,invalid_left,invalid_right,result,high_z`r`n"
             [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
@@ -210,9 +307,9 @@ try {
                 throw "Run did not reach a terminal state before timeout."
             }
             Write-Host "CAPTURE $csvPath"
-        }
     }
 } finally {
+    Close-Bridge
     if ($null -ne $serial) {
         if ($serial.IsOpen) { $serial.Close() }
         $serial.Dispose()

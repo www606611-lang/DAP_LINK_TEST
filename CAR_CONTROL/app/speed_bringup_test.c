@@ -5,10 +5,13 @@
 
 #include <stddef.h>
 
-#define SPEED_BRINGUP_RAMP_MS           1000U
-#define SPEED_BRINGUP_RUN_MS            5000U
+#define SPEED_BRINGUP_RAMP_MS             1000U
+#define SPEED_BRINGUP_RUN_MS              5000U
+#define SPEED_BRINGUP_STEP_RUN_MS         7000U
+#define SPEED_BRINGUP_REVERSE_RUN_MS      9000U
+#define SPEED_BRINGUP_SWEEP_RUN_MS       11000U
 #define SPEED_BRINGUP_DEFAULT_TARGET_PPS   3500.0f
-#define SPEED_BRINGUP_DEFAULT_OUTPUT_LIMIT  700U
+#define SPEED_BRINGUP_DEFAULT_OUTPUT_LIMIT  650U
 
 static speed_bringup_test_state_t g_state;
 static speed_bringup_config_t g_config;
@@ -16,10 +19,18 @@ static uint32_t g_run_started_ms;
 static uint32_t g_run_count;
 static bool g_start_requested;
 static bool g_stop_requested;
+static speed_bringup_profile_t g_requested_profile;
+static speed_bringup_profile_t g_active_profile;
 
-static void speed_bringup_start(uint32_t now_ms);
+static void speed_bringup_start(
+    uint32_t now_ms, speed_bringup_profile_t profile);
 static void speed_bringup_stop(car_control_block_reason_t reason,
     speed_bringup_test_state_t next_state);
+static bool speed_bringup_profile_is_valid(speed_bringup_profile_t profile);
+static uint32_t speed_bringup_profile_duration_ms(
+    speed_bringup_profile_t profile);
+static float speed_bringup_profile_target(
+    speed_bringup_profile_t profile, uint32_t elapsed_ms);
 
 void SpeedBringupTest_Init(bool reset_locked)
 {
@@ -29,6 +40,8 @@ void SpeedBringupTest_Init(bool reset_locked)
     g_run_count = 0U;
     g_start_requested = false;
     g_stop_requested = false;
+    g_requested_profile = SPEED_BRINGUP_PROFILE_RAMP;
+    g_active_profile = SPEED_BRINGUP_PROFILE_RAMP;
     (void) WheelSpeedControl_GetTunings(&g_config.pid);
     g_config.target_pps = SPEED_BRINGUP_DEFAULT_TARGET_PPS;
     g_config.output_limit_permille =
@@ -42,6 +55,7 @@ void SpeedBringupTest_Task(uint32_t now_ms, bool press_event)
     wheel_speed_control_snapshot_t snapshot;
     bool start_event = g_start_requested;
     bool stop_event = g_stop_requested;
+    speed_bringup_profile_t requested_profile = g_requested_profile;
 
     g_start_requested = false;
     g_stop_requested = false;
@@ -64,8 +78,11 @@ void SpeedBringupTest_Task(uint32_t now_ms, bool press_event)
         case SPEED_BRINGUP_TEST_READY:
         case SPEED_BRINGUP_TEST_COMPLETE:
         case SPEED_BRINGUP_TEST_ABORTED:
-            if (press_event || start_event) {
-                speed_bringup_start(now_ms);
+            if (press_event) {
+                speed_bringup_start(
+                    now_ms, SPEED_BRINGUP_PROFILE_RAMP);
+            } else if (start_event) {
+                speed_bringup_start(now_ms, requested_profile);
             }
             return;
 
@@ -84,19 +101,15 @@ void SpeedBringupTest_Task(uint32_t now_ms, bool press_event)
             }
 
             elapsed_ms = now_ms - g_run_started_ms;
-            if (elapsed_ms >= SPEED_BRINGUP_RUN_MS) {
+            if (elapsed_ms >=
+                speed_bringup_profile_duration_ms(g_active_profile)) {
                 speed_bringup_stop(CAR_CONTROL_BLOCK_TEST_COMPLETE,
                     SPEED_BRINGUP_TEST_COMPLETE);
                 return;
             }
 
-            if (elapsed_ms < SPEED_BRINGUP_RAMP_MS) {
-                target_pps = (g_config.target_pps *
-                    (float) elapsed_ms) /
-                    (float) SPEED_BRINGUP_RAMP_MS;
-            } else {
-                target_pps = g_config.target_pps;
-            }
+            target_pps = speed_bringup_profile_target(
+                g_active_profile, elapsed_ms);
 
             if (WheelSpeedControl_SetTargets(target_pps, target_pps) !=
                 WHEEL_SPEED_CONTROL_OK) {
@@ -147,10 +160,18 @@ bool SpeedBringupTest_GetConfig(speed_bringup_config_t *config)
 
 bool SpeedBringupTest_RequestStart(void)
 {
+    return SpeedBringupTest_RequestProfile(SPEED_BRINGUP_PROFILE_RAMP);
+}
+
+bool SpeedBringupTest_RequestProfile(speed_bringup_profile_t profile)
+{
     if ((g_state == SPEED_BRINGUP_TEST_LOCKED) ||
-        (g_state == SPEED_BRINGUP_TEST_RUNNING)) {
+        (g_state == SPEED_BRINGUP_TEST_RUNNING) ||
+        !speed_bringup_profile_is_valid(profile)) {
         return false;
     }
+    g_requested_profile = profile;
+    g_active_profile = profile;
     g_start_requested = true;
     return true;
 }
@@ -183,13 +204,39 @@ const char *SpeedBringupTest_GetStateText(void)
     }
 }
 
+speed_bringup_profile_t SpeedBringupTest_GetProfile(void)
+{
+    return g_active_profile;
+}
+
+const char *SpeedBringupTest_GetProfileText(void)
+{
+    switch (g_active_profile) {
+        case SPEED_BRINGUP_PROFILE_RAMP:
+            return "RAMP";
+        case SPEED_BRINGUP_PROFILE_STEP:
+            return "STEP";
+        case SPEED_BRINGUP_PROFILE_REVERSE:
+            return "REV";
+        case SPEED_BRINGUP_PROFILE_SWEEP:
+            return "SWEEP";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 uint32_t SpeedBringupTest_GetRunCount(void)
 {
     return g_run_count;
 }
 
-static void speed_bringup_start(uint32_t now_ms)
+static void speed_bringup_start(
+    uint32_t now_ms, speed_bringup_profile_t profile)
 {
+    if (!speed_bringup_profile_is_valid(profile)) {
+        g_state = SPEED_BRINGUP_TEST_ABORTED;
+        return;
+    }
     if (WheelSpeedControl_SetOutputLimits(
             g_config.output_limit_permille,
             g_config.output_limit_permille) != WHEEL_SPEED_CONTROL_OK) {
@@ -209,6 +256,7 @@ static void speed_bringup_start(uint32_t now_ms)
     }
 
     g_run_started_ms = now_ms;
+    g_active_profile = profile;
     g_run_count++;
     g_state = SPEED_BRINGUP_TEST_RUNNING;
 }
@@ -218,4 +266,103 @@ static void speed_bringup_stop(car_control_block_reason_t reason,
 {
     WheelSpeedControl_Stop(reason);
     g_state = next_state;
+}
+
+static bool speed_bringup_profile_is_valid(speed_bringup_profile_t profile)
+{
+    return profile <= SPEED_BRINGUP_PROFILE_SWEEP;
+}
+
+static uint32_t speed_bringup_profile_duration_ms(
+    speed_bringup_profile_t profile)
+{
+    switch (profile) {
+        case SPEED_BRINGUP_PROFILE_STEP:
+            return SPEED_BRINGUP_STEP_RUN_MS;
+        case SPEED_BRINGUP_PROFILE_REVERSE:
+            return SPEED_BRINGUP_REVERSE_RUN_MS;
+        case SPEED_BRINGUP_PROFILE_SWEEP:
+            return SPEED_BRINGUP_SWEEP_RUN_MS;
+        case SPEED_BRINGUP_PROFILE_RAMP:
+        default:
+            return SPEED_BRINGUP_RUN_MS;
+    }
+}
+
+static float speed_bringup_profile_target(
+    speed_bringup_profile_t profile, uint32_t elapsed_ms)
+{
+    float target = g_config.target_pps;
+
+    switch (profile) {
+        case SPEED_BRINGUP_PROFILE_STEP:
+            if (elapsed_ms < 1000U) {
+                return 0.5f * target * (float) elapsed_ms / 1000.0f;
+            }
+            if (elapsed_ms < 2500U) {
+                return 0.5f * target;
+            }
+            if (elapsed_ms < 4500U) {
+                return target;
+            }
+            if (elapsed_ms < 6500U) {
+                return 0.6f * target;
+            }
+            return 0.6f * target *
+                (float) (SPEED_BRINGUP_STEP_RUN_MS - elapsed_ms) /
+                500.0f;
+
+        case SPEED_BRINGUP_PROFILE_REVERSE:
+            target *= 0.7f;
+            if (elapsed_ms < 1000U) {
+                return target * (float) elapsed_ms / 1000.0f;
+            }
+            if (elapsed_ms < 3000U) {
+                return target;
+            }
+            if (elapsed_ms < 4000U) {
+                return target * (float) (4000U - elapsed_ms) / 1000.0f;
+            }
+            if (elapsed_ms < 4500U) {
+                return 0.0f;
+            }
+            if (elapsed_ms < 5500U) {
+                return -target * (float) (elapsed_ms - 4500U) / 1000.0f;
+            }
+            if (elapsed_ms < 7500U) {
+                return -target;
+            }
+            if (elapsed_ms < 8500U) {
+                return -target * (float) (8500U - elapsed_ms) / 1000.0f;
+            }
+            return 0.0f;
+
+        case SPEED_BRINGUP_PROFILE_SWEEP:
+            if (elapsed_ms < 1000U) {
+                return 0.4f * target * (float) elapsed_ms / 1000.0f;
+            }
+            if (elapsed_ms < 3000U) {
+                return 0.4f * target;
+            }
+            if (elapsed_ms < 5000U) {
+                return 0.6f * target;
+            }
+            if (elapsed_ms < 7000U) {
+                return 0.8f * target;
+            }
+            if (elapsed_ms < 10000U) {
+                return target;
+            }
+            return target *
+                (float) (SPEED_BRINGUP_SWEEP_RUN_MS - elapsed_ms) /
+                1000.0f;
+
+        case SPEED_BRINGUP_PROFILE_RAMP:
+        default:
+            if (elapsed_ms < SPEED_BRINGUP_RAMP_MS) {
+                return target * (float) elapsed_ms /
+                    (float) SPEED_BRINGUP_RAMP_MS;
+            }
+            return target;
+    }
 }
