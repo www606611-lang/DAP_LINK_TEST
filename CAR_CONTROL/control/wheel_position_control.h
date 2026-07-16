@@ -11,6 +11,8 @@
 #define WHEEL_POSITION_CONTROL_RUN_MIN_MS         500U
 #define WHEEL_POSITION_CONTROL_RUN_MAX_MS         30000U
 #define WHEEL_POSITION_CONTROL_KP_MAX             20.0f
+#define WHEEL_POSITION_CONTROL_SYNC_KP_MAX        20.0f
+#define WHEEL_POSITION_CONTROL_SYNC_MAX_PPS       6000.0f
 
 typedef enum {
     WHEEL_POSITION_CONTROL_OK = 0,
@@ -28,6 +30,8 @@ typedef enum {
 typedef struct {
     float kp;
     float max_speed_pps;
+    float sync_kp;
+    float sync_max_correction_pps;
     uint16_t tolerance_counts;
     uint16_t settle_speed_pps;
     uint16_t settle_time_ms;
@@ -42,6 +46,8 @@ typedef struct {
     int32_t right_error_count;
     float left_speed_target_pps;
     float right_speed_target_pps;
+    int32_t sync_error_count;
+    float sync_correction_pps;
     uint32_t left_recovery_count;
     uint32_t right_recovery_count;
     uint32_t update_count;
@@ -51,6 +57,7 @@ typedef struct {
     bool settled;
     bool left_recovery_active;
     bool right_recovery_active;
+    bool sync_active;
 } wheel_position_control_snapshot_t;
 
 void WheelPositionControl_Init(uint32_t now_ms);

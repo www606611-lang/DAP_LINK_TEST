@@ -21,6 +21,8 @@ param(
     [single]$PositionMaxSpeed = 2000.0,
     [uint16]$PositionLimit = 650,
     [uint16]$PositionTolerance = 24,
+    [single]$PositionSyncKp = 2.0,
+    [single]$PositionSyncMax = 400.0,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -172,15 +174,19 @@ function Get-PositionSetCommand {
         ($PositionTarget -gt 100000) -or
         ($PositionMaxSpeed -lt 100) -or ($PositionMaxSpeed -gt 6000) -or
         ($PositionLimit -lt 100) -or ($PositionLimit -gt 1000) -or
-        ($PositionTolerance -lt 1) -or ($PositionTolerance -gt 200)) {
+        ($PositionTolerance -lt 1) -or ($PositionTolerance -gt 200) -or
+        ($PositionSyncKp -lt 0) -or ($PositionSyncKp -gt 20) -or
+        ($PositionSyncMax -lt 0) -or ($PositionSyncMax -gt 6000)) {
         throw "Position configuration is outside firmware range."
     }
-    return ('pos set {0} {1} {2} {3} {4}' -f
+    return ('pos set {0} {1} {2} {3} {4} {5} {6}' -f
         $PositionKp.ToString('0.####', $culture),
         $PositionTarget.ToString($culture),
         $PositionMaxSpeed.ToString('0.####', $culture),
         $PositionLimit.ToString($culture),
-        $PositionTolerance.ToString($culture))
+        $PositionTolerance.ToString($culture),
+        $PositionSyncKp.ToString('0.####', $culture),
+        $PositionSyncMax.ToString('0.####', $culture))
 }
 
 function Parse-Status([string]$line) {

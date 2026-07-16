@@ -521,3 +521,35 @@ motor, gearbox, wheel-diameter, and ground-friction differences combined with
 two independent wheel loops; endpoint position success alone does not enforce
 matched wheel progress throughout the move. A later straight-line
 cross-coupling or heading loop will correct this behavior.
+
+## 2026-07-16: straight-line wheel cross-coupling
+
+The position outer loop now records the encoder count at the start of each
+move. For equal nonzero left/right deltas it calculates:
+
+```text
+sync error = left progress - right progress
+left speed target  -= sync Kp * sync error
+right speed target += sync Kp * sync error
+default sync Kp: 2.0 pps/count
+default correction limit: 400 pps
+```
+
+Both corrected targets retain the original travel direction and the configured
+position speed limit. Cross-coupling disengages when either wheel enters the
+endpoint tolerance, allowing the independent position loops to settle without
+reversing a completed wheel. Unequal deltas do not enable synchronization, so
+future differential turns remain available. The Bluetooth position command
+accepts optional sync gain and limit fields; the previous five-field command
+remains compatible. Ground improvement and Stress 24 remain pending after the
+new firmware is flashed.
+
+### Ground straight-line result
+
+The user confirmed that the cross-coupled position build produces an almost
+perfect straight line in the physical ground test. The default `sync Kp=2.0`
+and `400 pps` correction limit are therefore accepted as the initial chassis
+baseline. Position-loop tuning is considered complete for straight relative
+moves. One synchronized Stress 24 run remains as a regression check before the
+position module is frozen for higher-loop integration; it is not expected to
+require further tuning unless that regression exposes a fault.

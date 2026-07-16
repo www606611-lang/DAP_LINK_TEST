@@ -60,6 +60,9 @@ volatile int32_t g_car_position_left_error_count;
 volatile int32_t g_car_position_right_error_count;
 volatile int32_t g_car_position_left_speed_target_pps;
 volatile int32_t g_car_position_right_speed_target_pps;
+volatile int32_t g_car_position_sync_error_count;
+volatile int32_t g_car_position_sync_correction_pps;
+volatile bool g_car_position_sync_active;
 volatile uint32_t g_car_position_update_count;
 volatile uint32_t g_car_position_last_result;
 volatile bool g_car_position_settled;
@@ -249,10 +252,11 @@ static void app_display_update(uint32_t now_ms)
         (long) g_car_encoder_0_speed_pps,
         (long) g_car_encoder_1_speed_pps);
     ST7789_Printf(8U, 138U, ST7789_8X16, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "INV:%5lu/%-5lu PRES:%2lu",
+        ST7789_COLOR_BLACK, "SYNC:%5ld C:%4ld INV:%lu/%lu",
+        (long) g_car_position_sync_error_count,
+        (long) g_car_position_sync_correction_pps,
         (unsigned long) g_car_encoder_0_invalid,
-        (unsigned long) g_car_encoder_1_invalid,
-        (unsigned long) g_car_position_last_result);
+        (unsigned long) g_car_encoder_1_invalid);
     ST7789_Printf(8U, 157U, ST7789_6X8, ST7789_COLOR_WHITE,
         ST7789_COLOR_BLACK, "M:%s B:%s R:%lu UP:%08lu",
         ControlSupervisor_GetModeText(),
@@ -308,6 +312,10 @@ static void app_update_debug_state(void)
             app_round_float(position.left_speed_target_pps);
         g_car_position_right_speed_target_pps =
             app_round_float(position.right_speed_target_pps);
+        g_car_position_sync_error_count = position.sync_error_count;
+        g_car_position_sync_correction_pps =
+            app_round_float(position.sync_correction_pps);
+        g_car_position_sync_active = position.sync_active;
         g_car_position_update_count = position.update_count;
         g_car_position_last_result = (uint32_t) position.last_result;
         g_car_position_settled = position.settled;

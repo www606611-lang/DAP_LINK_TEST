@@ -98,11 +98,16 @@ WheelPositionControl_Stop(reason);
 WheelPositionControl_GetSnapshot(&snapshot);
 ```
 
-Position uses raw quadrature counts and converts independent left/right errors
-to speed targets. The validated symmetric configuration is `Kp=3.0`, maximum
-speed `2000 pps`, tolerance `24 counts`, settle speed `120 pps`, and settle time
-`200 ms`. A completed move and every stop or fault path return both motor
-channels to high impedance. Position targets never bypass the speed inner loop.
+Position uses raw quadrature counts and converts left/right errors to speed
+targets. The validated symmetric configuration is `Kp=3.0`, maximum speed
+`2000 pps`, tolerance `24 counts`, settle speed `120 pps`, and settle time
+`200 ms`. Equal relative wheel moves also use straight-line cross-coupling:
+`sync Kp=2.0 pps/count` with a `400 pps` correction limit. The correction uses
+the left-minus-right progress since the current move started, applies equal and
+opposite speed changes, and disengages near the endpoint. Unequal wheel targets
+keep independent control for future turning motions. A completed move and every
+stop or fault path return both motor channels to high impedance. Position
+targets never bypass the speed inner loop.
 Position ownership uses a `4000 pps/s` speed-target slew. If a wheel remains
 below `40 pps` for 300 ms while still outside tolerance, the controller issues
 a bounded recovery request, never exceeding the configured maximum speed.
@@ -128,8 +133,9 @@ second speed test and displays both measured speeds, outputs, invalid encoder
 transitions, result code, and final high-impedance state. A reset restores the
 compiled defaults. The TCP bridge also accepts `pos get`, `pos set`, `pos run`,
 `pos run stress`, `pos stop`, and `pos stat`. The GUI has separate speed and
-position tabs with position configuration, live progress, recovery totals, and
-a 24-segment stress button. During a position run, VOFA+ receives the
+position tabs with position configuration including straight-line sync gain and
+limit, live progress, recovery totals, and a 24-segment stress button. During a
+position run, VOFA+ receives the
 six-channel `position` group and the tool records `latest_position_wave.json`
 plus `latest_position_telemetry.csv` under `tools/speed_tuner/runtime`.
 
@@ -187,6 +193,9 @@ g_car_position_left_error_count
 g_car_position_right_error_count
 g_car_position_left_speed_target_pps
 g_car_position_right_speed_target_pps
+g_car_position_sync_error_count
+g_car_position_sync_correction_pps
+g_car_position_sync_active
 g_car_position_update_count
 g_car_position_last_result
 g_car_position_settled

@@ -18,11 +18,12 @@ The serial format is `9600 8N1`. The Bluetooth module's UART side must use a
 
 Open `Launch-SpeedTuner.cmd`, select the Bluetooth serial COM port, and connect.
 The GUI has separate speed-loop and position-loop tabs. The position tab edits
-Kp, relative target counts, maximum speed, output limit, and tolerance, and
-provides Run, Stress 24, and Stop controls. Its live panel shows position target,
-actual count, error, current step, completed moves, worst error, wheel speeds,
-recovery totals, invalid transitions, result, and high-impedance state. The GUI
-is the only process that owns the physical serial port.
+Kp, relative target counts, maximum speed, output limit, tolerance, straight-line
+sync Kp, and maximum sync correction, and provides Run, Stress 24, and Stop
+controls. Its live panel shows position target, actual count, error, current
+step, completed moves, worst error, wheel speeds, recovery totals, invalid
+transitions, result, and high-impedance state. The GUI is the only process that
+owns the physical serial port.
 
 | Consumer | Connection | Data |
 | --- | --- | --- |
@@ -94,7 +95,7 @@ spd stop
 spd stat
 
 pos get
-pos set KP TARGET_COUNTS MAX_SPEED_PPS OUTPUT_LIMIT_PERMILLE TOLERANCE_COUNTS
+pos set KP TARGET_COUNTS MAX_SPEED_PPS OUTPUT_LIMIT_PERMILLE TOLERANCE_COUNTS SYNC_KP SYNC_MAX_PPS
 pos run
 pos run stress
 pos stop
@@ -122,6 +123,11 @@ poswave:LEFT_TARGET_COUNT,LEFT_COUNT,RIGHT_TARGET_COUNT,RIGHT_COUNT,LEFT_SPEED_T
 Every segment must settle and return to high impedance before the next begins.
 Any failed segment stops the full sequence.
 
+The final two `pos set` fields are optional for compatibility with older tools.
+When omitted, the current sync settings are preserved. A zero sync gain or zero
+sync maximum disables cross-coupling. Sync is applied only when both relative
+wheel targets are equal and nonzero.
+
 Accepted ranges:
 
 ```text
@@ -130,4 +136,6 @@ Ki       0 .. 20
 Kd       0 .. 2
 Target   100 .. 6000 pps
 Limit    100 .. 1000 permille
+Pos sync Kp   0 .. 20 pps/count
+Pos sync max  0 .. 6000 pps
 ```

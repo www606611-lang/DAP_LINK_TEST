@@ -14,7 +14,7 @@
 #include <string.h>
 
 #define SPEED_TUNING_LINE_SIZE  96U
-#define SPEED_TUNING_TOKEN_MAX   8U
+#define SPEED_TUNING_TOKEN_MAX   9U
 #define SPEED_TUNING_WAVE_INTERVAL_MS 100U
 
 static char g_line[SPEED_TUNING_LINE_SIZE];
@@ -43,7 +43,7 @@ static int32_t speed_tuning_round_float(float value);
 void SpeedTuningConsole_Init(void)
 {
     g_last_wave_ms = 0U;
-    BluetoothUart_WriteText("OK READY v=3\r\n");
+    BluetoothUart_WriteText("OK READY v=4\r\n");
 }
 
 void SpeedTuningConsole_Task(uint32_t now_ms)
@@ -177,7 +177,7 @@ static void speed_tuning_process_line(char *line)
         BluetoothUart_WriteText("OK POS STOP\r\n");
         return;
     }
-    if ((token_count == 7U) &&
+    if (((token_count == 7U) || (token_count == 9U)) &&
         (strcmp(tokens[0], "pos") == 0) &&
         (strcmp(tokens[1], "set") == 0)) {
         position_bringup_config_t config;
@@ -191,7 +191,12 @@ static void speed_tuning_process_line(char *line)
             !speed_tuning_parse_u16(
                 tokens[5], &config.output_limit_permille) ||
             !speed_tuning_parse_u16(
-                tokens[6], &config.control.tolerance_counts)) {
+                tokens[6], &config.control.tolerance_counts) ||
+            ((token_count == 9U) &&
+                (!speed_tuning_parse_float(
+                    tokens[7], &config.control.sync_kp) ||
+                 !speed_tuning_parse_float(tokens[8],
+                    &config.control.sync_max_correction_pps)))) {
             BluetoothUart_WriteText("ERR number\r\n");
             return;
         }
@@ -448,6 +453,11 @@ static void speed_tuning_send_position_config(void)
     speed_tuning_write_u32(config.output_limit_permille);
     BluetoothUart_WriteText(" tol=");
     speed_tuning_write_u32(config.control.tolerance_counts);
+    BluetoothUart_WriteText(" syncKp=");
+    speed_tuning_write_float4(config.control.sync_kp);
+    BluetoothUart_WriteText(" syncMax=");
+    speed_tuning_write_float4(
+        config.control.sync_max_correction_pps);
     BluetoothUart_WriteText(" settle=");
     speed_tuning_write_u32(config.control.settle_speed_pps);
     BluetoothUart_WriteText(" stime=");

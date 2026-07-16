@@ -151,7 +151,7 @@ function Test-ControlCommand([string]$line) {
     if ($line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
         return $true
     }
-    return $line -match '^pos set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?\d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+$'
+    return $line -match '^pos set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?\d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+))?$'
 }
 
 function Process-ControlLine($entry, [string]$line) {
@@ -503,16 +503,21 @@ function Update-ConfigFromLine([string]$line) {
 function Update-PositionConfigFromLine([string]$line) {
     $match = [System.Text.RegularExpressions.Regex]::Match(
         $line,
-        'kp=(?<kp>[-0-9.]+)\s+target=(?<target>-?\d+)\s+max=(?<max>[-0-9.]+)\s+limit=(?<limit>\d+)\s+tol=(?<tol>\d+)')
+        'kp=(?<kp>[-0-9.]+)\s+target=(?<target>-?\d+)\s+max=(?<max>[-0-9.]+)\s+limit=(?<limit>\d+)\s+tol=(?<tol>\d+)(?:\s+syncKp=(?<syncKp>[-0-9.]+)\s+syncMax=(?<syncMax>[-0-9.]+))?')
     if ($match.Success) {
         $posKpBox.Text = $match.Groups['kp'].Value
         $posTargetBox.Text = $match.Groups['target'].Value
         $posMaxSpeedBox.Text = $match.Groups['max'].Value
         $posLimitBox.Text = $match.Groups['limit'].Value
         $posToleranceBox.Text = $match.Groups['tol'].Value
+        if ($match.Groups['syncKp'].Success) {
+            $posSyncKpBox.Text = $match.Groups['syncKp'].Value
+            $posSyncMaxBox.Text = $match.Groups['syncMax'].Value
+        }
         foreach ($box in @(
             $posKpBox, $posTargetBox, $posMaxSpeedBox,
-            $posLimitBox, $posToleranceBox)) {
+            $posLimitBox, $posToleranceBox, $posSyncKpBox,
+            $posSyncMaxBox)) {
             $box.SelectionStart = 0
             $box.SelectionLength = 0
         }
@@ -718,6 +723,8 @@ function Read-PositionUiConfig {
     [single]$maxSpeed = 0
     [uint16]$limit = 0
     [uint16]$tolerance = 0
+    [single]$syncKp = 0
+    [single]$syncMax = 0
 
     $valid = [single]::TryParse(
             $posKpBox.Text, $style, $culture, [ref]$kp) -and
@@ -725,7 +732,11 @@ function Read-PositionUiConfig {
         [single]::TryParse(
             $posMaxSpeedBox.Text, $style, $culture, [ref]$maxSpeed) -and
         [uint16]::TryParse($posLimitBox.Text, [ref]$limit) -and
-        [uint16]::TryParse($posToleranceBox.Text, [ref]$tolerance)
+        [uint16]::TryParse($posToleranceBox.Text, [ref]$tolerance) -and
+        [single]::TryParse(
+            $posSyncKpBox.Text, $style, $culture, [ref]$syncKp) -and
+        [single]::TryParse(
+            $posSyncMaxBox.Text, $style, $culture, [ref]$syncMax)
     if (-not $valid) {
         Add-Log "Position parameter format error." ([System.Drawing.Color]::Firebrick)
         return $null
@@ -734,17 +745,21 @@ function Read-PositionUiConfig {
         ($target -eq 0) -or ($target -lt -100000) -or ($target -gt 100000) -or
         ($maxSpeed -lt 100) -or ($maxSpeed -gt 6000) -or
         ($limit -lt 100) -or ($limit -gt 1000) -or
-        ($tolerance -lt 1) -or ($tolerance -gt 200)) {
+        ($tolerance -lt 1) -or ($tolerance -gt 200) -or
+        ($syncKp -lt 0) -or ($syncKp -gt 20) -or
+        ($syncMax -lt 0) -or ($syncMax -gt 6000)) {
         Add-Log "Position parameter outside firmware range." ([System.Drawing.Color]::Firebrick)
         return $null
     }
 
-    return ('pos set {0} {1} {2} {3} {4}' -f
+    return ('pos set {0} {1} {2} {3} {4} {5} {6}' -f
         $kp.ToString('0.####', $culture),
         $target.ToString($culture),
         $maxSpeed.ToString('0.####', $culture),
         $limit.ToString($culture),
-        $tolerance.ToString($culture))
+        $tolerance.ToString($culture),
+        $syncKp.ToString('0.####', $culture),
+        $syncMax.ToString('0.####', $culture))
 }
 
 $connectionGroup = New-Object System.Windows.Forms.GroupBox
@@ -833,21 +848,27 @@ $stopButton.Size = New-Object System.Drawing.Size(98, 29)
 $stopButton.BackColor = [System.Drawing.Color]::MistyRose
 $parameterGroup.Controls.Add($stopButton)
 
-$positionTab.Controls.Add((New-Label "Kp" 15 23 105))
-$posKpBox = New-TextBox "3.0000" 15 46 105
+$positionTab.Controls.Add((New-Label "Kp" 15 23 85))
+$posKpBox = New-TextBox "3.0000" 15 46 85
 $positionTab.Controls.Add($posKpBox)
-$positionTab.Controls.Add((New-Label "Target (count)" 135 23 110))
-$posTargetBox = New-TextBox "1060" 135 46 105
+$positionTab.Controls.Add((New-Label "Target" 110 23 85))
+$posTargetBox = New-TextBox "1060" 110 46 85
 $positionTab.Controls.Add($posTargetBox)
-$positionTab.Controls.Add((New-Label "Max speed" 255 23 105))
-$posMaxSpeedBox = New-TextBox "2000" 255 46 105
+$positionTab.Controls.Add((New-Label "Max speed" 205 23 85))
+$posMaxSpeedBox = New-TextBox "2000" 205 46 85
 $positionTab.Controls.Add($posMaxSpeedBox)
-$positionTab.Controls.Add((New-Label "Output limit" 375 23 105))
-$posLimitBox = New-TextBox "650" 375 46 105
+$positionTab.Controls.Add((New-Label "Output" 300 23 85))
+$posLimitBox = New-TextBox "650" 300 46 85
 $positionTab.Controls.Add($posLimitBox)
-$positionTab.Controls.Add((New-Label "Tolerance" 495 23 105))
-$posToleranceBox = New-TextBox "24" 495 46 105
+$positionTab.Controls.Add((New-Label "Tolerance" 395 23 85))
+$posToleranceBox = New-TextBox "24" 395 46 85
 $positionTab.Controls.Add($posToleranceBox)
+$positionTab.Controls.Add((New-Label "Sync Kp" 490 23 85))
+$posSyncKpBox = New-TextBox "2.0000" 490 46 85
+$positionTab.Controls.Add($posSyncKpBox)
+$positionTab.Controls.Add((New-Label "Sync max" 585 23 105))
+$posSyncMaxBox = New-TextBox "400" 585 46 105
+$positionTab.Controls.Add($posSyncMaxBox)
 
 $posReadButton = New-Object System.Windows.Forms.Button
 $posReadButton.Text = "Read"

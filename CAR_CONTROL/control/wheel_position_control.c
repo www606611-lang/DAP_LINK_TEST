@@ -7,6 +7,8 @@
 
 #define WHEEL_POSITION_DEFAULT_KP                3.0f
 #define WHEEL_POSITION_DEFAULT_MAX_SPEED_PPS  2000.0f
+#define WHEEL_POSITION_DEFAULT_SYNC_KP            2.0f
+#define WHEEL_POSITION_DEFAULT_SYNC_MAX_PPS     400.0f
 #define WHEEL_POSITION_DEFAULT_TOLERANCE_COUNTS 24U
 #define WHEEL_POSITION_DEFAULT_SETTLE_SPEED_PPS 120U
 #define WHEEL_POSITION_DEFAULT_SETTLE_TIME_MS   200U
@@ -34,6 +36,10 @@ static uint32_t g_last_update_ms;
 static uint32_t g_deadline_ms;
 static uint32_t g_settle_started_ms;
 static bool g_settle_pending;
+static int32_t g_left_start_count;
+static int32_t g_right_start_count;
+static int8_t g_sync_direction;
+static bool g_sync_straight_move;
 static wheel_position_recovery_t g_left_recovery;
 static wheel_position_recovery_t g_right_recovery;
 
@@ -45,6 +51,8 @@ static float wheel_position_apply_recovery(
     wheel_position_recovery_t *recovery, int32_t error_count,
     int32_t measured_speed_pps, float base_target_pps,
     uint32_t *recovery_count, uint32_t now_ms);
+static void wheel_position_apply_sync(void);
+static float wheel_position_clamp_speed_for_direction(float speed_pps);
 static void wheel_position_reset_recovery(
     wheel_position_recovery_t *recovery, uint32_t now_ms);
 static bool wheel_position_deadline_reached(
@@ -61,6 +69,9 @@ void WheelPositionControl_Init(uint32_t now_ms)
 {
     g_config.kp = WHEEL_POSITION_DEFAULT_KP;
     g_config.max_speed_pps = WHEEL_POSITION_DEFAULT_MAX_SPEED_PPS;
+    g_config.sync_kp = WHEEL_POSITION_DEFAULT_SYNC_KP;
+    g_config.sync_max_correction_pps =
+        WHEEL_POSITION_DEFAULT_SYNC_MAX_PPS;
     g_config.tolerance_counts =
         WHEEL_POSITION_DEFAULT_TOLERANCE_COUNTS;
     g_config.settle_speed_pps =
@@ -76,6 +87,8 @@ void WheelPositionControl_Init(uint32_t now_ms)
     g_snapshot.right_error_count = 0;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.sync_error_count = 0;
+    g_snapshot.sync_correction_pps = 0.0f;
     g_snapshot.left_recovery_count = 0U;
     g_snapshot.right_recovery_count = 0U;
     g_snapshot.update_count = 0U;
@@ -85,12 +98,17 @@ void WheelPositionControl_Init(uint32_t now_ms)
     g_snapshot.settled = false;
     g_snapshot.left_recovery_active = false;
     g_snapshot.right_recovery_active = false;
+    g_snapshot.sync_active = false;
 
     g_started_ms = now_ms;
     g_last_update_ms = now_ms;
     g_deadline_ms = now_ms;
     g_settle_started_ms = now_ms;
     g_settle_pending = false;
+    g_left_start_count = 0;
+    g_right_start_count = 0;
+    g_sync_direction = 0;
+    g_sync_straight_move = false;
     wheel_position_reset_recovery(&g_left_recovery, now_ms);
     wheel_position_reset_recovery(&g_right_recovery, now_ms);
 }
@@ -107,6 +125,11 @@ bool WheelPositionControl_ConfigIsValid(
         (config->max_speed_pps >= WHEEL_POSITION_MIN_SPEED_PPS) &&
         (config->max_speed_pps <=
             WHEEL_SPEED_CONTROL_TARGET_MAX_PPS) &&
+        (config->sync_kp >= 0.0f) &&
+        (config->sync_kp <= WHEEL_POSITION_CONTROL_SYNC_KP_MAX) &&
+        (config->sync_max_correction_pps >= 0.0f) &&
+        (config->sync_max_correction_pps <=
+            WHEEL_POSITION_CONTROL_SYNC_MAX_PPS) &&
         (config->tolerance_counts > 0U) &&
         (config->tolerance_counts <=
             WHEEL_POSITION_TOLERANCE_MAX_COUNTS) &&
@@ -152,6 +175,8 @@ wheel_position_control_result_t WheelPositionControl_StartAbsolute(
     encoder_input_snapshot_t left;
     encoder_input_snapshot_t right;
     wheel_speed_control_result_t speed_result;
+    int64_t left_delta;
+    int64_t right_delta;
 
     if (g_snapshot.running) {
         g_snapshot.last_result = WHEEL_POSITION_CONTROL_BUSY;
@@ -196,6 +221,8 @@ wheel_position_control_result_t WheelPositionControl_StartAbsolute(
         right_target_count, right.count);
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.sync_error_count = 0;
+    g_snapshot.sync_correction_pps = 0.0f;
     g_snapshot.left_recovery_count = 0U;
     g_snapshot.right_recovery_count = 0U;
     g_snapshot.update_count = 0U;
@@ -205,6 +232,16 @@ wheel_position_control_result_t WheelPositionControl_StartAbsolute(
     g_snapshot.settled = false;
     g_snapshot.left_recovery_active = false;
     g_snapshot.right_recovery_active = false;
+    g_snapshot.sync_active = false;
+
+    left_delta = (int64_t) left_target_count - left.count;
+    right_delta = (int64_t) right_target_count - right.count;
+    g_left_start_count = left.count;
+    g_right_start_count = right.count;
+    g_sync_straight_move = (left_delta != 0) &&
+        (left_delta == right_delta);
+    g_sync_direction = g_sync_straight_move ?
+        ((left_delta > 0) ? 1 : -1) : 0;
 
     g_started_ms = now_ms;
     g_last_update_ms = now_ms;
@@ -274,6 +311,8 @@ void WheelPositionControl_Task(uint32_t now_ms)
         g_snapshot.settled = false;
         g_snapshot.left_speed_target_pps = 0.0f;
         g_snapshot.right_speed_target_pps = 0.0f;
+        g_snapshot.sync_correction_pps = 0.0f;
+        g_snapshot.sync_active = false;
         g_snapshot.last_result = WHEEL_POSITION_CONTROL_SPEED_ERROR;
         return;
     }
@@ -302,6 +341,7 @@ void WheelPositionControl_Task(uint32_t now_ms)
         &g_right_recovery, g_snapshot.right_error_count,
         right.speed_pps, g_snapshot.right_speed_target_pps,
         &g_snapshot.right_recovery_count, now_ms);
+    wheel_position_apply_sync();
     g_snapshot.left_recovery_active = g_left_recovery.recovery_active;
     g_snapshot.right_recovery_active = g_right_recovery.recovery_active;
 
@@ -313,6 +353,8 @@ void WheelPositionControl_Task(uint32_t now_ms)
         g_snapshot.settled = false;
         g_snapshot.left_speed_target_pps = 0.0f;
         g_snapshot.right_speed_target_pps = 0.0f;
+        g_snapshot.sync_correction_pps = 0.0f;
+        g_snapshot.sync_active = false;
         g_snapshot.last_result = WHEEL_POSITION_CONTROL_SPEED_ERROR;
         return;
     }
@@ -356,6 +398,8 @@ void WheelPositionControl_Stop(car_control_block_reason_t reason)
     g_snapshot.right_speed_target_pps = 0.0f;
     g_snapshot.left_recovery_active = false;
     g_snapshot.right_recovery_active = false;
+    g_snapshot.sync_correction_pps = 0.0f;
+    g_snapshot.sync_active = false;
     g_snapshot.last_result = WHEEL_POSITION_CONTROL_STOPPED;
     g_settle_pending = false;
 }
@@ -463,6 +507,77 @@ static float wheel_position_apply_recovery(
     return (error_count > 0) ? recovery_speed : -recovery_speed;
 }
 
+static void wheel_position_apply_sync(void)
+{
+    float correction;
+    float correction_limit = g_config.sync_max_correction_pps;
+    bool both_approaching;
+
+    g_snapshot.sync_correction_pps = 0.0f;
+    g_snapshot.sync_active = false;
+    if (!g_sync_straight_move || (g_sync_direction == 0) ||
+        (g_config.sync_kp <= 0.0f) || (correction_limit <= 0.0f)) {
+        return;
+    }
+
+    if (g_sync_direction > 0) {
+        both_approaching =
+            (g_snapshot.left_error_count >
+                (int32_t) g_config.tolerance_counts) &&
+            (g_snapshot.right_error_count >
+                (int32_t) g_config.tolerance_counts);
+    } else {
+        both_approaching =
+            (g_snapshot.left_error_count <
+                -(int32_t) g_config.tolerance_counts) &&
+            (g_snapshot.right_error_count <
+                -(int32_t) g_config.tolerance_counts);
+    }
+    if (!both_approaching) {
+        return;
+    }
+
+    if (correction_limit > g_config.max_speed_pps) {
+        correction_limit = g_config.max_speed_pps;
+    }
+    correction = g_config.sync_kp *
+        (float) g_snapshot.sync_error_count;
+    if (correction > correction_limit) {
+        correction = correction_limit;
+    } else if (correction < -correction_limit) {
+        correction = -correction_limit;
+    }
+
+    g_snapshot.left_speed_target_pps =
+        wheel_position_clamp_speed_for_direction(
+            g_snapshot.left_speed_target_pps - correction);
+    g_snapshot.right_speed_target_pps =
+        wheel_position_clamp_speed_for_direction(
+            g_snapshot.right_speed_target_pps + correction);
+    g_snapshot.sync_correction_pps = correction;
+    g_snapshot.sync_active = true;
+}
+
+static float wheel_position_clamp_speed_for_direction(float speed_pps)
+{
+    if (g_sync_direction > 0) {
+        if (speed_pps < 0.0f) {
+            return 0.0f;
+        }
+        if (speed_pps > g_config.max_speed_pps) {
+            return g_config.max_speed_pps;
+        }
+    } else {
+        if (speed_pps > 0.0f) {
+            return 0.0f;
+        }
+        if (speed_pps < -g_config.max_speed_pps) {
+            return -g_config.max_speed_pps;
+        }
+    }
+    return speed_pps;
+}
+
 static void wheel_position_reset_recovery(
     wheel_position_recovery_t *recovery, uint32_t now_ms)
 {
@@ -496,6 +611,21 @@ static void wheel_position_update_measurements(
         g_snapshot.left_target_count, left->count);
     g_snapshot.right_error_count = wheel_position_error(
         g_snapshot.right_target_count, right->count);
+    if (g_sync_straight_move) {
+        int64_t sync_error =
+            ((int64_t) left->count - g_left_start_count) -
+            ((int64_t) right->count - g_right_start_count);
+
+        if (sync_error > INT32_MAX) {
+            g_snapshot.sync_error_count = INT32_MAX;
+        } else if (sync_error < INT32_MIN) {
+            g_snapshot.sync_error_count = INT32_MIN;
+        } else {
+            g_snapshot.sync_error_count = (int32_t) sync_error;
+        }
+    } else {
+        g_snapshot.sync_error_count = 0;
+    }
 }
 
 static void wheel_position_complete(uint32_t now_ms)
@@ -508,6 +638,8 @@ static void wheel_position_complete(uint32_t now_ms)
     g_snapshot.right_speed_target_pps = 0.0f;
     g_snapshot.left_recovery_active = false;
     g_snapshot.right_recovery_active = false;
+    g_snapshot.sync_correction_pps = 0.0f;
+    g_snapshot.sync_active = false;
     g_snapshot.update_count++;
     g_snapshot.last_result = WHEEL_POSITION_CONTROL_OK;
     g_settle_pending = false;
@@ -523,6 +655,8 @@ static void wheel_position_fault(wheel_position_control_result_t result,
     g_snapshot.right_speed_target_pps = 0.0f;
     g_snapshot.left_recovery_active = false;
     g_snapshot.right_recovery_active = false;
+    g_snapshot.sync_correction_pps = 0.0f;
+    g_snapshot.sync_active = false;
     g_snapshot.last_result = result;
     g_settle_pending = false;
 }
