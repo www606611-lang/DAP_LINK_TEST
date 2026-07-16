@@ -6,21 +6,25 @@ reference sources only; they are not copied wholesale into this target.
 
 ## Current safety baseline
 
-- PB21 is active-low with a 20 ms software debounce.
+- PB21, SW2/PB4, and SW1/PB5 are active-low with a 20 ms software
+  debounce. PB4/PB5 use the board's 200 kOhm pull-ups and 100 nF capacitors
+  plus MCU internal pull-ups.
 - ST7789 SPI display support is enabled.
 - Motor control nets are confirmed as:
   - channel A: `PA29 -> AIN1`, `PA30 -> AIN2`
   - channel B: `PA23 -> BIN1`, `PA24 -> BIN2`
 - TIMG6 provides 20 kHz PWM for motor A, and TIMG7 provides 20 kHz PWM for
   motor B. Both channels are enabled only during a supervised motion mode.
-- All four motor pins return to high impedance at startup, on a second PB21
-  press, after the speed-command lease expires, at the test endpoint, and on
-  every emergency stop.
+- All four motor pins return to high impedance at startup, when any of the
+  three buttons is pressed during motion, after the speed-command lease
+  expires, at the test endpoint, and on every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. PB21 now starts the initial suspended-wheel position-loop test. Both
-  wheels move forward by 1060 encoder counts, equivalent to one calibrated
-  wheel revolution, through a 50 Hz position outer loop and the verified
-  100 Hz speed inner loop. Pressing PB21 again stops immediately.
+  wheel. For ground testing, PB21 commands `+4000` encoder counts, SW2/PB4
+  commands `-2000`, and SW1/PB5 commands `+2000`. The commands use the 50 Hz
+  position outer loop and verified 100 Hz speed inner loop. Pressing any key
+  during motion stops immediately; commands are never stacked while moving.
+  Remote `pos run` and Stress 24 retain the separately tunable 1060-count
+  default.
 - Motor B drive polarity is inverted at the board configuration layer so a
   positive command produces forward motion and positive E1 feedback, matching
   motor A/E0. This sign was confirmed in the powered right-wheel retest.
@@ -103,6 +107,10 @@ Position ownership uses a `4000 pps/s` speed-target slew. If a wheel remains
 below `40 pps` for 300 ms while still outside tolerance, the controller issues
 a bounded recovery request, never exceeding the configured maximum speed.
 
+The position bring-up application also provides
+`PositionBringupTest_RequestMove(delta_counts)` for one-shot physical-button
+moves without changing the remote single-run or stress-profile target.
+
 ## Bluetooth speed tuner
 
 `tools/speed_tuner/Launch-SpeedTuner.cmd` opens the Windows GUI. Connect a
@@ -143,6 +151,11 @@ In VS Code, run `Terminal -> Run Task -> Build + Flash (J-Link)`.
 ```text
 g_car_pb21_pressed
 g_car_pb21_press_count
+g_car_pb4_pressed
+g_car_pb4_press_count
+g_car_pb5_pressed
+g_car_pb5_press_count
+g_car_last_button_move_counts
 g_car_reset_cause
 g_car_control_mode
 g_car_control_block_reason

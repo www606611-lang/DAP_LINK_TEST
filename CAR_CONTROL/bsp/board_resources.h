@@ -12,6 +12,8 @@
 #define BOARD_MOTOR_B_FORWARD_INVERTED  1
 
 #define BOARD_BUTTON_PIN_NAME         "PB21"
+#define BOARD_POSITION_SW2_PIN_NAME   "PB4"
+#define BOARD_POSITION_SW1_PIN_NAME   "PB5"
 
 /* Motor A/E0 is the left wheel; motor B/E1 is the right wheel. */
 #define BOARD_ENCODER_0_A_PIN_NAME    "PB0"

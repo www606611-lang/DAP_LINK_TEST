@@ -5,14 +5,15 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 
 | Function | MCU pins | Status | Source / decision |
 | --- | --- | --- | --- |
-| PB21 button | PB21 | Confirmed | Clean board test; active-low, pull-up |
+| Board button | PB21 | Confirmed | Clean board test; active-low, MCU pull-up |
+| SW2 position button | PB4 | Schematic confirmed | Active-low; external 200 kOhm pull-up and 100 nF to GND; MCU pull-up enabled |
+| SW1 position button | PB5 | Schematic confirmed | Active-low; external 200 kOhm pull-up and 100 nF to GND; MCU pull-up enabled |
 | ST7789 SPI | PB8 MOSI, PB9 SCLK | Confirmed | Clean board test |
 | ST7789 control | PB10 RESET, PB11 DC, PB14 CS, PB26 BLK | Confirmed | Clean board test |
 | Motor channel A / left wheel | PA29 TIMG6_CCP0/AIN1, PA30 TIMG6_CCP1/AIN2 | Bench confirmed | 20 kHz PWM; drives AOUT/U4; paired with encoder channel 0 |
 | Motor channel B / right wheel | PA23 TIMG7_CCP0/BIN1, PA24 TIMG7_CCP1/BIN2; forward command inverted | Bench confirmed | 20 kHz PWM; drives BOUT/U3; paired with encoder channel 1 |
 | Encoder channel 0 / motor A / left wheel | PB0 A, PB1 B; forward sign inverted | Bench confirmed | Physical board, hand-turn calibration, and powered left-wheel test |
 | Encoder channel 1 / motor B / right wheel | PB2 A, PB3 B; forward sign native | Bench confirmed | Hand-turn and corrected powered-motor tests both produce positive forward feedback |
-| Legacy direction key `up` | PB4 | Reference only | PB4 is not an encoder input |
 | IMU I2C | PA0 SDA, PA1 SCL | Pending | Old firmware only |
 | Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
 | K230 UART | PA21 TX, PA22 RX in old firmware | Pending | Legacy firmware mapping; not enabled yet |

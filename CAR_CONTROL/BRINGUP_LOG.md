@@ -497,3 +497,27 @@ A one-revolution run reached the 2000 pps target, completed in approximately
 stress run completed in approximately 27 s with worst error 24 counts, final
 error `-23/-15`, recovery count `1/0`, invalid transitions `0/0`, and terminal
 `DONE/HIGH-Z`. These values replace the initial 800 pps compiled baseline.
+
+## 2026-07-16: schematic-backed ground-test buttons
+
+The supplied board schematic confirms two additional active-low keys:
+
+```text
+SW2 -> PB4 -> -2000 encoder counts
+SW1 -> PB5 -> +2000 encoder counts
+PB21       -> +4000 encoder counts
+```
+
+SW1 and SW2 each have a 200 kOhm external pull-up to 3.3 V and a 100 nF
+capacitor to ground. MCU pull-ups and the existing 20 ms software debounce are
+also enabled. Each idle press requests one relative dual-wheel position move.
+If either the speed or position test is running, any of the three keys requests
+an immediate supervised stop instead, so position commands do not accumulate
+during motion. The remote tuner and Stress 24 keep their 1060-count base target.
+The flashed ground test confirmed that all three commands and supervised stop
+behavior work. The vehicle shows a small left/right transient mismatch and
+corresponding heading drift while moving. This is consistent with ordinary
+motor, gearbox, wheel-diameter, and ground-friction differences combined with
+two independent wheel loops; endpoint position success alone does not enforce
+matched wheel progress throughout the move. A later straight-line
+cross-coupling or heading loop will correct this behavior.

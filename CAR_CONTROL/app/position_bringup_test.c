@@ -14,7 +14,9 @@ static position_bringup_test_state_t g_state;
 static position_bringup_config_t g_config;
 static uint32_t g_run_count;
 static bool g_start_requested;
+static bool g_move_requested;
 static bool g_stop_requested;
+static int32_t g_requested_move_counts;
 static bool g_waiting_next_move;
 static position_bringup_profile_t g_requested_profile;
 static position_bringup_profile_t g_active_profile;
@@ -26,7 +28,8 @@ static uint32_t g_right_recovery_count;
 static uint32_t g_next_move_ms;
 
 static void position_bringup_start(
-    uint32_t now_ms, position_bringup_profile_t profile);
+    uint32_t now_ms, position_bringup_profile_t profile,
+    bool use_move_override, int32_t move_override_counts);
 static bool position_bringup_start_move(
     uint32_t now_ms, int32_t delta_counts);
 static void position_bringup_stop(car_control_block_reason_t reason,
@@ -45,7 +48,9 @@ void PositionBringupTest_Init(bool reset_locked)
         POSITION_BRINGUP_TEST_LOCKED : POSITION_BRINGUP_TEST_READY;
     g_run_count = 0U;
     g_start_requested = false;
+    g_move_requested = false;
     g_stop_requested = false;
+    g_requested_move_counts = 0;
     g_waiting_next_move = false;
     g_requested_profile = POSITION_BRINGUP_PROFILE_SINGLE;
     g_active_profile = POSITION_BRINGUP_PROFILE_SINGLE;
@@ -66,10 +71,13 @@ void PositionBringupTest_Task(uint32_t now_ms, bool press_event)
 {
     wheel_position_control_snapshot_t position;
     bool start_event = g_start_requested;
+    bool move_event = g_move_requested;
     bool stop_event = g_stop_requested;
+    int32_t requested_move_counts = g_requested_move_counts;
     position_bringup_profile_t requested_profile = g_requested_profile;
 
     g_start_requested = false;
+    g_move_requested = false;
     g_stop_requested = false;
 
     if (stop_event) {
@@ -87,10 +95,11 @@ void PositionBringupTest_Task(uint32_t now_ms, bool press_event)
         case POSITION_BRINGUP_TEST_READY:
         case POSITION_BRINGUP_TEST_COMPLETE:
         case POSITION_BRINGUP_TEST_ABORTED:
-            if (press_event || start_event) {
+            if (press_event || start_event || move_event) {
                 position_bringup_start(now_ms,
-                    press_event ? POSITION_BRINGUP_PROFILE_SINGLE :
-                        requested_profile);
+                    (press_event || move_event) ?
+                        POSITION_BRINGUP_PROFILE_SINGLE : requested_profile,
+                    move_event, requested_move_counts);
             }
             return;
 
@@ -215,6 +224,23 @@ bool PositionBringupTest_RequestProfile(position_bringup_profile_t profile)
     }
     g_requested_profile = profile;
     g_start_requested = true;
+    g_move_requested = false;
+    return true;
+}
+
+bool PositionBringupTest_RequestMove(int32_t delta_counts)
+{
+    if ((g_state == POSITION_BRINGUP_TEST_LOCKED) ||
+        (g_state == POSITION_BRINGUP_TEST_RUNNING) ||
+        (delta_counts == 0) ||
+        (delta_counts < -POSITION_BRINGUP_TARGET_MAX_COUNTS) ||
+        (delta_counts > POSITION_BRINGUP_TARGET_MAX_COUNTS)) {
+        return false;
+    }
+    g_requested_move_counts = delta_counts;
+    g_requested_profile = POSITION_BRINGUP_PROFILE_SINGLE;
+    g_start_requested = false;
+    g_move_requested = true;
     return true;
 }
 
@@ -301,7 +327,8 @@ uint32_t PositionBringupTest_GetRunCount(void)
 }
 
 static void position_bringup_start(
-    uint32_t now_ms, position_bringup_profile_t profile)
+    uint32_t now_ms, position_bringup_profile_t profile,
+    bool use_move_override, int32_t move_override_counts)
 {
     int32_t first_delta;
 
@@ -328,8 +355,9 @@ static void position_bringup_start(
     g_left_recovery_count = 0U;
     g_right_recovery_count = 0U;
     g_waiting_next_move = false;
-    first_delta = (profile == POSITION_BRINGUP_PROFILE_STRESS) ?
-        position_bringup_stress_delta(0U) : g_config.target_counts;
+    first_delta = use_move_override ? move_override_counts :
+        ((profile == POSITION_BRINGUP_PROFILE_STRESS) ?
+            position_bringup_stress_delta(0U) : g_config.target_counts);
     if (!position_bringup_start_move(now_ms, first_delta)) {
         g_state = POSITION_BRINGUP_TEST_ABORTED;
         return;

@@ -18,8 +18,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define APP_PB21_MOVE_COUNTS     4000
+#define APP_SW2_PB4_MOVE_COUNTS -2000
+#define APP_SW1_PB5_MOVE_COUNTS  2000
+
 volatile bool g_car_pb21_pressed;
 volatile uint32_t g_car_pb21_press_count;
+volatile bool g_car_pb4_pressed;
+volatile uint32_t g_car_pb4_press_count;
+volatile bool g_car_pb5_pressed;
+volatile uint32_t g_car_pb5_press_count;
+volatile int32_t g_car_last_button_move_counts;
 volatile uint32_t g_car_reset_cause;
 volatile uint32_t g_car_control_mode;
 volatile uint32_t g_car_control_block_reason;
@@ -94,35 +103,82 @@ int main(void)
         uint32_t now_ms = delay_get_ms();
         uint32_t now_second = now_ms / 1000U;
         uint32_t now_encoder_period = now_ms / 200U;
-        bool press_event;
-        bool release_event;
-        bool speed_press_event = false;
-        bool position_press_event = false;
+        bool pb21_press_event;
+        bool pb4_press_event;
+        bool pb5_press_event;
+        bool pb21_release_event;
+        bool pb4_release_event;
+        bool pb5_release_event;
+        bool any_press_event;
+        bool any_release_event;
 
         BoardButton_Task(now_ms);
-        press_event = BoardButton_GetPressEvent();
-        release_event = BoardButton_GetReleaseEvent();
+        pb21_press_event = BoardButton_GetPressEventId(
+            BOARD_BUTTON_ID_PB21);
+        pb4_press_event = BoardButton_GetPressEventId(
+            BOARD_BUTTON_ID_SW2_PB4);
+        pb5_press_event = BoardButton_GetPressEventId(
+            BOARD_BUTTON_ID_SW1_PB5);
+        pb21_release_event = BoardButton_GetReleaseEventId(
+            BOARD_BUTTON_ID_PB21);
+        pb4_release_event = BoardButton_GetReleaseEventId(
+            BOARD_BUTTON_ID_SW2_PB4);
+        pb5_release_event = BoardButton_GetReleaseEventId(
+            BOARD_BUTTON_ID_SW1_PB5);
+        any_press_event = pb21_press_event || pb4_press_event ||
+            pb5_press_event;
+        any_release_event = pb21_release_event || pb4_release_event ||
+            pb5_release_event;
         EncoderInput_Task(now_ms);
         BluetoothUart_Task(now_ms);
         SpeedTuningConsole_Task(now_ms);
         ControlSupervisor_Task(now_ms);
-        if (press_event &&
-            (SpeedBringupTest_GetState() ==
-                SPEED_BRINGUP_TEST_RUNNING)) {
-            speed_press_event = true;
-        } else {
-            position_press_event = press_event;
+        if (any_press_event) {
+            if (SpeedBringupTest_GetState() ==
+                    SPEED_BRINGUP_TEST_RUNNING) {
+                SpeedBringupTest_RequestStop();
+                g_car_last_button_move_counts = 0;
+            } else if (PositionBringupTest_GetState() ==
+                    POSITION_BRINGUP_TEST_RUNNING) {
+                PositionBringupTest_RequestStop();
+                g_car_last_button_move_counts = 0;
+            } else if (pb21_press_event) {
+                if (PositionBringupTest_RequestMove(
+                        APP_PB21_MOVE_COUNTS)) {
+                    g_car_last_button_move_counts =
+                        APP_PB21_MOVE_COUNTS;
+                }
+            } else if (pb4_press_event) {
+                if (PositionBringupTest_RequestMove(
+                        APP_SW2_PB4_MOVE_COUNTS)) {
+                    g_car_last_button_move_counts =
+                        APP_SW2_PB4_MOVE_COUNTS;
+                }
+            } else if (pb5_press_event &&
+                PositionBringupTest_RequestMove(
+                    APP_SW1_PB5_MOVE_COUNTS)) {
+                g_car_last_button_move_counts =
+                    APP_SW1_PB5_MOVE_COUNTS;
+            }
         }
-        SpeedBringupTest_Task(now_ms, speed_press_event);
-        PositionBringupTest_Task(now_ms, position_press_event);
+        SpeedBringupTest_Task(now_ms, false);
+        PositionBringupTest_Task(now_ms, false);
         WheelPositionControl_Task(now_ms);
         WheelSpeedControl_Task(now_ms);
 
-        if (press_event) {
+        if (pb21_press_event) {
             g_car_pb21_press_count++;
             display_dirty = true;
         }
-        if (release_event) {
+        if (pb4_press_event) {
+            g_car_pb4_press_count++;
+            display_dirty = true;
+        }
+        if (pb5_press_event) {
+            g_car_pb5_press_count++;
+            display_dirty = true;
+        }
+        if (any_release_event) {
             display_dirty = true;
         }
         if (now_second != displayed_second) {
@@ -157,16 +213,19 @@ static void app_display_update(uint32_t now_ms)
 {
     uint16_t reset_color = ResetDiagnostics_IsSuspicious() ?
         ST7789_COLOR_RED : ST7789_COLOR_GREEN;
-    uint16_t button_color = g_car_pb21_pressed ?
+    uint16_t button_color = (g_car_pb21_pressed || g_car_pb4_pressed ||
+        g_car_pb5_pressed) ?
         ST7789_COLOR_GREEN : ST7789_COLOR_WHITE;
 
     ST7789_Printf(8U, 30U, ST7789_8X16, reset_color,
         ST7789_COLOR_BLACK, "RESET:%-25s",
         ResetDiagnostics_GetCauseText());
     ST7789_Printf(8U, 48U, ST7789_8X16, button_color,
-        ST7789_COLOR_BLACK, "PB21:%-8s COUNT:%05lu",
-        g_car_pb21_pressed ? "PRESSED" : "RELEASED",
-        (unsigned long) g_car_pb21_press_count);
+        ST7789_COLOR_BLACK, "K 21:%c 4:%c 5:%c CMD:%+5ld",
+        g_car_pb21_pressed ? 'P' : '-',
+        g_car_pb4_pressed ? 'P' : '-',
+        g_car_pb5_pressed ? 'P' : '-',
+        (long) g_car_last_button_move_counts);
     ST7789_Printf(8U, 66U, ST7789_8X16, ST7789_COLOR_YELLOW,
         ST7789_COLOR_BLACK, "P:%-6s %-6s O:%4ld/%4ld",
         PositionBringupTest_GetStateText(),
@@ -210,6 +269,10 @@ static void app_update_debug_state(void)
     wheel_position_control_snapshot_t position;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
+    g_car_pb4_pressed = BoardButton_IsPressedId(
+        BOARD_BUTTON_ID_SW2_PB4);
+    g_car_pb5_pressed = BoardButton_IsPressedId(
+        BOARD_BUTTON_ID_SW1_PB5);
     g_car_reset_cause = ResetDiagnostics_GetCause();
     g_car_control_mode = (uint32_t) ControlSupervisor_GetMode();
     g_car_control_block_reason =

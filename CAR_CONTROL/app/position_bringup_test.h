@@ -45,6 +45,7 @@ position_bringup_config_result_t PositionBringupTest_SetConfig(
 bool PositionBringupTest_GetConfig(position_bringup_config_t *config);
 bool PositionBringupTest_RequestStart(void);
 bool PositionBringupTest_RequestProfile(position_bringup_profile_t profile);
+bool PositionBringupTest_RequestMove(int32_t delta_counts);
 void PositionBringupTest_RequestStop(void);
 position_bringup_test_state_t PositionBringupTest_GetState(void);
 const char *PositionBringupTest_GetStateText(void);
