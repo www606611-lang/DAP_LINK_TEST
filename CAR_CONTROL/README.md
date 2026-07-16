@@ -35,7 +35,7 @@ reference sources only; they are not copied wholesale into this target.
   calibration established 1060 quadrature counts per wheel revolution.
 - Reset cause, control mode, block reason, and motor-safe state are visible on
   the LCD and as debugger globals.
-- UART3 provides detached speed-loop tuning at 9600 baud: PA26 is MCU TX and
+- UART3 provides detached speed-loop tuning at 115200 baud: PA26 is MCU TX and
   PA25 is MCU RX. Applying parameters does not start either motor.
 
 Direct mode requests remain blocked. Verified outer controllers enter
@@ -177,6 +177,10 @@ six-channel `position` group and the tool records `latest_position_wave.json`
 plus `latest_position_telemetry.csv` under `tools/speed_tuner/runtime`.
 The command-line companion also provides `-Action ImuStatus` and
 `-Action ImuZero` through the same TCP bridge or by direct serial access.
+The GUI also has a Yaw-loop tab for all outer-loop parameters, live angle,
+Yaw rate, wheel targets/speeds, output, result, and high-impedance state. It
+forwards the seven-channel `yaw` FireWater group to VOFA+ and records the
+latest Yaw wave, status, and telemetry under the same runtime directory.
 
 ## Build and flash
 
@@ -190,6 +194,27 @@ cmake --build build-gcc --target car_control -j
 ```
 
 In VS Code, run `Terminal -> Run Task -> Build + Flash (J-Link)`.
+
+The resident wireless updater uses this protected Flash layout:
+
+```text
+0x00000000..0x00002FFF  car_bootloader (12 KiB, J-Link install only)
+0x00003000..0x0001FBFF  relocatable car_control application
+0x0001FC00..0x0001FFFF  update state, image size, and CRC32
+```
+
+`Install Bootloader + App (J-Link, One Time)` performs the only full-chip
+installation. After that, close any program that owns COM6 and run `Build +
+Wireless Update (COM6)` from the VS Code task list. The tested 81,664-byte GCC
+image transfers through the JDY-31 at 115200 baud in 16.7 seconds. `fw update`
+is accepted only while all motor outputs are high impedance. Each 1024-byte
+frame and the completed image have independent CRC32 checks; an interrupted
+update leaves the Bootloader resident and ready for the same task to be run
+again.
+
+`flash_gcc.jlink` is now application-only: it erases `0x3000..0x1FFFF` and
+cannot erase the resident Bootloader. Do not replace it with a full-chip erase
+for normal development.
 
 ## Debug globals
 

@@ -23,11 +23,28 @@ static volatile bool g_rx_overflow;
 static uint8_t g_tx_buffer[BLUETOOTH_UART_TX_SIZE];
 static uint16_t g_tx_head;
 static uint16_t g_tx_tail;
+static uint32_t g_baud_rate;
 
+static void bluetooth_uart_reset_software_state(void);
 static void bluetooth_uart_finish_line(void);
 static void bluetooth_uart_transmit_pending(void);
 
 void BluetoothUart_Init(void)
+{
+    bluetooth_uart_reset_software_state();
+    g_baud_rate = BLUETOOTH_UART_BAUD_RATE;
+
+    DL_UART_Main_enableFIFOs(BLUETOOTH_UART_INST);
+    DL_UART_Main_setRXFIFOThreshold(
+        BLUETOOTH_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+    while (!DL_UART_Main_isRXFIFOEmpty(BLUETOOTH_UART_INST)) {
+        (void) DL_UART_Main_receiveData(BLUETOOTH_UART_INST);
+    }
+    NVIC_ClearPendingIRQ(BLUETOOTH_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(BLUETOOTH_UART_INST_INT_IRQN);
+}
+
+static void bluetooth_uart_reset_software_state(void)
 {
     g_line_length = 0U;
     g_last_rx_ms = 0U;
@@ -39,15 +56,6 @@ void BluetoothUart_Init(void)
     g_rx_overflow = false;
     g_tx_head = 0U;
     g_tx_tail = 0U;
-
-    DL_UART_Main_enableFIFOs(BLUETOOTH_UART_INST);
-    DL_UART_Main_setRXFIFOThreshold(
-        BLUETOOTH_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
-    while (!DL_UART_Main_isRXFIFOEmpty(BLUETOOTH_UART_INST)) {
-        (void) DL_UART_Main_receiveData(BLUETOOTH_UART_INST);
-    }
-    NVIC_ClearPendingIRQ(BLUETOOTH_UART_INST_INT_IRQN);
-    NVIC_EnableIRQ(BLUETOOTH_UART_INST_INT_IRQN);
 }
 
 void BluetoothUart_Task(uint32_t now_ms)
@@ -158,6 +166,44 @@ void BluetoothUart_WriteText(const char *text)
         g_tx_head = next_head;
         text++;
     }
+}
+
+bool BluetoothUart_SetBaudRate(uint32_t baud_rate)
+{
+    if ((baud_rate != 9600U) && (baud_rate != 115200U)) {
+        return false;
+    }
+    bluetooth_uart_transmit_pending();
+    if (g_tx_tail != g_tx_head) {
+        return false;
+    }
+
+    NVIC_DisableIRQ(BLUETOOTH_UART_INST_INT_IRQN);
+    DL_UART_Main_changeConfig(BLUETOOTH_UART_INST);
+    DL_UART_Main_configBaudRate(BLUETOOTH_UART_INST,
+        BLUETOOTH_UART_INST_FREQUENCY, baud_rate);
+    DL_UART_Main_enableFIFOs(BLUETOOTH_UART_INST);
+    DL_UART_Main_setRXFIFOThreshold(
+        BLUETOOTH_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+    bluetooth_uart_reset_software_state();
+    DL_UART_Main_enable(BLUETOOTH_UART_INST);
+    DL_UART_Main_clearInterruptStatus(
+        BLUETOOTH_UART_INST, DL_UART_MAIN_INTERRUPT_RX);
+    NVIC_ClearPendingIRQ(BLUETOOTH_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(BLUETOOTH_UART_INST_INT_IRQN);
+    g_baud_rate = baud_rate;
+    return true;
+}
+
+uint32_t BluetoothUart_GetBaudRate(void)
+{
+    return g_baud_rate;
+}
+
+bool BluetoothUart_IsTxIdle(void)
+{
+    return (g_tx_tail == g_tx_head) &&
+        !DL_UART_Main_isBusy(BLUETOOTH_UART_INST);
 }
 
 static void bluetooth_uart_finish_line(void)

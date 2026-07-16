@@ -13,8 +13,10 @@
 #define WHEEL_SPEED_DEADBAND_PPS        12.0f
 #define WHEEL_SPEED_FEEDFORWARD_OFFSET  487.0f
 #define WHEEL_SPEED_FEEDFORWARD_GAIN      0.031f
+#define WHEEL_SPEED_BOOST_MEASURED_MAX_PPS 100.0f
 #define WHEEL_SPEED_TARGET_SLEW_PPS_PER_S          2000.0f
 #define WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S 4000.0f
+#define WHEEL_SPEED_YAW_TARGET_SLEW_PPS_PER_S      6000.0f
 #define WHEEL_SPEED_DEFAULT_OUTPUT_MAX  1000U
 
 static pid_controller_t g_left_pid;
@@ -27,13 +29,18 @@ static uint32_t g_last_update_ms;
 static uint32_t g_last_command_ms;
 static uint32_t g_command_deadline_ms;
 static car_control_mode_t g_owner_mode;
+static uint16_t g_feedforward_boost_permille;
+static float g_feedforward_ramp_pps;
+static bool g_left_feedforward_startup_active;
+static bool g_right_feedforward_startup_active;
 static float g_left_requested_pps;
 static float g_right_requested_pps;
 
 static bool wheel_speed_control_target_is_valid(float target_pps);
 static float wheel_speed_control_update_one(pid_controller_t *pid,
     float target_pps, float measured_pps, float dt_s,
-    uint16_t output_limit);
+    uint16_t output_limit, uint16_t feedforward_boost_permille,
+    float feedforward_ramp_pps, bool *feedforward_startup_active);
 static int16_t wheel_speed_control_round_output(float output);
 static float wheel_speed_control_slew_target(
     float current, float requested, float max_delta);
@@ -87,6 +94,10 @@ void WheelSpeedControl_Init(uint32_t now_ms)
     g_owner_mode = CAR_CONTROL_MODE_SPEED;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
+    g_feedforward_boost_permille = 0U;
+    g_feedforward_ramp_pps = 0.0f;
+    g_left_feedforward_startup_active = false;
+    g_right_feedforward_startup_active = false;
     g_last_update_ms = now_ms;
     g_last_command_ms = now_ms;
     g_command_deadline_ms = now_ms;
@@ -148,13 +159,33 @@ wheel_speed_control_result_t WheelSpeedControl_Start(uint32_t now_ms)
 wheel_speed_control_result_t WheelSpeedControl_StartForMode(
     car_control_mode_t owner_mode, uint32_t now_ms)
 {
+    return WheelSpeedControl_StartForModeWithFeedforward(
+        owner_mode, 0U, 0.0f, now_ms);
+}
+
+wheel_speed_control_result_t WheelSpeedControl_StartForModeWithFeedforward(
+    car_control_mode_t owner_mode, uint16_t feedforward_boost_permille,
+    float feedforward_ramp_pps, uint32_t now_ms)
+{
     if (!ControlSupervisor_ModeCanOwnSpeedControl(owner_mode)) {
         g_snapshot.last_result = WHEEL_SPEED_CONTROL_BAD_OWNER;
         return g_snapshot.last_result;
     }
+    if ((feedforward_boost_permille >
+            WHEEL_SPEED_CONTROL_FEEDFORWARD_BOOST_MAX) ||
+        !(feedforward_ramp_pps >= 0.0f) ||
+        !(feedforward_ramp_pps <=
+            WHEEL_SPEED_CONTROL_TARGET_MAX_PPS)) {
+        g_snapshot.last_result =
+            WHEEL_SPEED_CONTROL_BAD_FEEDFORWARD_CONFIG;
+        return g_snapshot.last_result;
+    }
     if (g_snapshot.running) {
         if ((g_owner_mode == owner_mode) &&
-            (ControlSupervisor_GetMode() == owner_mode)) {
+            (ControlSupervisor_GetMode() == owner_mode) &&
+            (g_feedforward_boost_permille ==
+                feedforward_boost_permille) &&
+            (g_feedforward_ramp_pps == feedforward_ramp_pps)) {
             return WHEEL_SPEED_CONTROL_OK;
         }
         g_snapshot.last_result = WHEEL_SPEED_CONTROL_BUSY;
@@ -182,6 +213,13 @@ wheel_speed_control_result_t WheelSpeedControl_StartForMode(
     g_snapshot.owner_mode = owner_mode;
     g_snapshot.running = true;
     g_owner_mode = owner_mode;
+    g_feedforward_boost_permille = feedforward_boost_permille;
+    g_feedforward_ramp_pps = feedforward_ramp_pps;
+    g_left_feedforward_startup_active =
+        (feedforward_ramp_pps > 0.0f) ||
+        (feedforward_boost_permille > 0U);
+    g_right_feedforward_startup_active =
+        g_left_feedforward_startup_active;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
     g_last_update_ms = now_ms;
@@ -325,11 +363,15 @@ void WheelSpeedControl_Task(uint32_t now_ms)
     left_output = wheel_speed_control_update_one(&g_left_pid,
         g_snapshot.left_target_pps,
         (float) g_snapshot.left_measured_pps, dt_s,
-        g_left_output_limit);
+        g_left_output_limit, g_feedforward_boost_permille,
+        g_feedforward_ramp_pps,
+        &g_left_feedforward_startup_active);
     right_output = wheel_speed_control_update_one(&g_right_pid,
         g_snapshot.right_target_pps,
         (float) g_snapshot.right_measured_pps, dt_s,
-        g_right_output_limit);
+        g_right_output_limit, g_feedforward_boost_permille,
+        g_feedforward_ramp_pps,
+        &g_right_feedforward_startup_active);
     g_snapshot.left_output_permille =
         wheel_speed_control_round_output(left_output);
     g_snapshot.right_output_permille =
@@ -379,11 +421,15 @@ static bool wheel_speed_control_target_is_valid(float target_pps)
 
 static float wheel_speed_control_update_one(pid_controller_t *pid,
     float target_pps, float measured_pps, float dt_s,
-    uint16_t output_limit)
+    uint16_t output_limit, uint16_t feedforward_boost_permille,
+    float feedforward_ramp_pps, bool *feedforward_startup_active)
 {
     float feedforward;
     float correction;
     float target_magnitude;
+    float measured_magnitude;
+    float active_boost = 0.0f;
+    float offset_scale = 1.0f;
 
     if (target_pps == 0.0f) {
         PID_Reset(pid);
@@ -391,8 +437,34 @@ static float wheel_speed_control_update_one(pid_controller_t *pid,
     }
 
     target_magnitude = (target_pps > 0.0f) ? target_pps : -target_pps;
-    feedforward = WHEEL_SPEED_FEEDFORWARD_OFFSET +
-        WHEEL_SPEED_FEEDFORWARD_GAIN * target_magnitude;
+    measured_magnitude = (measured_pps > 0.0f) ?
+        measured_pps : -measured_pps;
+    if ((feedforward_ramp_pps > 0.0f) &&
+        (target_magnitude < feedforward_ramp_pps)) {
+        offset_scale = target_magnitude / feedforward_ramp_pps;
+    }
+    if ((feedforward_startup_active != NULL) &&
+        !*feedforward_startup_active &&
+        (feedforward_ramp_pps > 0.0f) &&
+        (target_magnitude < feedforward_ramp_pps) &&
+        (measured_magnitude <= WHEEL_SPEED_BOOST_MEASURED_MAX_PPS)) {
+        *feedforward_startup_active = true;
+    }
+    if ((feedforward_startup_active != NULL) &&
+        *feedforward_startup_active) {
+        if ((measured_magnitude >
+                WHEEL_SPEED_BOOST_MEASURED_MAX_PPS) &&
+            ((feedforward_ramp_pps <= 0.0f) ||
+                (target_magnitude >= feedforward_ramp_pps))) {
+            *feedforward_startup_active = false;
+        } else {
+            offset_scale = 1.0f;
+            active_boost = (float) feedforward_boost_permille;
+        }
+    }
+    feedforward = WHEEL_SPEED_FEEDFORWARD_OFFSET * offset_scale +
+        WHEEL_SPEED_FEEDFORWARD_GAIN * target_magnitude +
+        active_boost;
     if (feedforward > (float) output_limit) {
         feedforward = (float) output_limit;
     }
@@ -421,6 +493,18 @@ static int16_t wheel_speed_control_round_output(float output)
 static float wheel_speed_control_slew_target(
     float current, float requested, float max_delta)
 {
+    if (g_owner_mode == CAR_CONTROL_MODE_YAW) {
+        if (((current > 0.0f) && (requested < 0.0f)) ||
+            ((current < 0.0f) && (requested > 0.0f))) {
+            return 0.0f;
+        }
+        if (((current > 0.0f) && (requested >= 0.0f) &&
+                (requested < current)) ||
+            ((current < 0.0f) && (requested <= 0.0f) &&
+                (requested > current))) {
+            return requested;
+        }
+    }
     if (requested > (current + max_delta)) {
         return current + max_delta;
     }
@@ -438,9 +522,13 @@ static bool wheel_speed_control_crossed_zero(float previous, float current)
 
 static float wheel_speed_control_target_slew_rate(void)
 {
-    return (g_owner_mode == CAR_CONTROL_MODE_POSITION) ?
-        WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S :
-        WHEEL_SPEED_TARGET_SLEW_PPS_PER_S;
+    if (g_owner_mode == CAR_CONTROL_MODE_POSITION) {
+        return WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S;
+    }
+    if (g_owner_mode == CAR_CONTROL_MODE_YAW) {
+        return WHEEL_SPEED_YAW_TARGET_SLEW_PPS_PER_S;
+    }
+    return WHEEL_SPEED_TARGET_SLEW_PPS_PER_S;
 }
 
 static bool wheel_speed_control_deadline_reached(
@@ -466,6 +554,10 @@ static void wheel_speed_control_deactivate(void)
     g_snapshot.right_output_permille = 0;
     g_left_requested_pps = 0.0f;
     g_right_requested_pps = 0.0f;
+    g_feedforward_boost_permille = 0U;
+    g_feedforward_ramp_pps = 0.0f;
+    g_left_feedforward_startup_active = false;
+    g_right_feedforward_startup_active = false;
     g_command_deadline_ms = 0U;
     wheel_speed_control_reset_pid_state();
     BoardWheelDrive_SetZero();

@@ -73,6 +73,56 @@
       "problemMatcher": []
     },
     {
+      "label": "Build Firmware (GCC)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build-gcc",
+        "--target",
+        "car_bootloader",
+        "car_control",
+        "-j"
+      ],
+      "dependsOn": "Configure (GCC)",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Install Bootloader + App (J-Link, One Time)",
+      "type": "process",
+      "command": "${env:USERPROFILE}/SEGGER/JLink/JLink.exe",
+      "args": [
+        "-NoGui",
+        "1",
+        "-CommandFile",
+        "${workspaceFolder}/CAR_CONTROL/tools/install_bootloader_gcc.jlink"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build Firmware (GCC)",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build + Wireless Update (COM6)",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/CAR_CONTROL/tools/FirmwareUpdater.ps1",
+        "-Port",
+        "COM6"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build Target (GCC)",
+      "problemMatcher": []
+    },
+    {
       "label": "Flash CAR_CONTROL (OpenOCD + DAPLink)",
       "type": "shell",
       "command": "${config:mspm0.openocdPath}",

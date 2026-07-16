@@ -171,7 +171,7 @@ IMU_I2C.sdaPinConfig.$name              = "IMU_I2C_SDA_PIN";
 IMU_I2C.sclPinConfig.$name              = "IMU_I2C_SCL_PIN";
 
 BLUETOOTH_UART.$name                            = "BLUETOOTH_UART";
-BLUETOOTH_UART.targetBaudRate                   = 9600;
+BLUETOOTH_UART.targetBaudRate                   = 115200;
 BLUETOOTH_UART.enableFIFO                       = true;
 BLUETOOTH_UART.rxFifoThreshold                  = "DL_UART_RX_FIFO_LEVEL_ONE_ENTRY";
 BLUETOOTH_UART.enabledInterrupts                = ["RX"];

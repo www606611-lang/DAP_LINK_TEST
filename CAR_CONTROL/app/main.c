@@ -6,7 +6,9 @@
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
+#include "firmware_update.h"
 #include "icm20948.h"
+#include "jdy31_config.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "speed_bringup_test.h"
@@ -15,6 +17,8 @@
 #include "ti_msp_dl_config.h"
 #include "wheel_position_control.h"
 #include "wheel_speed_control.h"
+#include "wheel_yaw_control.h"
+#include "yaw_bringup_test.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -95,8 +99,24 @@ volatile int32_t g_car_imu_quaternion_y_million;
 volatile int32_t g_car_imu_quaternion_z_million;
 volatile bool g_car_imu_attitude_valid;
 volatile bool g_car_imu_stationary;
+volatile uint32_t g_car_yaw_test_state;
+volatile uint32_t g_car_yaw_test_run_count;
+volatile int32_t g_car_yaw_target_mdeg;
+volatile int32_t g_car_yaw_current_mdeg;
+volatile int32_t g_car_yaw_error_mdeg;
+volatile int32_t g_car_yaw_rate_mdps;
+volatile int32_t g_car_yaw_turn_target_pps;
+volatile int32_t g_car_yaw_left_target_pps;
+volatile int32_t g_car_yaw_right_target_pps;
+volatile uint32_t g_car_yaw_update_count;
+volatile uint32_t g_car_yaw_last_result;
+volatile bool g_car_yaw_settled;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
+volatile uint32_t g_car_jdy31_config_state;
+volatile uint32_t g_car_jdy31_uart_baud;
+volatile int32_t g_car_jdy31_reported_baud_code;
+volatile bool g_car_jdy31_config_success;
 
 static void app_display_init(void);
 static void app_display_update(uint32_t now_ms);
@@ -111,6 +131,7 @@ int main(void)
     uint32_t displayed_encoder_period = UINT32_MAX;
     bool display_dirty = true;
 
+    FirmwareUpdate_AppInit();
     SYSCFG_DL_init();
     ResetDiagnostics_Init();
     BoardMotorSafe_Init();
@@ -125,10 +146,16 @@ int main(void)
         BOARD_ENCODER_1_FORWARD_INVERTED != 0);
     WheelSpeedControl_Init(delay_get_ms());
     WheelPositionControl_Init(delay_get_ms());
+    WheelYawControl_Init(delay_get_ms());
     SpeedBringupTest_Init(ResetDiagnostics_IsSuspicious());
     PositionBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    YawBringupTest_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
-    SpeedTuningConsole_Init();
+    JDY31_ConfigInit(delay_get_ms(),
+        CAR_JDY31_CONFIGURE_ON_BOOT != 0);
+    if (!JDY31_ConfigIsExclusive()) {
+        SpeedTuningConsole_Init();
+    }
 
     ST7789_Init();
     app_display_init();
@@ -167,9 +194,14 @@ int main(void)
         EncoderInput_Task(now_ms);
         ICM20948_Task(now_ms);
         BluetoothUart_Task(now_ms);
-        SpeedTuningConsole_Task(now_ms);
+        JDY31_ConfigTask(now_ms);
+        if (!JDY31_ConfigIsExclusive()) {
+            SpeedTuningConsole_Task(now_ms);
+        }
+        FirmwareUpdate_Task();
         ControlSupervisor_Task(now_ms);
-        if (any_press_event) {
+        if (any_press_event && !JDY31_ConfigIsExclusive() &&
+            !FirmwareUpdate_IsPending()) {
             if (SpeedBringupTest_GetState() ==
                     SPEED_BRINGUP_TEST_RUNNING) {
                 SpeedBringupTest_RequestStop();
@@ -177,6 +209,10 @@ int main(void)
             } else if (PositionBringupTest_GetState() ==
                     POSITION_BRINGUP_TEST_RUNNING) {
                 PositionBringupTest_RequestStop();
+                g_car_last_button_move_counts = 0;
+            } else if (YawBringupTest_GetState() ==
+                    YAW_BRINGUP_TEST_RUNNING) {
+                YawBringupTest_RequestStop();
                 g_car_last_button_move_counts = 0;
             } else if (pb21_press_event) {
                 if (PositionBringupTest_RequestMove(
@@ -199,7 +235,9 @@ int main(void)
         }
         SpeedBringupTest_Task(now_ms, false);
         PositionBringupTest_Task(now_ms, false);
+        YawBringupTest_Task(now_ms);
         WheelPositionControl_Task(now_ms);
+        WheelYawControl_Task(now_ms);
         WheelSpeedControl_Task(now_ms);
 
         if (pb21_press_event) {
@@ -240,6 +278,13 @@ int main(void)
 static void app_display_init(void)
 {
     ST7789_Fill(ST7789_COLOR_BLACK);
+    if (JDY31_ConfigIsExclusive()) {
+        ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U,
+            ST7789_COLOR_BLUE);
+        ST7789_ShowString(8U, 5U, "JDY-31 CONFIG", ST7789_8X16,
+            ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
+        return;
+    }
     ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U, ST7789_COLOR_BLUE);
     ST7789_ShowString(8U, 5U, "ICM20948 ATTITUDE", ST7789_8X16,
         ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
@@ -261,6 +306,31 @@ static void app_display_update(uint32_t now_ms)
         (g_car_imu_stationary ? "LOCKED" : "MOVING");
 
     (void) now_ms;
+
+    if (JDY31_ConfigIsExclusive()) {
+        jdy31_config_snapshot_t jdy31;
+
+        if (JDY31_ConfigGetSnapshot(&jdy31)) {
+            uint16_t state_color = (jdy31.state == JDY31_CONFIG_SUCCESS) ?
+                ST7789_COLOR_GREEN :
+                ((jdy31.state == JDY31_CONFIG_FAILED) ?
+                    ST7789_COLOR_RED : ST7789_COLOR_YELLOW);
+
+            ST7789_PrintfFast(24U, 48U, ST7789_8X16, state_color,
+                ST7789_COLOR_BLACK, "STATE: %-14s",
+                JDY31_ConfigGetStateText());
+            ST7789_PrintfFast(24U, 82U, ST7789_8X16,
+                ST7789_COLOR_CYAN, ST7789_COLOR_BLACK,
+                "UART : %6lu", (unsigned long) jdy31.uart_baud);
+            ST7789_PrintfFast(24U, 116U, ST7789_8X16,
+                ST7789_COLOR_WHITE, ST7789_COLOR_BLACK,
+                "CODE : %6ld", (long) jdy31.reported_baud_code);
+            ST7789_PrintfFast(24U, 150U, ST7789_8X16,
+                ST7789_COLOR_WHITE, ST7789_COLOR_BLACK,
+                "RESP : %-20s", jdy31.last_response);
+        }
+        return;
+    }
 
     ST7789_ShowAsciiStringFast(260U, 5U,
         g_car_motor_high_impedance ? "HIGH-Z" : "ARMED ",
@@ -300,7 +370,9 @@ static void app_update_debug_state(void)
     encoder_input_snapshot_t encoder_1;
     wheel_speed_control_snapshot_t speed;
     wheel_position_control_snapshot_t position;
+    wheel_yaw_control_snapshot_t yaw;
     icm20948_snapshot_t imu;
+    jdy31_config_snapshot_t jdy31;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
     g_car_pb4_pressed = BoardButton_IsPressedId(
@@ -317,6 +389,15 @@ static void app_update_debug_state(void)
     g_car_position_test_state =
         (uint32_t) PositionBringupTest_GetState();
     g_car_position_test_run_count = PositionBringupTest_GetRunCount();
+    g_car_yaw_test_state = (uint32_t) YawBringupTest_GetState();
+    g_car_yaw_test_run_count = YawBringupTest_GetRunCount();
+    if (JDY31_ConfigGetSnapshot(&jdy31)) {
+        g_car_jdy31_config_state = (uint32_t) jdy31.state;
+        g_car_jdy31_uart_baud = jdy31.uart_baud;
+        g_car_jdy31_reported_baud_code =
+            jdy31.reported_baud_code;
+        g_car_jdy31_config_success = jdy31.success;
+    }
 
     if (WheelSpeedControl_GetSnapshot(&speed)) {
         g_car_speed_left_target_pps =
@@ -349,6 +430,26 @@ static void app_update_debug_state(void)
         g_car_position_update_count = position.update_count;
         g_car_position_last_result = (uint32_t) position.last_result;
         g_car_position_settled = position.settled;
+    }
+
+    if (WheelYawControl_GetSnapshot(&yaw)) {
+        g_car_yaw_target_mdeg =
+            app_round_float(yaw.target_yaw_deg * 1000.0f);
+        g_car_yaw_current_mdeg =
+            app_round_float(yaw.current_yaw_deg * 1000.0f);
+        g_car_yaw_error_mdeg =
+            app_round_float(yaw.error_deg * 1000.0f);
+        g_car_yaw_rate_mdps =
+            app_round_float(yaw.yaw_rate_dps * 1000.0f);
+        g_car_yaw_turn_target_pps =
+            app_round_float(yaw.turn_speed_target_pps);
+        g_car_yaw_left_target_pps =
+            app_round_float(yaw.left_speed_target_pps);
+        g_car_yaw_right_target_pps =
+            app_round_float(yaw.right_speed_target_pps);
+        g_car_yaw_update_count = yaw.update_count;
+        g_car_yaw_last_result = (uint32_t) yaw.last_result;
+        g_car_yaw_settled = yaw.settled;
     }
 
     if (ICM20948_GetSnapshot(&imu)) {

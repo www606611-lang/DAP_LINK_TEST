@@ -5,7 +5,8 @@ param(
         "Get", "Set", "Run", "Step", "Reverse", "Sweep", "Lease",
         "Stop", "Status", "PositionGet", "PositionSet", "PositionRun",
         "PositionStress", "PositionStop", "PositionStatus",
-        "ImuStatus", "ImuZero")]
+        "ImuStatus", "ImuZero", "YawGet", "YawSet", "YawRun",
+        "YawStop", "YawStatus")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -24,12 +25,24 @@ param(
     [uint16]$PositionTolerance = 24,
     [single]$PositionSyncKp = 2.0,
     [single]$PositionSyncMax = 400.0,
+    [single]$YawKp = 45.0,
+    [single]$YawKi = 0.8,
+    [single]$YawKd = 7.0,
+    [single]$YawTarget = -45.0,
+    [single]$YawMaxSpeed = 800.0,
+    [single]$YawMinSpeed = 200.0,
+    [uint16]$YawBoost = 40,
+    [uint16]$YawLimit = 750,
+    [single]$YawTolerance = 0.7,
+    [single]$YawSettleRate = 5.0,
+    [uint16]$YawSettleTime = 300,
+    [uint16]$YawTimeout = 5000,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
 
 $ErrorActionPreference = "Stop"
-$baudRate = 9600
+$baudRate = 115200
 $serial = $null
 $bridgeClient = $null
 $bridgeReader = $null
@@ -119,7 +132,9 @@ function Read-Expected([string[]]$prefixes, [uint32]$timeoutMs = 2500) {
                 $line = $serial.ReadLine().Trim()
             }
             if ($line.Length -eq 0) { continue }
-            if ($line.StartsWith("wave:")) { continue }
+            if ($line.StartsWith("wave:") -or
+                $line.StartsWith("poswave:") -or
+                $line.StartsWith("yawwave:")) { continue }
             Write-Host "RX $line"
             foreach ($prefix in $prefixes) {
                 if ($line.StartsWith($prefix)) {
@@ -190,6 +205,37 @@ function Get-PositionSetCommand {
         $PositionSyncMax.ToString('0.####', $culture))
 }
 
+function Get-YawSetCommand {
+    if (($YawKp -le 0) -or ($YawKp -gt 50) -or
+        ($YawKi -lt 0) -or ($YawKi -gt 20) -or
+        ($YawKd -lt 0) -or ($YawKd -gt 20) -or
+        ($YawTarget -eq 0) -or
+        ($YawTarget -lt -180) -or ($YawTarget -gt 180) -or
+        ($YawMaxSpeed -lt 100) -or ($YawMaxSpeed -gt 6000) -or
+        ($YawMinSpeed -lt 0) -or ($YawMinSpeed -gt $YawMaxSpeed) -or
+        ($YawBoost -gt 300) -or
+        ($YawLimit -lt 100) -or ($YawLimit -gt 1000) -or
+        ($YawTolerance -lt 0.1) -or ($YawTolerance -gt 15) -or
+        ($YawSettleRate -lt 0.1) -or ($YawSettleRate -gt 50) -or
+        ($YawSettleTime -lt 50) -or ($YawSettleTime -gt 2000) -or
+        ($YawTimeout -lt 500) -or ($YawTimeout -gt 15000)) {
+        throw "Yaw configuration is outside firmware range."
+    }
+    return ('yaw set {0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11}' -f
+        $YawKp.ToString('0.####', $culture),
+        $YawKi.ToString('0.####', $culture),
+        $YawKd.ToString('0.####', $culture),
+        $YawTarget.ToString('0.####', $culture),
+        $YawMaxSpeed.ToString('0.####', $culture),
+        $YawLimit.ToString($culture),
+        $YawTolerance.ToString('0.####', $culture),
+        $YawSettleRate.ToString('0.####', $culture),
+        $YawSettleTime.ToString($culture),
+        $YawTimeout.ToString($culture),
+        $YawMinSpeed.ToString('0.####', $culture),
+        $YawBoost.ToString($culture))
+}
+
 function Parse-Status([string]$line) {
     $values = @{}
     foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
@@ -235,12 +281,58 @@ function Save-DirectStatus([hashtable]$values, [string]$csvPath) {
     }
 }
 
+function Save-YawStatus([hashtable]$values, [string]$csvPath) {
+    $timestamp = [DateTime]::Now.ToString("o")
+    $status = [ordered]@{
+        timestamp = $timestamp
+        source = $transport
+        port = if ($transport -eq "tcp_bridge") {
+            "$BridgeHost`:$BridgePort"
+        } else { $Port }
+        state = $values['state']
+        target_mdeg = [int]$values['target']
+        current_mdeg = [int]$values['current']
+        error_mdeg = [int]$values['error']
+        yaw_rate_mdps = [int]$values['rate']
+        turn_target_pps = [int]$values['turn']
+        left_target_pps = [int]$values['tL']
+        right_target_pps = [int]$values['tR']
+        left_speed_pps = [int]$values['vL']
+        right_speed_pps = [int]$values['vR']
+        left_output_permille = [int]$values['outL']
+        right_output_permille = [int]$values['outR']
+        result = [uint32]$values['res']
+        high_impedance = ($values['hz'] -eq '1')
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $runtimeDir "latest_yaw_status.json"),
+        ($status | ConvertTo-Json), $utf8NoBom)
+
+    if ($csvPath -ne "") {
+        $row = @(
+            $timestamp, $values['state'], $values['target'],
+            $values['current'], $values['error'], $values['rate'],
+            $values['turn'], $values['tL'], $values['tR'],
+            $values['vL'], $values['vR'], $values['outL'],
+            $values['outR'], $values['res'], $values['hz']) -join ','
+        [System.IO.File]::AppendAllText(
+            $csvPath, "$row`r`n", $utf8NoBom)
+        if ($transport -ne "tcp_bridge") {
+            [System.IO.File]::AppendAllText(
+                (Join-Path $runtimeDir "latest_yaw_telemetry.csv"),
+                "$row`r`n", $utf8NoBom)
+        }
+    }
+}
+
 if ($Takeover) {
     Stop-GuiOwner
 }
 
 try {
     $runCommand = $null
+    $yawRunRequested = $false
+    $yawRunActive = $false
     $bridgeConnected = $false
     if ((-not $Takeover) -and (-not $DirectSerial)) {
         $bridgeConnected = Connect-Bridge
@@ -316,6 +408,28 @@ try {
         "ImuZero" {
             [void](Invoke-Protocol "imu zero" @("OK IMU ZERO", "ERR "))
         }
+        "YawGet" {
+            [void](Invoke-Protocol "yaw get" @("OK YCFG ", "ERR "))
+        }
+        "YawSet" {
+            [void](Invoke-Protocol (Get-YawSetCommand) @("OK YCFG ", "ERR "))
+        }
+        "YawRun" {
+            if ($ApplyConfig) {
+                [void](Invoke-Protocol (Get-YawSetCommand) @("OK YCFG ", "ERR "))
+            } else {
+                [void](Invoke-Protocol "yaw get" @("OK YCFG ", "ERR "))
+            }
+            [void](Invoke-Protocol "yaw run" @("OK YAW RUN", "ERR "))
+            $yawRunRequested = $true
+            $yawRunActive = $true
+        }
+        "YawStop" {
+            [void](Invoke-Protocol "yaw stop" @("OK YAW STOP", "ERR "))
+        }
+        "YawStatus" {
+            [void](Invoke-Protocol "yaw stat" @("YSTAT ", "ERR "))
+        }
         "Run" {
             $runCommand = "spd run"
         }
@@ -369,7 +483,72 @@ try {
             }
             Write-Host "CAPTURE $csvPath"
     }
+
+    if ($yawRunRequested) {
+        $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
+        $csvPath = Join-Path $runtimeDir "yaw_run_$stamp.csv"
+        $latestCsvPath = Join-Path $runtimeDir "latest_yaw_telemetry.csv"
+        $header = "timestamp,state,target_mdeg,current_mdeg,error_mdeg,yaw_rate_mdps,turn_target_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z`r`n"
+        [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
+        if ($transport -ne "tcp_bridge") {
+            [System.IO.File]::WriteAllText(
+                $latestCsvPath, $header, $utf8NoBom)
+        }
+
+        $deadline = [DateTime]::Now.AddMilliseconds($RunTimeoutMs)
+        $acceptedAt = [DateTime]::Now
+        $finished = $false
+        $observedRunning = $false
+        $terminalState = $null
+        $terminalResult = $null
+        $terminalHighZ = $null
+        while ([DateTime]::Now -lt $deadline) {
+            Start-Sleep -Milliseconds $PollMs
+            $statusLine = Invoke-Protocol "yaw stat" @("YSTAT ", "ERR ")
+            if (-not $statusLine.StartsWith("YSTAT ")) { continue }
+            $values = Parse-Status $statusLine
+            Save-YawStatus $values $csvPath
+            if ($values['state'] -eq 'RUN') {
+                $observedRunning = $true
+                continue
+            }
+            if ($observedRunning -and
+                ($values['state'] -in @('DONE', 'ABORT', 'LOCKED'))) {
+                $finished = $true
+                $terminalState = $values['state']
+                $terminalResult = $values['res']
+                $terminalHighZ = $values['hz']
+                $yawRunActive = $false
+                break
+            }
+            if ((-not $observedRunning) -and
+                (([DateTime]::Now - $acceptedAt).TotalMilliseconds -ge 2000) -and
+                ($values['state'] -in @('ABORT', 'LOCKED'))) {
+                $finished = $true
+                $terminalState = $values['state']
+                $terminalResult = $values['res']
+                $terminalHighZ = $values['hz']
+                $yawRunActive = $false
+                break
+            }
+        }
+        if (-not $finished) {
+            [void](Invoke-Protocol "yaw stop" @("OK YAW STOP", "ERR "))
+            $yawRunActive = $false
+            throw "Yaw run did not reach a terminal state before timeout."
+        }
+        Write-Host "CAPTURE $csvPath"
+        if ($terminalState -ne 'DONE') {
+            throw "Yaw run ended in state=$terminalState result=$terminalResult high_z=$terminalHighZ."
+        }
+    }
 } finally {
+    if ($yawRunActive) {
+        try {
+            [void](Invoke-Protocol "yaw stop" @("OK YAW STOP", "ERR "))
+        } catch {
+        }
+    }
     Close-Bridge
     if ($null -ne $serial) {
         if ($serial.IsOpen) { $serial.Close() }

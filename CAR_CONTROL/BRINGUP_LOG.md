@@ -645,3 +645,91 @@ and `att=1`. This verifies that the stationary yaw lock engages again after a
 dynamic turn rather than only at startup. The motion sign is internally
 consistent; the final vehicle convention still needs the operator to label the
 observed physical clockwise direction before the yaw controller is enabled.
+
+### Yaw loop bring-up and bidirectional stress test
+
+The operator confirmed the vehicle convention: clockwise rotation is negative
+Yaw and counterclockwise rotation is positive Yaw. The Yaw controller owns the
+validated wheel-speed loop and always returns both motor channels to high
+impedance on completion, timeout, operator stop, ownership loss, or IMU error.
+
+Initial `500 pps` tests were mechanically weak and repeatedly stopped just
+outside the angle tolerance. Telemetry showed that the wheel-speed loop was
+commanding only `23..68 pps` near the target and could not overcome chassis
+stiction. The controller now preserves its integral while temporarily inside
+the settling band and applies a configurable minimum turn speed only when its
+output still points toward an out-of-tolerance target. Opposite-direction PID
+braking is not clamped by this compensation.
+
+The first data-only candidate was:
+
+```text
+Kp / Ki / Kd:       30.0 / 1.5 / 1.5
+maximum turn speed: 1000 pps
+minimum turn speed:  300 pps
+PWM limit:            650 permille
+angle tolerance:        1.5 degrees
+settle rate:             4.0 dps
+settle time:            300 ms
+timeout:               6000 ms
+```
+
+A single clockwise run reached `-43.853 degrees` with a `-1.147 degree`
+target error, approximately `70.5 dps` peak rate, no target crossing, and a
+`DONE / HIGH-Z` terminal state. A single counterclockwise run reached
+`+43.521 degrees` with a `+1.479 degree` error, approximately `84.0 dps` peak
+rate, no target crossing, and `DONE / HIGH-Z`.
+
+Four additional alternating `-45/+45/-45/+45` runs all completed with result
+zero and high impedance. Their final angles were `-43.533`, `+43.507`,
+`-43.959`, and `+43.500` degrees. This passed the protocol and safety gates but
+failed physical acceptance: the operator reported weak turning, stop-and-go
+motion, and unacceptable errors clustered at the `1.5 degree` completion
+boundary. The candidate was not promoted to compiled defaults.
+
+The next revision therefore raises the Yaw-owner speed-target slew rate from
+`2000` to `6000 pps/s`, adds a configurable Yaw-only feedforward boost for the
+extra tire-scrub load of pivot turns, and restricts minimum-speed compensation
+to near-stationary recovery. Accuracy must be retested with a tighter tolerance
+before any final defaults are accepted.
+
+### Final ground-tuned Yaw loop
+
+Ground testing exposed a second stiction case after the initial feedforward
+boost had already disengaged. During deceleration, both wheels could stop near
+`320..370 pps` while the speed loop still applied approximately `520
+permille`; the Yaw test then timed out several degrees short. The speed loop
+now re-enables its per-wheel startup assist only after the requested speed is
+inside the configured feedforward ramp and measured speed falls below `100
+pps`. This leaves the verified high-speed behavior unchanged while restoring
+authority through the final low-speed approach.
+
+The promoted defaults are:
+
+```text
+Kp / Ki / Kd:       45.0 / 0.8 / 7.0
+maximum turn speed:  800 pps
+minimum turn speed:  200 pps
+feedforward boost:    40 permille
+PWM limit:            750 permille
+angle tolerance:        0.7 degrees
+settle rate:             5.0 dps
+settle time:            300 ms
+timeout:               5000 ms
+```
+
+The post-fix matrix passed `+/-2`, `+/-5`, `+/-10`, `+/-30`, `+/-45`,
+`+/-90`, and `+/-135` degrees. A further ten-run alternating `+45/-45`
+ground stress test completed every commanded run with result zero and high
+impedance. High-rate telemetry measured `1.5..1.8 s` to enter the `1 degree / 5
+dps` settling region. Nine runs had no target crossing; one crossed by only
+`0.008 degrees`. Successful terminal errors ranged from `0.23` to `0.94
+degrees`. A deliberate host CSV contention failure stopped through the normal
+supervisor path with high impedance and was excluded from the ten successful
+runs.
+
+After a wireless update and MCU restart, `yaw get` returned the promoted
+defaults without a host-side parameter write. A bare `yaw run` then completed
+the default `-45 degree` command at `-44.214 degrees`, result zero, and high
+impedance. The GUI remains the sole owner of high-rate latest-wave files when
+the CLI controls it through the TCP bridge, eliminating concurrent CSV writes.

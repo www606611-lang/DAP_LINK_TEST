@@ -10,7 +10,8 @@ connect
 EoE 1
 r
 h
-erase 0x00003000, 0x0001FFFF
+erase 0x00000000, 0x0001FFFF
+loadfile build-gcc/CAR_CONTROL/car_bootloader.elf
 loadfile build-gcc/CAR_CONTROL/car_control.elf
 r
 g

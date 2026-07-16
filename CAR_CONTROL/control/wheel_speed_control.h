@@ -11,6 +11,7 @@
 #define WHEEL_SPEED_CONTROL_KI_MAX         20.0f
 #define WHEEL_SPEED_CONTROL_KD_MAX          2.0f
 #define WHEEL_SPEED_CONTROL_COMMAND_LEASE_MS 100U
+#define WHEEL_SPEED_CONTROL_FEEDFORWARD_BOOST_MAX 300U
 
 typedef enum {
     WHEEL_SPEED_CONTROL_OK = 0,
@@ -23,7 +24,8 @@ typedef enum {
     WHEEL_SPEED_CONTROL_BAD_TUNING,
     WHEEL_SPEED_CONTROL_BUSY,
     WHEEL_SPEED_CONTROL_BAD_OWNER,
-    WHEEL_SPEED_CONTROL_COMMAND_TIMEOUT
+    WHEEL_SPEED_CONTROL_COMMAND_TIMEOUT,
+    WHEEL_SPEED_CONTROL_BAD_FEEDFORWARD_CONFIG
 } wheel_speed_control_result_t;
 
 typedef struct {
@@ -58,6 +60,9 @@ bool WheelSpeedControl_GetTunings(
 wheel_speed_control_result_t WheelSpeedControl_Start(uint32_t now_ms);
 wheel_speed_control_result_t WheelSpeedControl_StartForMode(
     car_control_mode_t owner_mode, uint32_t now_ms);
+wheel_speed_control_result_t WheelSpeedControl_StartForModeWithFeedforward(
+    car_control_mode_t owner_mode, uint16_t feedforward_boost_permille,
+    float feedforward_ramp_pps, uint32_t now_ms);
 wheel_speed_control_result_t WheelSpeedControl_SetTargets(
     float left_pps, float right_pps, uint32_t now_ms);
 wheel_speed_control_result_t WheelSpeedControl_SetOutputLimits(

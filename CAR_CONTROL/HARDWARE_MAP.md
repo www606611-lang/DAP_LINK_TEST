@@ -17,7 +17,7 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | ICM20948 IMU I2C0 | PA0 SDA, PA1 SCL | Bench confirmed | Module responds at 7-bit address `0x69`; `WHO_AM_I=0xEA`; 100 Hz reads verified with zero I2C errors |
 | Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
 | K230 UART | PA21 TX, PA22 RX in old firmware | Pending | Legacy firmware mapping; not enabled yet |
-| Bluetooth UART3 | PA26 TX, PA25 RX | Configured; bench pending | Reuses the `DAP_LINK_TEST` mapping and generated 9600 baud setting; all Tianmengxing pins are available on the headers |
+| Bluetooth UART3 | PA26 TX, PA25 RX | Verified at 115200 baud | JDY-31A reports `BAUD=8`; all Tianmengxing pins are available on the headers |
 | CAN | PA12/PA13 or PA26/PA27 | Conflict | PA26 is now reserved for Bluetooth UART3 TX; CAN remains disabled |
 
 ## Motor naming rule
@@ -56,6 +56,9 @@ alignment; per-wheel correction is not justified by this test.
   MCU is powered from USB/J-Link while the Buck or AT8236 VM rail is off.
 - Motor outputs must remain high impedance until the AT8236, Buck, VM, 5 V,
   3.3 V, and common-ground power-up sequence is valid.
+- The resident Bootloader explicitly configures PA29, PA30, PA23, and PA24 as
+  digital inputs before accepting a wireless update. Its Flash commands cannot
+  address the protected `0x0000..0x2FFF` Bootloader partition.
 - The guarded speed-loop test enables both channels with a 100 ms target lease
   inside a separate 200 ms hardware lease. The target ramps to 3500 pps, PWM is
   capped at 650 permille, a second PB21 press stops both immediately, and a

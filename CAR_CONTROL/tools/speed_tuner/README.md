@@ -1,7 +1,7 @@
 # CAR Control Tuner
 
-This tool changes the speed-loop configuration and carries position-loop
-commands and telemetry over one Bluetooth UART connection.
+This tool changes speed-, position-, and Yaw-loop configuration and carries
+their commands and telemetry over one Bluetooth UART connection.
 
 ## Wiring
 
@@ -11,19 +11,28 @@ commands and telemetry over one Bluetooth UART connection.
 | PA25 / UART3 RX | TX |
 | GND | GND |
 
-The serial format is `9600 8N1`. The Bluetooth module's UART side must use a
+The serial format is `115200 8N1`. The Bluetooth module's UART side must use a
 3.3 V compatible logic level.
 
 ## Run
 
 Open `Launch-SpeedTuner.cmd`, select the Bluetooth serial COM port, and connect.
-The GUI has separate speed-loop and position-loop tabs. The position tab edits
+The GUI has separate speed-loop, position-loop, and Yaw-loop tabs. The position tab edits
 Kp, relative target counts, maximum speed, output limit, tolerance, straight-line
 sync Kp, and maximum sync correction, and provides Run, Stress 24, and Stop
 controls. Its live panel shows position target, actual count, error, current
 step, completed moves, worst error, wheel speeds, recovery totals, invalid
 transitions, result, and high-impedance state. The GUI is the only process that
 owns the physical serial port.
+
+The Yaw tab edits Kp/Ki/Kd, relative target angle, maximum and minimum turn
+speed, PWM limit, angle tolerance, settle rate/time, run timeout, and a
+pivot-load feedforward boost. The minimum speed compensates motor stiction only
+when the vehicle is nearly stationary and still outside tolerance. The boost
+adds startup torque while the speed loop is owned by Yaw mode. Its live panel shows
+target/current/error angle, Yaw rate, turn target, wheel targets/speeds,
+outputs, result, and `HIGH-Z/ARMED`. Start with `-StartYawMode` to select this
+tab before auto-connect.
 
 | Consumer | Connection | Data |
 | --- | --- | --- |
@@ -53,6 +62,21 @@ The position samples are mirrored into
 `runtime/latest_position_wave.json` and
 `runtime/latest_position_telemetry.csv`.
 
+During a Yaw move the bridge emits a seven-value FireWater group named `yaw`:
+
+```text
+Yaw_Target_mdeg
+Yaw_Current_mdeg
+Yaw_Error_mdeg
+Yaw_Rate_mdps
+Turn_Target_pps
+Left_Speed_pps
+Right_Speed_pps
+```
+
+Yaw samples and status are mirrored into `runtime/latest_yaw_wave.json`,
+`runtime/latest_yaw_telemetry.csv`, and `runtime/latest_yaw_status.json`.
+
 The values are stored in RAM. A reset restores the firmware defaults. Applying
 a configuration never starts the motors, and applying while a test is running
 returns `ERR busy`.
@@ -77,6 +101,9 @@ powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Step
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Reverse
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Sweep -Target 6000 -Limit 750 -ApplyConfig
 powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action Lease
+powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action YawGet
+powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action YawSet -YawKp 45 -YawKi 0.8 -YawKd 3 -YawTarget -45 -YawMaxSpeed 2000 -YawMinSpeed 300 -YawBoost 80 -ApplyConfig
+powershell -NoProfile -File SpeedTunerCli.ps1 -Port COM6 -Action YawRun
 ```
 
 The CLI never starts a run unless `-Action Run` is explicitly selected.
@@ -100,6 +127,15 @@ pos run
 pos run stress
 pos stop
 pos stat
+
+imu stat
+imu zero
+
+yaw get
+yaw set KP KI KD TARGET_DEG MAX_SPEED_PPS OUTPUT_LIMIT_PERMILLE TOLERANCE_DEG SETTLE_RATE_DPS SETTLE_MS TIMEOUT_MS [MIN_SPEED_PPS [FEEDFORWARD_BOOST_PERMILLE]]
+yaw run
+yaw stop
+yaw stat
 ```
 
 The normal ramp uses the configured target. `step` switches between 50%,
@@ -127,6 +163,10 @@ The final two `pos set` fields are optional for compatibility with older tools.
 When omitted, the current sync settings are preserved. A zero sync gain or zero
 sync maximum disables cross-coupling. Sync is applied only when both relative
 wheel targets are equal and nonzero.
+
+The final two `yaw set` fields are optional for compatibility with older tools.
+When omitted, the current minimum turn speed and Yaw feedforward boost are
+preserved. The boost range is `0..300 permille`.
 
 Accepted ranges:
 

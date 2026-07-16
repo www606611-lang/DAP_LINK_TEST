@@ -1,7 +1,11 @@
 # Firmware Architecture
 
 ```text
+bootloader/main -> bootloader/boot_uart + bootloader/boot_flash
+  -> drivers/utility/crc32 -> platform/mspm0g3507 memory layout
+
 app/main
+  -> app/firmware_update -> SRAM boot mailbox
   -> app/position_bringup_test
   -> app/speed_bringup_test
   -> app/speed_tuning_console -> drivers/mcu/bluetooth_uart
@@ -47,6 +51,10 @@ control cascade
   attitude estimator owns quaternion integration, gravity-vector correction,
   Euler conversion, and relative-yaw tracking; it has no I2C or board access.
 - `app`: scheduling, display, commands, and mode transitions.
+- `platform/mspm0g3507`: immutable Flash/SRAM partition constants and linker
+  layouts shared by the application and resident Bootloader.
+- `bootloader`: isolated 115200-baud JDY-31 update protocol, safe motor-pin
+  state, Flash erase/program, image validation, and application handoff.
 
 ## Integration gates
 
@@ -79,7 +87,9 @@ control cascade
    Dynamic hand turns and post-turn stationary locking are verified. The
    operator-labeled clockwise sign remains the gate before motorized yaw-loop
    work.
-10. Yaw loop: verified IMU yaw output into the speed loop.
+10. Yaw loop: the 100 Hz relative-angle controller, Yaw-owner speed slew,
+    low-speed stiction recovery, Bluetooth tuning, `+/-2..135 degree` matrix,
+    and ten-run alternating ground stress test are verified.
 11. Line tracking: line sensor validation, then steering correction into the
    speed loop.
 12. Mode arbitration: only one outer loop may own speed targets at a time. The
