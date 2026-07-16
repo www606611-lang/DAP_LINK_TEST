@@ -84,11 +84,24 @@ volatile int32_t g_car_imu_gz_mdps;
 volatile int32_t g_car_imu_roll_mdeg;
 volatile int32_t g_car_imu_pitch_mdeg;
 volatile int32_t g_car_imu_yaw_mdeg;
+volatile int32_t g_car_imu_yaw_rate_mdps;
+volatile int32_t g_car_imu_accel_norm_mg;
+volatile int32_t g_car_imu_bias_x_mdps;
+volatile int32_t g_car_imu_bias_y_mdps;
+volatile int32_t g_car_imu_bias_z_mdps;
+volatile int32_t g_car_imu_quaternion_w_million;
+volatile int32_t g_car_imu_quaternion_x_million;
+volatile int32_t g_car_imu_quaternion_y_million;
+volatile int32_t g_car_imu_quaternion_z_million;
+volatile bool g_car_imu_attitude_valid;
+volatile bool g_car_imu_stationary;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 
 static void app_display_init(void);
 static void app_display_update(uint32_t now_ms);
+static void app_display_angle(uint16_t y, const char *label,
+    int32_t angle_mdeg, uint16_t color);
 static void app_update_debug_state(void);
 static int32_t app_round_float(float value);
 
@@ -228,72 +241,57 @@ static void app_display_init(void)
 {
     ST7789_Fill(ST7789_COLOR_BLACK);
     ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U, ST7789_COLOR_BLUE);
-    ST7789_ShowString(8U, 5U, "CAR POSITION + IMU", ST7789_8X16,
+    ST7789_ShowString(8U, 5U, "ICM20948 ATTITUDE", ST7789_8X16,
         ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
+    ST7789_DrawLine(24U, 66U, 296U, 66U,
+        ST7789_RGB565(48U, 52U, 60U));
+    ST7789_DrawLine(24U, 108U, 296U, 108U,
+        ST7789_RGB565(48U, 52U, 60U));
+    ST7789_DrawLine(24U, 148U, 296U, 148U,
+        ST7789_RGB565(48U, 52U, 60U));
 }
 
 static void app_display_update(uint32_t now_ms)
 {
-    uint16_t reset_color = ResetDiagnostics_IsSuspicious() ?
-        ST7789_COLOR_RED : ST7789_COLOR_GREEN;
-    uint16_t button_color = (g_car_pb21_pressed || g_car_pb4_pressed ||
-        g_car_pb5_pressed) ?
-        ST7789_COLOR_GREEN : ST7789_COLOR_WHITE;
+    uint16_t imu_color = (g_car_imu_ready &&
+        g_car_imu_attitude_valid) ? ST7789_COLOR_GREEN : ST7789_COLOR_RED;
+    const char *imu_text = (g_car_imu_ready &&
+        g_car_imu_attitude_valid) ? "READY" : "ERROR";
+    const char *yaw_text = !g_car_imu_attitude_valid ? "ERROR " :
+        (g_car_imu_stationary ? "LOCKED" : "MOVING");
 
-    ST7789_Printf(8U, 30U, ST7789_8X16, reset_color,
-        ST7789_COLOR_BLACK, "RESET:%-25s",
-        ResetDiagnostics_GetCauseText());
-    ST7789_Printf(8U, 48U, ST7789_8X16, button_color,
-        ST7789_COLOR_BLACK, "K 21:%c 4:%c 5:%c CMD:%+5ld",
-        g_car_pb21_pressed ? 'P' : '-',
-        g_car_pb4_pressed ? 'P' : '-',
-        g_car_pb5_pressed ? 'P' : '-',
-        (long) g_car_last_button_move_counts);
-    ST7789_Printf(8U, 66U, ST7789_8X16, ST7789_COLOR_YELLOW,
-        ST7789_COLOR_BLACK, "P:%-6s %-6s O:%4ld/%4ld",
-        PositionBringupTest_GetStateText(),
-        g_car_motor_high_impedance ? "HIGH-Z" : "ARMED",
-        (long) g_car_speed_left_output_permille,
-        (long) g_car_speed_right_output_permille);
-    ST7789_Printf(8U, 84U, ST7789_8X16, ST7789_COLOR_CYAN,
-        ST7789_COLOR_BLACK, "L T:%7ld C:%7ld E:%6ld",
-        (long) g_car_position_left_target_count,
-        (long) g_car_encoder_0_count,
-        (long) g_car_position_left_error_count);
-    ST7789_Printf(8U, 102U, ST7789_8X16, ST7789_COLOR_CYAN,
-        ST7789_COLOR_BLACK, "R T:%7ld C:%7ld E:%6ld",
-        (long) g_car_position_right_target_count,
-        (long) g_car_encoder_1_count,
-        (long) g_car_position_right_error_count);
-    ST7789_Printf(8U, 120U, ST7789_8X16, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "VT:%5ld/%-5ld V:%5ld/%-5ld",
-        (long) g_car_position_left_speed_target_pps,
-        (long) g_car_position_right_speed_target_pps,
-        (long) g_car_encoder_0_speed_pps,
-        (long) g_car_encoder_1_speed_pps);
-    ST7789_FillRect(0U, 138U, ST7789_WIDTH, 18U,
-        ST7789_COLOR_BLACK);
-    ST7789_Printf(8U, 138U, ST7789_6X8,
-        g_car_imu_ready ? ST7789_COLOR_GREEN : ST7789_COLOR_RED,
-        ST7789_COLOR_BLACK,
-        "IMU:%s ID:%02lX Y:%7ld GZ:%7ld N:%lu",
-        g_car_imu_ready ? "OK" : "ERR",
-        (unsigned long) g_car_imu_who_am_i,
-        (long) g_car_imu_yaw_mdeg,
-        (long) g_car_imu_gz_mdps,
-        (unsigned long) g_car_imu_sample_count);
-    ST7789_Printf(8U, 147U, ST7789_6X8, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "SYNC:%5ld C:%4ld INV:%lu/%lu",
-        (long) g_car_position_sync_error_count,
-        (long) g_car_position_sync_correction_pps,
-        (unsigned long) g_car_encoder_0_invalid,
-        (unsigned long) g_car_encoder_1_invalid);
-    ST7789_Printf(8U, 157U, ST7789_6X8, ST7789_COLOR_WHITE,
-        ST7789_COLOR_BLACK, "M:%s B:%s R:%lu UP:%08lu",
-        ControlSupervisor_GetModeText(),
-        ControlSupervisor_GetBlockReasonText(),
-        (unsigned long) g_car_position_test_run_count,
-        (unsigned long) (now_ms / 1000U));
+    (void) now_ms;
+
+    ST7789_ShowAsciiStringFast(260U, 5U,
+        g_car_motor_high_impedance ? "HIGH-Z" : "ARMED ",
+        ST7789_8X16,
+        g_car_motor_high_impedance ? ST7789_COLOR_GREEN : ST7789_COLOR_RED,
+        ST7789_COLOR_BLUE);
+    app_display_angle(38U, "ROLL", g_car_imu_roll_mdeg,
+        ST7789_COLOR_CYAN);
+    app_display_angle(80U, "PITCH", g_car_imu_pitch_mdeg,
+        ST7789_COLOR_CYAN);
+    app_display_angle(120U, "YAW", g_car_imu_yaw_mdeg,
+        ST7789_COLOR_YELLOW);
+    ST7789_PrintfFast(72U, 152U, ST7789_8X16, imu_color,
+        ST7789_COLOR_BLACK, "IMU:%-5s  YAW:%-6s",
+        imu_text, yaw_text);
+}
+
+static void app_display_angle(uint16_t y, const char *label,
+    int32_t angle_mdeg, uint16_t color)
+{
+    int32_t magnitude = angle_mdeg;
+    char sign = '+';
+
+    if (magnitude < 0) {
+        sign = '-';
+        magnitude = -magnitude;
+    }
+    ST7789_PrintfFast(88U, y, ST7789_8X16, color, ST7789_COLOR_BLACK,
+        "%-5s: %c%3ld.%02ld deg",
+        label, sign, (long) (magnitude / 1000),
+        (long) ((magnitude % 1000) / 10));
 }
 
 static void app_update_debug_state(void)
@@ -373,6 +371,26 @@ static void app_update_debug_state(void)
         g_car_imu_roll_mdeg = app_round_float(imu.roll_deg * 1000.0f);
         g_car_imu_pitch_mdeg = app_round_float(imu.pitch_deg * 1000.0f);
         g_car_imu_yaw_mdeg = app_round_float(imu.yaw_deg * 1000.0f);
+        g_car_imu_yaw_rate_mdps =
+            app_round_float(imu.yaw_rate_dps * 1000.0f);
+        g_car_imu_accel_norm_mg =
+            app_round_float(imu.accel_norm_g * 1000.0f);
+        g_car_imu_bias_x_mdps =
+            app_round_float(imu.gyro_bias_x_dps * 1000.0f);
+        g_car_imu_bias_y_mdps =
+            app_round_float(imu.gyro_bias_y_dps * 1000.0f);
+        g_car_imu_bias_z_mdps =
+            app_round_float(imu.gyro_bias_z_dps * 1000.0f);
+        g_car_imu_quaternion_w_million =
+            app_round_float(imu.quaternion_w * 1000000.0f);
+        g_car_imu_quaternion_x_million =
+            app_round_float(imu.quaternion_x * 1000000.0f);
+        g_car_imu_quaternion_y_million =
+            app_round_float(imu.quaternion_y * 1000000.0f);
+        g_car_imu_quaternion_z_million =
+            app_round_float(imu.quaternion_z * 1000000.0f);
+        g_car_imu_attitude_valid = imu.attitude_valid;
+        g_car_imu_stationary = imu.stationary;
     }
 
     if (EncoderInput_GetSnapshot(ENCODER_INPUT_0, &encoder_0) &&

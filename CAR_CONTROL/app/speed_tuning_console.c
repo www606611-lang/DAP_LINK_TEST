@@ -599,6 +599,37 @@ static void speed_tuning_send_imu_status(uint32_t now_ms)
     BluetoothUart_WriteText(" yaw=");
     speed_tuning_write_i32(
         speed_tuning_round_float(imu.yaw_deg * 1000.0f));
+    BluetoothUart_WriteText(" yr=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.yaw_rate_dps * 1000.0f));
+    BluetoothUart_WriteText(" att=");
+    speed_tuning_write_u32(imu.attitude_valid ? 1U : 0U);
+    BluetoothUart_WriteText(" still=");
+    speed_tuning_write_u32(imu.stationary ? 1U : 0U);
+    BluetoothUart_WriteText(" an=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.accel_norm_g * 1000.0f));
+    BluetoothUart_WriteText(" bias=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.gyro_bias_x_dps * 1000.0f));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.gyro_bias_y_dps * 1000.0f));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.gyro_bias_z_dps * 1000.0f));
+    BluetoothUart_WriteText(" q=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.quaternion_w * 1000000.0f));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.quaternion_x * 1000000.0f));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.quaternion_y * 1000000.0f));
+    BluetoothUart_WriteText(",");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.quaternion_z * 1000000.0f));
     BluetoothUart_WriteText("\r\n");
 }
 

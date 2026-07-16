@@ -130,13 +130,28 @@ ICM20948_ResetYaw();
 ```
 
 Initialization probes `0x69` and then `0x68`, requires `WHO_AM_I=0xEA`, and
-performs a 400-sample stationary gyro calibration. The application schedules
-samples every 10 ms. Snapshot acceleration is in g, angular rate in degrees per
-second, temperature in degrees Celsius, and roll/pitch/yaw in degrees. Startup,
-configuration, calibration, and read failures remain visible through explicit
-state/result/error fields and the driver retries an offline device once per
-second. The Bluetooth console accepts `imu stat` and `imu zero`; these commands
-do not arm either motor.
+performs a 400-sample stationary gyro calibration. The application nominally
+schedules samples every 10 ms. Snapshot acceleration is in g, angular rate in
+degrees per second, temperature in degrees Celsius, and roll/pitch/yaw in
+degrees. A hardware-independent six-axis quaternion estimator in
+`drivers/utility/imu_attitude_estimator` fuses the accelerometer and gyro. Its
+accelerometer correction is reduced when the measured gravity magnitude is
+implausible, limiting false tilt during chassis acceleration. The public yaw is
+relative to startup or the last `imu zero`; after stationary detection it is
+held while the online gyro-bias estimate continues converging. This preserves
+the validated zero-drift behavior without pretending that a six-axis estimate
+is a magnetic heading.
+
+Startup, configuration, calibration, estimator validity, stationary state,
+quaternion, sample age, and read failures remain visible through explicit
+snapshot fields. The driver retries an offline device once per second. The
+Bluetooth console accepts `imu stat` and `imu zero`; these commands do not arm
+either motor. The SPI display is intentionally a simple user view: three
+large, centered Roll/Pitch/Yaw values plus `IMU READY/ERROR`, `YAW
+LOCKED/MOVING`, and motor `HIGH-Z/ARMED`. Acceleration, gyro, bias, quaternion,
+sample-age, and error diagnostics remain available over the console and debug
+globals without crowding the physical screen. Whole-line DMA text drawing
+keeps the physical sensor task near its nominal update rate.
 
 ## Bluetooth speed tuner
 
@@ -240,6 +255,17 @@ g_car_imu_gz_mdps
 g_car_imu_roll_mdeg
 g_car_imu_pitch_mdeg
 g_car_imu_yaw_mdeg
+g_car_imu_yaw_rate_mdps
+g_car_imu_accel_norm_mg
+g_car_imu_bias_x_mdps
+g_car_imu_bias_y_mdps
+g_car_imu_bias_z_mdps
+g_car_imu_quaternion_w_million
+g_car_imu_quaternion_x_million
+g_car_imu_quaternion_y_million
+g_car_imu_quaternion_z_million
+g_car_imu_attitude_valid
+g_car_imu_stationary
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
 ```

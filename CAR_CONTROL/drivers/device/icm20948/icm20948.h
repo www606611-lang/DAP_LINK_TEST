@@ -51,6 +51,12 @@ typedef struct {
     float gyro_bias_x_dps;
     float gyro_bias_y_dps;
     float gyro_bias_z_dps;
+    float yaw_rate_dps;
+    float accel_norm_g;
+    float quaternion_w;
+    float quaternion_x;
+    float quaternion_y;
+    float quaternion_z;
     uint32_t sample_count;
     uint32_t read_error_count;
     uint32_t last_sample_ms;
@@ -59,6 +65,8 @@ typedef struct {
     uint8_t consecutive_read_errors;
     icm20948_state_t state;
     icm20948_result_t last_result;
+    bool attitude_valid;
+    bool stationary;
     bool ready;
 } icm20948_snapshot_t;
 

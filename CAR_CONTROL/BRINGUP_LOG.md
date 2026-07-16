@@ -580,3 +580,68 @@ which is physically plausible. Roll/pitch and integrated yaw are exposed for
 observation, but no angle controller is allowed to arm the motors yet. The
 remaining sensor gate is to rotate the chassis deliberately in both directions
 and record the sign of `gz` and yaw before defining vehicle-positive yaw.
+
+### Six-axis attitude estimator and TFT diagnostic page
+
+The original reference project did not contain a quaternion or magnetometer
+fusion algorithm. Its good stationary yaw behavior came from startup gyro-bias
+calibration, stationary detection, slow online bias tracking, deadbands, and
+locking angular integration after 20 stationary samples. Those validated
+properties remain in the new driver.
+
+A hardware-independent six-axis estimator now integrates a normalized
+quaternion and uses the measured gravity direction for proportional roll/pitch
+correction. Accelerometer correction is weighted down as acceleration magnitude
+moves away from 1 g. Public yaw accumulates quaternion yaw increments while the
+board moves and freezes while stationary, so gravity correction cannot create
+stationary heading drift. `imu zero` changes only the public yaw reference.
+This is relative inertial heading; the ICM20948 magnetometer is intentionally
+not mixed in before chassis magnetic-interference and calibration tests.
+
+The 320 x 170 ST7789 initially presented every IMU diagnostic, but that made
+the physical page harder to understand. The final user view contains only
+large centered Roll, Pitch, and Yaw values, simple IMU and Yaw state text, and
+the motor `HIGH-Z/ARMED` state. Acceleration, gyro, bias, quaternion, sample
+age, identity, and errors remain available to engineering tools. Dynamic text
+uses an added whole-line DMA formatting path to protect sensor scheduling.
+
+After the optimized page was flashed, five stationary samples over 20 seconds
+reported:
+
+```text
+sample count: 1175 -> 1626 -> 2076 -> 2527 -> 2982
+effective update rate: approximately 90.3 Hz
+read errors: 0 throughout
+attitude valid / stationary: 1 / 1 throughout
+yaw: +0.001 degrees throughout
+processed yaw rate: 0 dps throughout
+roll range: -8.461 to -8.307 degrees
+pitch range: +14.540 to +14.647 degrees
+quaternion norm: approximately 1.000
+```
+
+The static zero-drift and estimator-validity gates pass. Manual clockwise and
+counterclockwise chassis turns remain required to confirm vehicle yaw sign and
+dynamic return-to-zero behavior before the angle controller is allowed to own
+the speed loop.
+
+### Manual rotation capture
+
+A subsequent hand-rotation capture kept `att=1` for all 45 queried samples.
+Measured body-Z and quaternion-derived yaw rates followed the same sign and
+similar magnitude:
+
+```text
+raw GZ range:              -59.565 to +70.896 dps
+quaternion yaw-rate range: -57.912 to +67.848 dps
+one reverse return:        -72.686 to -2.882 degrees
+I2C read errors:           0
+invalid attitude samples:  0
+```
+
+After the chassis stopped at approximately -89 degrees, four samples over nine
+seconds all reported exactly `yaw=-89.104 degrees`, `yaw_rate=0`, `still=1`,
+and `att=1`. This verifies that the stationary yaw lock engages again after a
+dynamic turn rather than only at startup. The motion sign is internally
+consistent; the final vehicle convention still needs the operator to label the
+observed physical clockwise direction before the yaw controller is enabled.

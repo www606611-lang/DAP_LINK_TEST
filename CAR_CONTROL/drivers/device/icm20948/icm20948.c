@@ -2,6 +2,7 @@
 
 #include "delay.h"
 #include "i2c0_polling.h"
+#include "imu_attitude_estimator.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -26,7 +27,6 @@
 #define ICM20948_GYRO_SENS_500DPS      65.5f
 #define ICM20948_TEMP_SENS             333.87f
 #define ICM20948_TEMP_OFFSET            21.0f
-#define ICM20948_RAD_TO_DEG             57.2957795f
 #define ICM20948_GYRO_CONFIG_500DPS     0x1BU
 #define ICM20948_CALIBRATION_SAMPLES  400U
 #define ICM20948_RETRY_INTERVAL_MS    1000U
@@ -60,13 +60,11 @@ static icm20948_result_t icm20948_read_raw(icm20948_raw_t *raw);
 static icm20948_result_t icm20948_read_data(icm20948_data_t *data);
 static icm20948_result_t icm20948_calibrate_gyro(void);
 static void icm20948_update_attitude(float dt_s);
-static void icm20948_calculate_accel_angles(
-    const icm20948_data_t *data, float *roll_deg, float *pitch_deg);
+static void icm20948_copy_attitude_snapshot(void);
 static bool icm20948_is_stationary(const icm20948_data_t *data);
 static void icm20948_track_gyro_bias(
     const icm20948_data_t *data, float dt_s);
 static float icm20948_deadband(float value, float deadband);
-static float icm20948_wrap_deg(float angle_deg);
 static bool icm20948_deadline_reached(
     uint32_t now_ms, uint32_t deadline_ms);
 
@@ -130,6 +128,8 @@ void ICM20948_Task(uint32_t now_ms)
 
 void ICM20948_ResetYaw(void)
 {
+    ImuAttitudeEstimator_ResetYaw();
+    icm20948_copy_attitude_snapshot();
     g_snapshot.yaw_deg = 0.0f;
 }
 
@@ -151,8 +151,7 @@ static icm20948_result_t icm20948_try_initialize(uint32_t now_ms)
 {
     uint8_t id = 0xFFU;
     uint8_t register_value;
-    float roll_zero;
-    float pitch_zero;
+    imu_attitude_input_t attitude_input;
 
     g_snapshot.ready = false;
     g_snapshot.state = ICM20948_STATE_CALIBRATING;
@@ -224,11 +223,16 @@ static icm20948_result_t icm20948_try_initialize(uint32_t now_ms)
         goto config_error;
     }
 
-    icm20948_calculate_accel_angles(
-        &g_snapshot.data, &roll_zero, &pitch_zero);
-    g_snapshot.roll_deg = 0.0f;
-    g_snapshot.pitch_deg = 0.0f;
-    g_snapshot.yaw_deg = 0.0f;
+    attitude_input.ax_g = g_snapshot.data.ax_g;
+    attitude_input.ay_g = g_snapshot.data.ay_g;
+    attitude_input.az_g = g_snapshot.data.az_g;
+    attitude_input.gx_dps = 0.0f;
+    attitude_input.gy_dps = 0.0f;
+    attitude_input.gz_dps = 0.0f;
+    if (!ImuAttitudeEstimator_Init(&attitude_input)) {
+        goto config_error;
+    }
+    icm20948_copy_attitude_snapshot();
     g_still_count = 0U;
     g_snapshot.consecutive_read_errors = 0U;
     g_snapshot.last_sample_ms = now_ms;
@@ -236,8 +240,6 @@ static icm20948_result_t icm20948_try_initialize(uint32_t now_ms)
     g_snapshot.state = ICM20948_STATE_READY;
     g_snapshot.last_result = ICM20948_OK;
     g_last_update_ms = now_ms;
-    (void) roll_zero;
-    (void) pitch_zero;
     return ICM20948_OK;
 
 config_error:
@@ -385,18 +387,19 @@ static icm20948_result_t icm20948_calibrate_gyro(void)
 
 static void icm20948_update_attitude(float dt_s)
 {
-    float roll_acc_deg;
-    float pitch_acc_deg;
     float gx_dps = g_snapshot.data.gx_dps;
     float gy_dps = g_snapshot.data.gy_dps;
     float gz_dps = g_snapshot.data.gz_dps;
-    const float alpha = 0.70f;
+    bool stationary_locked = false;
+    imu_attitude_input_t attitude_input;
 
     if (icm20948_is_stationary(&g_snapshot.data)) {
         icm20948_track_gyro_bias(&g_snapshot.data, dt_s);
         if (g_still_count < ICM20948_STILL_COUNT_MIN) {
             g_still_count++;
-        } else {
+        }
+        if (g_still_count >= ICM20948_STILL_COUNT_MIN) {
+            stationary_locked = true;
             gx_dps = 0.0f;
             gy_dps = 0.0f;
             gz_dps = 0.0f;
@@ -408,29 +411,37 @@ static void icm20948_update_attitude(float dt_s)
     gx_dps = icm20948_deadband(gx_dps, ICM20948_GYRO_DEADBAND_XY_DPS);
     gy_dps = icm20948_deadband(gy_dps, ICM20948_GYRO_DEADBAND_XY_DPS);
     gz_dps = icm20948_deadband(gz_dps, ICM20948_GYRO_DEADBAND_Z_DPS);
-    icm20948_calculate_accel_angles(
-        &g_snapshot.data, &roll_acc_deg, &pitch_acc_deg);
 
-    g_snapshot.roll_deg = alpha *
-        (g_snapshot.roll_deg + gx_dps * dt_s) +
-        (1.0f - alpha) * roll_acc_deg;
-    g_snapshot.pitch_deg = alpha *
-        (g_snapshot.pitch_deg + gy_dps * dt_s) +
-        (1.0f - alpha) * pitch_acc_deg;
-    g_snapshot.yaw_deg = icm20948_wrap_deg(
-        g_snapshot.yaw_deg + gz_dps * dt_s);
+    attitude_input.ax_g = g_snapshot.data.ax_g;
+    attitude_input.ay_g = g_snapshot.data.ay_g;
+    attitude_input.az_g = g_snapshot.data.az_g;
+    attitude_input.gx_dps = gx_dps;
+    attitude_input.gy_dps = gy_dps;
+    attitude_input.gz_dps = gz_dps;
+    g_snapshot.stationary = stationary_locked;
+    g_snapshot.attitude_valid = ImuAttitudeEstimator_Update(
+        &attitude_input, dt_s, stationary_locked);
+    icm20948_copy_attitude_snapshot();
 }
 
-static void icm20948_calculate_accel_angles(
-    const icm20948_data_t *data, float *roll_deg, float *pitch_deg)
+static void icm20948_copy_attitude_snapshot(void)
 {
-    if ((data == NULL) || (roll_deg == NULL) || (pitch_deg == NULL)) {
+    imu_attitude_snapshot_t attitude;
+
+    if (!ImuAttitudeEstimator_GetSnapshot(&attitude)) {
+        g_snapshot.attitude_valid = false;
         return;
     }
-    *roll_deg = atan2f(data->ay_g, data->az_g) * ICM20948_RAD_TO_DEG;
-    *pitch_deg = atan2f(-data->ax_g,
-        sqrtf(data->ay_g * data->ay_g + data->az_g * data->az_g)) *
-        ICM20948_RAD_TO_DEG;
+    g_snapshot.roll_deg = attitude.roll_deg;
+    g_snapshot.pitch_deg = attitude.pitch_deg;
+    g_snapshot.yaw_deg = attitude.yaw_deg;
+    g_snapshot.yaw_rate_dps = attitude.yaw_rate_dps;
+    g_snapshot.accel_norm_g = attitude.accel_norm_g;
+    g_snapshot.quaternion_w = attitude.quaternion_w;
+    g_snapshot.quaternion_x = attitude.quaternion_x;
+    g_snapshot.quaternion_y = attitude.quaternion_y;
+    g_snapshot.quaternion_z = attitude.quaternion_z;
+    g_snapshot.attitude_valid = attitude.valid;
 }
 
 static bool icm20948_is_stationary(const icm20948_data_t *data)
@@ -470,17 +481,6 @@ static void icm20948_track_gyro_bias(
 static float icm20948_deadband(float value, float deadband)
 {
     return (fabsf(value) < deadband) ? 0.0f : value;
-}
-
-static float icm20948_wrap_deg(float angle_deg)
-{
-    while (angle_deg > 180.0f) {
-        angle_deg -= 360.0f;
-    }
-    while (angle_deg < -180.0f) {
-        angle_deg += 360.0f;
-    }
-    return angle_deg;
 }
 
 static bool icm20948_deadline_reached(

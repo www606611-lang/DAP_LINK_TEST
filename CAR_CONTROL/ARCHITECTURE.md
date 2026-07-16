@@ -14,6 +14,7 @@ app/main
   -> bsp/board_wheel_drive
   -> drivers/mcu/encoder_input
   -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
+     -> drivers/utility/imu_attitude_estimator
   -> bsp/board_wheel_drive -> drivers/device/at8236
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
@@ -42,6 +43,9 @@ control cascade
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
   motor PWM output, UART3 interrupt-RX/nonblocking-TX transport, and the polling
   I2C0 transaction layer used by the IMU. CAN remains future work.
+- `drivers/utility`: hardware-independent helpers and algorithms. The IMU
+  attitude estimator owns quaternion integration, gravity-vector correction,
+  Euler conversion, and relative-yaw tracking; it has no I2C or board access.
 - `app`: scheduling, display, commands, and mode transitions.
 
 ## Integration gates
@@ -68,10 +72,13 @@ control cascade
    forward/reverse and a 24-segment multi-distance alternating suspended-wheel
    regression are validated. Position-specific slew and bounded stall recovery
    handle low-speed static friction without changing the verified speed mode.
-9. IMU: ICM20948 identity, 100 Hz accelerometer/gyro sampling, startup bias
-   calibration, fresh-sample reporting, and stationary zero drift are verified.
-   Yaw sign under a deliberate chassis turn remains the gate before motorized
-   yaw-loop work.
+9. IMU: ICM20948 identity, nominal 100 Hz accelerometer/gyro scheduling,
+   startup bias calibration, six-axis quaternion estimation, fresh-sample
+   reporting, and stationary zero drift are verified. With the full diagnostic
+   TFT page active, the measured physical update rate is about 90 Hz.
+   Dynamic hand turns and post-turn stationary locking are verified. The
+   operator-labeled clockwise sign remains the gate before motorized yaw-loop
+   work.
 10. Yaw loop: verified IMU yaw output into the speed loop.
 11. Line tracking: line sensor validation, then steering correction into the
    speed loop.

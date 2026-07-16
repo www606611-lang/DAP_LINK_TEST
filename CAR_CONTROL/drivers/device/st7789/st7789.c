@@ -1200,6 +1200,24 @@ void ST7789_Printf(uint16_t x, uint16_t y, uint8_t font_size, uint16_t color,
     ST7789_ShowString(x, y, buffer, font_size, color, bg_color);
 }
 
+void ST7789_PrintfFast(uint16_t x, uint16_t y, uint8_t font_size,
+    uint16_t color, uint16_t bg_color, const char *format, ...)
+{
+    char buffer[ST7789_PRINTF_BUFFER_SIZE];
+    va_list args;
+
+    if (format == NULL) {
+        return;
+    }
+
+    va_start(args, format);
+    (void) vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    ST7789_ShowAsciiStringFast(
+        x, y, buffer, font_size, color, bg_color);
+}
+
 void ST7789_DrawTestPattern(void)
 {
     uint16_t band = (uint16_t) (ST7789_WIDTH / 8U);

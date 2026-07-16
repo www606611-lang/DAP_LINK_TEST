@@ -79,6 +79,8 @@ void ST7789_ShowChinese(uint16_t x, uint16_t y, const char *chinese,
     uint16_t color, uint16_t bg_color);
 void ST7789_Printf(uint16_t x, uint16_t y, uint8_t font_size, uint16_t color,
     uint16_t bg_color, const char *format, ...);
+void ST7789_PrintfFast(uint16_t x, uint16_t y, uint8_t font_size,
+    uint16_t color, uint16_t bg_color, const char *format, ...);
 
 void ST7789_DrawTestPattern(void);
 

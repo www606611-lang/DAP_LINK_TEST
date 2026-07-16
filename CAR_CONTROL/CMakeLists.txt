@@ -72,6 +72,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/device/st7789/st7789.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/device/st7789/OLED_Data.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/utility/delay.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/drivers/utility/imu_attitude_estimator.c"
   "${STARTUP_FILE}"
   "${SYSCFG_C}"
 )
