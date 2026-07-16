@@ -733,3 +733,40 @@ defaults without a host-side parameter write. A bare `yaw run` then completed
 the default `-45 degree` command at `-44.214 degrees`, result zero, and high
 impedance. The GUI remains the sole owner of high-rate latest-wave files when
 the CLI controls it through the TCP bridge, eliminating concurrent CSV writes.
+
+### Physical Yaw buttons
+
+The three ground-test buttons now issue relative Yaw commands instead of
+position-count moves:
+
+```text
+PB21:    +45 degrees
+SW1/PB5: +90 degrees
+SW2/PB4: -60 degrees
+```
+
+`YawBringupTest_RequestTurn()` owns the one-shot target update and start
+request. Pressing any button while speed, position, or Yaw testing is active
+retains the existing immediate supervised-stop behavior. Position commands
+remain available through their public API and Bluetooth console.
+
+### Yaw scheduling jitter measurement
+
+Runtime instrumentation now records the main-loop interval, ICM20948 sample
+interval, Yaw-control interval, and synchronous LCD update duration. The Yaw
+status frame, GUI JSON snapshot, and CLI capture CSV expose both the latest and
+maximum values without changing the seven-channel VOFA+ waveform format.
+
+An initial `+90 degree` run with the promoted Yaw defaults measured a `55 ms`
+maximum LCD update, `56 ms` main-loop interval, `61 ms` IMU interval, and `62
+ms` Yaw-control interval. This confirmed that whole-dashboard synchronous
+redraws periodically reduced the nominal `100 Hz` control path to roughly `16
+Hz`.
+
+Static labels are now drawn once and the dynamic dashboard is refreshed in
+four slices at `50 ms` intervals. The complete screen still updates in about
+`200 ms`, while the matched `+90 degree` run reduced the maximum LCD update to
+`17 ms`, main-loop interval to `19 ms`, and both IMU and Yaw-control intervals
+to `21 ms`. The run completed at `89.009 degrees` with result zero and high
+impedance. Ground testing confirmed a substantial improvement in smoothness,
+so a full asynchronous LCD state machine is not currently justified.

@@ -717,6 +717,14 @@ function Save-YawStatus([hashtable]$values) {
         right_output_permille = [int]$values['outR']
         result = [int]$values['res']
         high_impedance = ($values['hz'] -eq '1')
+        loop_interval_ms = [uint32]$values['loop']
+        loop_max_interval_ms = [uint32]$values['loopMax']
+        imu_interval_ms = [uint32]$values['imuDt']
+        imu_max_interval_ms = [uint32]$values['imuMax']
+        yaw_interval_ms = [uint32]$values['yawDt']
+        yaw_max_interval_ms = [uint32]$values['yawMax']
+        lcd_duration_ms = [uint32]$values['lcd']
+        lcd_max_duration_ms = [uint32]$values['lcdMax']
     }
     try {
         [System.IO.File]::WriteAllText(
@@ -728,13 +736,15 @@ function Save-YawStatus([hashtable]$values) {
 function Update-YawStatusFromLine([string]$line) {
     $match = [System.Text.RegularExpressions.Regex]::Match(
         $line,
-        '^YSTAT state=(?<state>[A-Z]+) target=(?<target>-?\d+) current=(?<current>-?\d+) error=(?<error>-?\d+) rate=(?<rate>-?\d+) turn=(?<turn>-?\d+) tL=(?<tL>-?\d+) tR=(?<tR>-?\d+) vL=(?<vL>-?\d+) vR=(?<vR>-?\d+) outL=(?<outL>-?\d+) outR=(?<outR>-?\d+) res=(?<res>\d+) hz=(?<hz>[01])$')
+        '^YSTAT state=(?<state>[A-Z]+) target=(?<target>-?\d+) current=(?<current>-?\d+) error=(?<error>-?\d+) rate=(?<rate>-?\d+) turn=(?<turn>-?\d+) tL=(?<tL>-?\d+) tR=(?<tR>-?\d+) vL=(?<vL>-?\d+) vR=(?<vR>-?\d+) outL=(?<outL>-?\d+) outR=(?<outR>-?\d+) res=(?<res>\d+) hz=(?<hz>[01]) loop=(?<loop>\d+) loopMax=(?<loopMax>\d+) imuDt=(?<imuDt>\d+) imuMax=(?<imuMax>\d+) yawDt=(?<yawDt>\d+) yawMax=(?<yawMax>\d+) lcd=(?<lcd>\d+) lcdMax=(?<lcdMax>\d+)$')
     if (-not $match.Success) { return $false }
 
     $values = @{}
     foreach ($key in @(
         'state', 'target', 'current', 'error', 'rate', 'turn',
-        'tL', 'tR', 'vL', 'vR', 'outL', 'outR', 'res', 'hz')) {
+        'tL', 'tR', 'vL', 'vR', 'outL', 'outR', 'res', 'hz',
+        'loop', 'loopMax', 'imuDt', 'imuMax', 'yawDt', 'yawMax',
+        'lcd', 'lcdMax')) {
         $values[$key] = $match.Groups[$key].Value
     }
     $culture = [System.Globalization.CultureInfo]::InvariantCulture

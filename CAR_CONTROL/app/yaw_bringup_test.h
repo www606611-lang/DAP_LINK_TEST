@@ -12,6 +12,7 @@
 typedef enum {
     YAW_BRINGUP_TEST_LOCKED = 0,
     YAW_BRINGUP_TEST_READY,
+    YAW_BRINGUP_TEST_ARMING,
     YAW_BRINGUP_TEST_RUNNING,
     YAW_BRINGUP_TEST_COMPLETE,
     YAW_BRINGUP_TEST_ABORTED
@@ -37,8 +38,10 @@ yaw_bringup_config_result_t YawBringupTest_SetConfig(
     const yaw_bringup_config_t *config);
 bool YawBringupTest_GetConfig(yaw_bringup_config_t *config);
 bool YawBringupTest_RequestStart(void);
+bool YawBringupTest_RequestTurn(float delta_yaw_deg);
 void YawBringupTest_RequestStop(void);
 yaw_bringup_test_state_t YawBringupTest_GetState(void);
+bool YawBringupTest_IsActive(void);
 const char *YawBringupTest_GetStateText(void);
 uint32_t YawBringupTest_GetRunCount(void);
 

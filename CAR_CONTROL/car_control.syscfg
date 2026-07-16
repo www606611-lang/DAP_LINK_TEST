@@ -43,6 +43,8 @@ USER_BUTTON.$name                              = "USER_BUTTON";
 USER_BUTTON.associatedPins[0].$name            = "PB21";
 USER_BUTTON.associatedPins[0].direction        = "INPUT";
 USER_BUTTON.associatedPins[0].internalResistor = "PULL_UP";
+USER_BUTTON.associatedPins[0].interruptEn      = true;
+USER_BUTTON.associatedPins[0].polarity         = "RISE_FALL";
 USER_BUTTON.associatedPins[0].pin.$assign      = "PB21";
 
 POSITION_BUTTONS.$name                              = "POSITION_BUTTONS";
@@ -50,10 +52,14 @@ POSITION_BUTTONS.associatedPins.create(2);
 POSITION_BUTTONS.associatedPins[0].$name            = "SW2_PB4";
 POSITION_BUTTONS.associatedPins[0].direction        = "INPUT";
 POSITION_BUTTONS.associatedPins[0].internalResistor = "PULL_UP";
+POSITION_BUTTONS.associatedPins[0].interruptEn      = true;
+POSITION_BUTTONS.associatedPins[0].polarity         = "RISE_FALL";
 POSITION_BUTTONS.associatedPins[0].pin.$assign      = "PB4";
 POSITION_BUTTONS.associatedPins[1].$name            = "SW1_PB5";
 POSITION_BUTTONS.associatedPins[1].direction        = "INPUT";
 POSITION_BUTTONS.associatedPins[1].internalResistor = "PULL_UP";
+POSITION_BUTTONS.associatedPins[1].interruptEn      = true;
+POSITION_BUTTONS.associatedPins[1].polarity         = "RISE_FALL";
 POSITION_BUTTONS.associatedPins[1].pin.$assign      = "PB5";
 
 MOTOR_A_PWM.$name                              = "MOTOR_A_PWM";

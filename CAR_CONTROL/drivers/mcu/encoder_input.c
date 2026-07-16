@@ -13,8 +13,6 @@
 #define ENCODER_1_B_IIDX ENCODER_GPIOB_ENCODER_1_B_IIDX
 #define ENCODER_1_B_PIN  ENCODER_GPIOB_ENCODER_1_B_PIN
 
-#define ENCODER_GPIOB_IRQN ENCODER_GPIOB_INT_IRQN
-#define ENCODER_GPIOB_GROUP_IIDX ENCODER_GPIOB_INT_IIDX
 #define ENCODER_INPUT_SPEED_FILTER_SAMPLES 4U
 
 typedef struct {
@@ -38,9 +36,7 @@ static uint32_t g_last_sample_ms;
 
 static bool encoder_input_is_valid_id(encoder_input_id_t id);
 static void encoder_input_record_edge(encoder_input_id_t id);
-static void encoder_input_drain_gpiob(void);
 static uint8_t encoder_input_read_state(encoder_input_id_t id);
-static uint32_t encoder_input_gpiob_pin_mask(void);
 static uint32_t encoder_input_enter_critical(void);
 static void encoder_input_exit_critical(uint32_t primask);
 static int8_t encoder_input_direction_from_delta(int32_t delta);
@@ -58,10 +54,6 @@ void EncoderInput_Init(uint32_t now_ms)
     encoder_input_exit_critical(primask);
 
     g_last_sample_ms = now_ms;
-    DL_GPIO_clearInterruptStatus(
-        ENCODER_GPIOB_PORT, encoder_input_gpiob_pin_mask());
-    NVIC_ClearPendingIRQ(ENCODER_GPIOB_IRQN);
-    NVIC_EnableIRQ(ENCODER_GPIOB_IRQN);
 }
 
 void EncoderInput_Task(uint32_t now_ms)
@@ -167,16 +159,19 @@ bool EncoderInput_GetSnapshot(
     return true;
 }
 
-void GROUP1_IRQHandler(void)
+bool EncoderInput_OnGpioInterrupt(uint32_t interrupt_index)
 {
-    while (true) {
-        switch (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1)) {
-            case ENCODER_GPIOB_GROUP_IIDX:
-                encoder_input_drain_gpiob();
-                break;
-            default:
-                return;
-        }
+    switch (interrupt_index) {
+        case ENCODER_0_A_IIDX:
+        case ENCODER_0_B_IIDX:
+            encoder_input_record_edge(ENCODER_INPUT_0);
+            return true;
+        case ENCODER_1_A_IIDX:
+        case ENCODER_1_B_IIDX:
+            encoder_input_record_edge(ENCODER_INPUT_1);
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -213,25 +208,6 @@ static void encoder_input_record_edge(encoder_input_id_t id)
     g_encoder[id].count += step;
 }
 
-static void encoder_input_drain_gpiob(void)
-{
-    while (true) {
-        switch (DL_GPIO_getPendingInterrupt(ENCODER_GPIOB_PORT)) {
-            case ENCODER_0_A_IIDX:
-            case ENCODER_0_B_IIDX:
-                encoder_input_record_edge(ENCODER_INPUT_0);
-                break;
-            case ENCODER_1_A_IIDX:
-            case ENCODER_1_B_IIDX:
-                encoder_input_record_edge(ENCODER_INPUT_1);
-                break;
-            case DL_GPIO_IIDX_NO_INTR:
-            default:
-                return;
-        }
-    }
-}
-
 static uint8_t encoder_input_read_state(encoder_input_id_t id)
 {
     uint32_t a_pin;
@@ -249,12 +225,6 @@ static uint8_t encoder_input_read_state(encoder_input_id_t id)
     pins = DL_GPIO_readPins(ENCODER_GPIOB_PORT, a_pin | b_pin);
     return (uint8_t) (((pins & a_pin) != 0U) ? 2U : 0U) |
         (uint8_t) (((pins & b_pin) != 0U) ? 1U : 0U);
-}
-
-static uint32_t encoder_input_gpiob_pin_mask(void)
-{
-    return ENCODER_0_A_PIN | ENCODER_0_B_PIN |
-        ENCODER_1_A_PIN | ENCODER_1_B_PIN;
 }
 
 static uint32_t encoder_input_enter_critical(void)

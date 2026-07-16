@@ -60,6 +60,8 @@ void ST7789_ShowImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
     const uint8_t *image, uint16_t color, uint16_t bg_color);
 void ST7789_ShowAsciiStringFast(uint16_t x, uint16_t y, const char *str,
     uint8_t font_size, uint16_t color, uint16_t bg_color);
+void ST7789_ShowAsciiStringScaled(uint16_t x, uint16_t y, const char *str,
+    uint8_t scale, uint16_t color, uint16_t bg_color);
 void ST7789_ShowChar(uint16_t x, uint16_t y, char ch, uint8_t font_size,
     uint16_t color, uint16_t bg_color);
 void ST7789_ShowString(uint16_t x, uint16_t y, const char *str,

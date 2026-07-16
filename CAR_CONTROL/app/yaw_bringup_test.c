@@ -1,20 +1,28 @@
 #include "yaw_bringup_test.h"
 
 #include "icm20948.h"
+#include "runtime_metrics.h"
 #include "wheel_speed_control.h"
 
+#include <math.h>
 #include <stddef.h>
 
 #define YAW_BRINGUP_DEFAULT_TARGET_DEG       -45.0f
 #define YAW_BRINGUP_DEFAULT_OUTPUT_LIMIT     750U
 #define YAW_BRINGUP_DEFAULT_TIMEOUT_MS      5000U
+#define YAW_BRINGUP_ARM_SETTLE_MS             40U
+#define YAW_BRINGUP_ARM_TIMEOUT_MS            400U
+#define YAW_BRINGUP_ARM_MAX_RATE_DPS            3.0f
 
 static yaw_bringup_test_state_t g_state;
 static yaw_bringup_config_t g_config;
 static uint32_t g_run_count;
 static bool g_start_requested;
 static bool g_stop_requested;
+static uint32_t g_arm_ready_ms;
+static uint32_t g_arm_deadline_ms;
 
+static void yaw_bringup_arm(uint32_t now_ms);
 static void yaw_bringup_start(uint32_t now_ms);
 static void yaw_bringup_stop(car_control_block_reason_t reason,
     yaw_bringup_test_state_t next_state);
@@ -26,6 +34,8 @@ void YawBringupTest_Init(bool reset_locked)
     g_run_count = 0U;
     g_start_requested = false;
     g_stop_requested = false;
+    g_arm_ready_ms = 0U;
+    g_arm_deadline_ms = 0U;
     (void) WheelYawControl_GetConfig(&g_config.control);
     g_config.target_yaw_deg = YAW_BRINGUP_DEFAULT_TARGET_DEG;
     g_config.output_limit_permille =
@@ -36,6 +46,7 @@ void YawBringupTest_Init(bool reset_locked)
 void YawBringupTest_Task(uint32_t now_ms)
 {
     wheel_yaw_control_snapshot_t yaw;
+    icm20948_snapshot_t yaw_imu;
     bool start_event = g_start_requested;
     bool stop_event = g_stop_requested;
 
@@ -46,6 +57,8 @@ void YawBringupTest_Task(uint32_t now_ms)
         if (g_state == YAW_BRINGUP_TEST_RUNNING) {
             yaw_bringup_stop(CAR_CONTROL_BLOCK_OPERATOR_STOP,
                 YAW_BRINGUP_TEST_ABORTED);
+        } else if (g_state == YAW_BRINGUP_TEST_ARMING) {
+            g_state = YAW_BRINGUP_TEST_ABORTED;
         }
         return;
     }
@@ -58,6 +71,20 @@ void YawBringupTest_Task(uint32_t now_ms)
         case YAW_BRINGUP_TEST_COMPLETE:
         case YAW_BRINGUP_TEST_ABORTED:
             if (start_event) {
+                yaw_bringup_arm(now_ms);
+            }
+            return;
+
+        case YAW_BRINGUP_TEST_ARMING:
+            if (!ICM20948_GetSnapshot(&yaw_imu) || !yaw_imu.ready ||
+                !yaw_imu.attitude_valid ||
+                ((int32_t) (now_ms - g_arm_deadline_ms) >= 0)) {
+                g_state = YAW_BRINGUP_TEST_ABORTED;
+                return;
+            }
+            if (((int32_t) (now_ms - g_arm_ready_ms) >= 0) &&
+                (fabsf(yaw_imu.data.gz_dps) <=
+                    YAW_BRINGUP_ARM_MAX_RATE_DPS)) {
                 yaw_bringup_start(now_ms);
             }
             return;
@@ -93,7 +120,7 @@ yaw_bringup_config_result_t YawBringupTest_SetConfig(
     if (config == NULL) {
         return YAW_BRINGUP_CONFIG_BAD_ARGUMENT;
     }
-    if (g_state == YAW_BRINGUP_TEST_RUNNING) {
+    if (YawBringupTest_IsActive()) {
         return YAW_BRINGUP_CONFIG_BUSY;
     }
     if (!WheelYawControl_ConfigIsValid(&config->control) ||
@@ -128,9 +155,23 @@ bool YawBringupTest_GetConfig(yaw_bringup_config_t *config)
 bool YawBringupTest_RequestStart(void)
 {
     if ((g_state == YAW_BRINGUP_TEST_LOCKED) ||
-        (g_state == YAW_BRINGUP_TEST_RUNNING)) {
+        YawBringupTest_IsActive() || g_start_requested) {
         return false;
     }
+    g_start_requested = true;
+    return true;
+}
+
+bool YawBringupTest_RequestTurn(float delta_yaw_deg)
+{
+    if (!(delta_yaw_deg >= -WHEEL_YAW_CONTROL_TARGET_MAX_DEG) ||
+        !(delta_yaw_deg <= WHEEL_YAW_CONTROL_TARGET_MAX_DEG) ||
+        (delta_yaw_deg == 0.0f) ||
+        (g_state == YAW_BRINGUP_TEST_LOCKED) ||
+        YawBringupTest_IsActive() || g_start_requested) {
+        return false;
+    }
+    g_config.target_yaw_deg = delta_yaw_deg;
     g_start_requested = true;
     return true;
 }
@@ -145,6 +186,12 @@ yaw_bringup_test_state_t YawBringupTest_GetState(void)
     return g_state;
 }
 
+bool YawBringupTest_IsActive(void)
+{
+    return (g_state == YAW_BRINGUP_TEST_ARMING) ||
+        (g_state == YAW_BRINGUP_TEST_RUNNING);
+}
+
 const char *YawBringupTest_GetStateText(void)
 {
     switch (g_state) {
@@ -152,6 +199,8 @@ const char *YawBringupTest_GetStateText(void)
             return "LOCKED";
         case YAW_BRINGUP_TEST_READY:
             return "READY";
+        case YAW_BRINGUP_TEST_ARMING:
+            return "ARM";
         case YAW_BRINGUP_TEST_RUNNING:
             return "RUN";
         case YAW_BRINGUP_TEST_COMPLETE:
@@ -168,12 +217,27 @@ uint32_t YawBringupTest_GetRunCount(void)
     return g_run_count;
 }
 
+static void yaw_bringup_arm(uint32_t now_ms)
+{
+    icm20948_snapshot_t imu;
+
+    if (!ICM20948_GetSnapshot(&imu) || !imu.ready ||
+        !imu.attitude_valid) {
+        g_state = YAW_BRINGUP_TEST_ABORTED;
+        return;
+    }
+
+    g_arm_ready_ms = now_ms + YAW_BRINGUP_ARM_SETTLE_MS;
+    g_arm_deadline_ms = now_ms + YAW_BRINGUP_ARM_TIMEOUT_MS;
+    g_state = YAW_BRINGUP_TEST_ARMING;
+}
+
 static void yaw_bringup_start(uint32_t now_ms)
 {
     icm20948_snapshot_t imu;
 
     if (!ICM20948_GetSnapshot(&imu) || !imu.ready ||
-        !imu.attitude_valid || !imu.stationary) {
+        !imu.attitude_valid) {
         g_state = YAW_BRINGUP_TEST_ABORTED;
         return;
     }
@@ -189,6 +253,8 @@ static void yaw_bringup_start(uint32_t now_ms)
         return;
     }
 
+    AppRuntimeMetrics_Reset(now_ms);
+    ICM20948_ResetTimingStats();
     ICM20948_ResetYaw();
     if (WheelYawControl_StartRelative(
             g_config.target_yaw_deg,

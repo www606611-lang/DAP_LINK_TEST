@@ -6,6 +6,7 @@
 #include "firmware_update.h"
 #include "icm20948.h"
 #include "position_bringup_test.h"
+#include "runtime_metrics.h"
 #include "speed_bringup_test.h"
 #include "wheel_position_control.h"
 #include "wheel_speed_control.h"
@@ -767,10 +768,14 @@ static void speed_tuning_send_yaw_config(void)
 
 static void speed_tuning_send_yaw_status(void)
 {
+    app_runtime_metrics_snapshot_t runtime;
+    icm20948_snapshot_t imu;
     wheel_yaw_control_snapshot_t yaw;
     wheel_speed_control_snapshot_t speed;
 
-    if (!WheelYawControl_GetSnapshot(&yaw) ||
+    if (!AppRuntimeMetrics_GetSnapshot(&runtime) ||
+        !ICM20948_GetSnapshot(&imu) ||
+        !WheelYawControl_GetSnapshot(&yaw) ||
         !WheelSpeedControl_GetSnapshot(&speed)) {
         BluetoothUart_WriteText("ERR status\r\n");
         return;
@@ -811,6 +816,22 @@ static void speed_tuning_send_yaw_status(void)
     BluetoothUart_WriteText(" hz=");
     speed_tuning_write_u32(
         BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+    BluetoothUart_WriteText(" loop=");
+    speed_tuning_write_u32(runtime.loop_interval_ms);
+    BluetoothUart_WriteText(" loopMax=");
+    speed_tuning_write_u32(runtime.loop_max_interval_ms);
+    BluetoothUart_WriteText(" imuDt=");
+    speed_tuning_write_u32(imu.last_interval_ms);
+    BluetoothUart_WriteText(" imuMax=");
+    speed_tuning_write_u32(imu.max_interval_ms);
+    BluetoothUart_WriteText(" yawDt=");
+    speed_tuning_write_u32(yaw.last_interval_ms);
+    BluetoothUart_WriteText(" yawMax=");
+    speed_tuning_write_u32(yaw.max_interval_ms);
+    BluetoothUart_WriteText(" lcd=");
+    speed_tuning_write_u32(runtime.display_duration_ms);
+    BluetoothUart_WriteText(" lcdMax=");
+    speed_tuning_write_u32(runtime.display_max_duration_ms);
     BluetoothUart_WriteText("\r\n");
 }
 

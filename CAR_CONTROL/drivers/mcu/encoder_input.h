@@ -23,6 +23,7 @@ typedef struct {
 
 void EncoderInput_Init(uint32_t now_ms);
 void EncoderInput_Task(uint32_t now_ms);
+bool EncoderInput_OnGpioInterrupt(uint32_t interrupt_index);
 void EncoderInput_SetInverted(encoder_input_id_t id, bool inverted);
 void EncoderInput_Reset(encoder_input_id_t id);
 void EncoderInput_ResetAll(void);

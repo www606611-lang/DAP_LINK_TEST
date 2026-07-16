@@ -60,6 +60,8 @@ typedef struct {
     uint32_t sample_count;
     uint32_t read_error_count;
     uint32_t last_sample_ms;
+    uint32_t last_interval_ms;
+    uint32_t max_interval_ms;
     uint8_t address7;
     uint8_t who_am_i;
     uint8_t consecutive_read_errors;
@@ -73,6 +75,7 @@ typedef struct {
 void ICM20948_Init(uint32_t now_ms);
 void ICM20948_Task(uint32_t now_ms);
 void ICM20948_ResetYaw(void);
+void ICM20948_ResetTimingStats(void);
 bool ICM20948_IsReady(void);
 bool ICM20948_GetSnapshot(icm20948_snapshot_t *snapshot);
 

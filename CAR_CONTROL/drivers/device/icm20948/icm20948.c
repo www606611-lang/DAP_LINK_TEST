@@ -31,9 +31,10 @@
 #define ICM20948_CALIBRATION_SAMPLES  400U
 #define ICM20948_RETRY_INTERVAL_MS    1000U
 #define ICM20948_MAX_READ_ERRORS         3U
-#define ICM20948_DT_CLAMP_MS            20U
+#define ICM20948_DT_MAX_MS             100U
 #define ICM20948_GYRO_DEADBAND_XY_DPS    0.05f
 #define ICM20948_GYRO_DEADBAND_Z_DPS     0.12f
+#define ICM20948_GYRO_Z_SCALE             1.0588f
 #define ICM20948_STILL_GYRO_XY_DPS       0.60f
 #define ICM20948_STILL_GYRO_Z_DPS        0.80f
 #define ICM20948_STILL_ACCEL_MIN_G2      0.90f
@@ -99,8 +100,12 @@ void ICM20948_Task(uint32_t now_ms)
     if (elapsed_ms < ICM20948_UPDATE_INTERVAL_MS) {
         return;
     }
-    if (elapsed_ms > ICM20948_DT_CLAMP_MS) {
-        elapsed_ms = ICM20948_UPDATE_INTERVAL_MS;
+    g_snapshot.last_interval_ms = elapsed_ms;
+    if (elapsed_ms > g_snapshot.max_interval_ms) {
+        g_snapshot.max_interval_ms = elapsed_ms;
+    }
+    if (elapsed_ms > ICM20948_DT_MAX_MS) {
+        elapsed_ms = ICM20948_DT_MAX_MS;
     }
     g_last_update_ms = now_ms;
 
@@ -131,6 +136,12 @@ void ICM20948_ResetYaw(void)
     ImuAttitudeEstimator_ResetYaw();
     icm20948_copy_attitude_snapshot();
     g_snapshot.yaw_deg = 0.0f;
+}
+
+void ICM20948_ResetTimingStats(void)
+{
+    g_snapshot.last_interval_ms = 0U;
+    g_snapshot.max_interval_ms = 0U;
 }
 
 bool ICM20948_IsReady(void)
@@ -350,8 +361,8 @@ static icm20948_result_t icm20948_read_data(icm20948_data_t *data)
         g_snapshot.gyro_bias_x_dps;
     data->gy_dps = (float) raw.gy / ICM20948_GYRO_SENS_500DPS -
         g_snapshot.gyro_bias_y_dps;
-    data->gz_dps = (float) raw.gz / ICM20948_GYRO_SENS_500DPS -
-        g_snapshot.gyro_bias_z_dps;
+    data->gz_dps = ((float) raw.gz / ICM20948_GYRO_SENS_500DPS -
+        g_snapshot.gyro_bias_z_dps) * ICM20948_GYRO_Z_SCALE;
     data->temperature_c =
         (float) raw.temperature / ICM20948_TEMP_SENS +
         ICM20948_TEMP_OFFSET;
@@ -475,7 +486,8 @@ static void icm20948_track_gyro_bias(
     }
     g_snapshot.gyro_bias_x_dps += data->gx_dps * gain_xy;
     g_snapshot.gyro_bias_y_dps += data->gy_dps * gain_xy;
-    g_snapshot.gyro_bias_z_dps += data->gz_dps * gain_z;
+    g_snapshot.gyro_bias_z_dps +=
+        (data->gz_dps / ICM20948_GYRO_Z_SCALE) * gain_z;
 }
 
 static float icm20948_deadband(float value, float deadband)

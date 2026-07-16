@@ -994,6 +994,79 @@ void ST7789_ShowAsciiStringFast(uint16_t x, uint16_t y, const char *str,
     st7789_deselect();
 }
 
+void ST7789_ShowAsciiStringScaled(uint16_t x, uint16_t y, const char *str,
+    uint8_t scale, uint16_t color, uint16_t bg_color)
+{
+    uint16_t visible_chars = 0U;
+    uint16_t draw_width;
+    uint16_t draw_height;
+    uint16_t row;
+    uint16_t ch_index;
+    uint8_t color_high = (uint8_t) (color >> 8);
+    uint8_t color_low = (uint8_t) color;
+    uint8_t bg_high = (uint8_t) (bg_color >> 8);
+    uint8_t bg_low = (uint8_t) bg_color;
+    uint32_t buffered_bytes = 0U;
+
+    if ((str == NULL) || (scale == 0U) || (x >= ST7789_WIDTH) ||
+        (y >= ST7789_HEIGHT)) {
+        return;
+    }
+
+    while ((str[visible_chars] != '\0') &&
+        (str[visible_chars] != '\n') &&
+        ((uint32_t) x + (uint32_t) (visible_chars + 1U) * 8U * scale <=
+            ST7789_WIDTH)) {
+        visible_chars++;
+    }
+    if (visible_chars == 0U) {
+        return;
+    }
+
+    draw_width = (uint16_t) (visible_chars * 8U * scale);
+    draw_height = (uint16_t) (16U * scale);
+    if ((uint32_t) y + draw_height > ST7789_HEIGHT) {
+        draw_height = (uint16_t) (ST7789_HEIGHT - y);
+    }
+
+    ST7789_SetWindow(x, y, (uint16_t) (x + draw_width - 1U),
+        (uint16_t) (y + draw_height - 1U));
+    st7789_select();
+    DL_GPIO_setPins(LCD_CTRL_PORT, LCD_CTRL_LCD_DC_PIN);
+
+    for (row = 0U; row < draw_height; row++) {
+        uint8_t source_row = (uint8_t) (row / scale);
+        uint8_t glyph_row = (uint8_t) (source_row / 8U);
+        uint8_t glyph_mask = (uint8_t) (1U << (source_row % 8U));
+
+        for (ch_index = 0U; ch_index < visible_chars; ch_index++) {
+            const uint8_t *glyph =
+                OLED_F8x16[st7789_ascii_index(str[ch_index])];
+            uint8_t col;
+
+            for (col = 0U; col < 8U; col++) {
+                bool pixel_on =
+                    ((glyph[glyph_row * 8U + col] & glyph_mask) != 0U);
+                uint8_t repeat;
+
+                for (repeat = 0U; repeat < scale; repeat++) {
+                    g_st7789_dma_buffer[buffered_bytes++] =
+                        pixel_on ? color_high : bg_high;
+                    g_st7789_dma_buffer[buffered_bytes++] =
+                        pixel_on ? color_low : bg_low;
+                    if (buffered_bytes >= ST7789_DMA_BUFFER_SIZE) {
+                        st7789_flush_pixel_buffer(
+                            g_st7789_dma_buffer, &buffered_bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    st7789_flush_pixel_buffer(g_st7789_dma_buffer, &buffered_bytes);
+    st7789_deselect();
+}
+
 void DMA_IRQHandler(void)
 {
     switch (DL_DMA_getPendingInterrupt(DMA)) {

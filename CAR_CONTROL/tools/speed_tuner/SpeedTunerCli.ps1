@@ -303,6 +303,14 @@ function Save-YawStatus([hashtable]$values, [string]$csvPath) {
         right_output_permille = [int]$values['outR']
         result = [uint32]$values['res']
         high_impedance = ($values['hz'] -eq '1')
+        loop_interval_ms = [uint32]$values['loop']
+        loop_max_interval_ms = [uint32]$values['loopMax']
+        imu_interval_ms = [uint32]$values['imuDt']
+        imu_max_interval_ms = [uint32]$values['imuMax']
+        yaw_interval_ms = [uint32]$values['yawDt']
+        yaw_max_interval_ms = [uint32]$values['yawMax']
+        lcd_duration_ms = [uint32]$values['lcd']
+        lcd_max_duration_ms = [uint32]$values['lcdMax']
     }
     [System.IO.File]::WriteAllText(
         (Join-Path $runtimeDir "latest_yaw_status.json"),
@@ -314,7 +322,10 @@ function Save-YawStatus([hashtable]$values, [string]$csvPath) {
             $values['current'], $values['error'], $values['rate'],
             $values['turn'], $values['tL'], $values['tR'],
             $values['vL'], $values['vR'], $values['outL'],
-            $values['outR'], $values['res'], $values['hz']) -join ','
+            $values['outR'], $values['res'], $values['hz'],
+            $values['loop'], $values['loopMax'], $values['imuDt'],
+            $values['imuMax'], $values['yawDt'], $values['yawMax'],
+            $values['lcd'], $values['lcdMax']) -join ','
         [System.IO.File]::AppendAllText(
             $csvPath, "$row`r`n", $utf8NoBom)
         if ($transport -ne "tcp_bridge") {
@@ -488,7 +499,7 @@ try {
         $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
         $csvPath = Join-Path $runtimeDir "yaw_run_$stamp.csv"
         $latestCsvPath = Join-Path $runtimeDir "latest_yaw_telemetry.csv"
-        $header = "timestamp,state,target_mdeg,current_mdeg,error_mdeg,yaw_rate_mdps,turn_target_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z`r`n"
+        $header = "timestamp,state,target_mdeg,current_mdeg,error_mdeg,yaw_rate_mdps,turn_target_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z,loop_interval_ms,loop_max_interval_ms,imu_interval_ms,imu_max_interval_ms,yaw_interval_ms,yaw_max_interval_ms,lcd_duration_ms,lcd_max_duration_ms`r`n"
         [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
         if ($transport -ne "tcp_bridge") {
             [System.IO.File]::WriteAllText(

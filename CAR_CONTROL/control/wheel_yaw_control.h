@@ -46,6 +46,8 @@ typedef struct {
     float right_speed_target_pps;
     uint32_t update_count;
     uint32_t elapsed_ms;
+    uint32_t last_interval_ms;
+    uint32_t max_interval_ms;
     wheel_yaw_control_result_t last_result;
     bool imu_ready;
     bool running;

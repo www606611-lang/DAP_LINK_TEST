@@ -19,12 +19,25 @@ reference sources only; they are not copied wholesale into this target.
   three buttons is pressed during motion, after the speed-command lease
   expires, at the test endpoint, and on every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. For ground testing, PB21 commands `+4000` encoder counts, SW2/PB4
-  commands `-2000`, and SW1/PB5 commands `+2000`. The commands use the 50 Hz
-  position outer loop and verified 100 Hz speed inner loop. Pressing any key
-  during motion stops immediately; commands are never stacked while moving.
-  Remote `pos run` and Stress 24 retain the separately tunable 1060-count
-  default.
+  wheel. For ground Yaw testing, PB21 commands `+45 degrees`, SW1/PB5 commands
+  `+90 degrees`, and SW2/PB4 commands `-60 degrees`. Each command is relative
+  to the heading at the button press. Pressing any key during motion stops
+  immediately; commands are never stacked while moving. Remote position-loop
+  commands and Stress 24 remain available through Bluetooth.
+- PB21, PB4, and PB5 use both-edge GPIOB interrupts with 5 ms press and 30 ms
+  release debounce. The longer release qualification prevents switch bounce
+  from re-arming a second command. The board-level GPIOB dispatcher drains
+  every pending source and routes PB0-PB3 to the encoder driver.
+- IMU integration uses the measured sample interval through display and UART
+  stalls instead of replacing every interval above 20 ms with 10 ms. Only an
+  abnormal interval above 100 ms is capped, preventing systematic Yaw loss.
+- The physical-button Yaw path enters a short `ARM` state so button vibration
+  can settle before motor start; it no longer rejects the command just because
+  the IMU temporarily reports motion at the press edge. The LCD dedicates its
+  main area to current Yaw, target, error, angular rate, elapsed test time,
+  control state, physical-button state, relative command, and motor safety.
+- The provisional Z-gyro scale correction is `1.0588`, derived from the first
+  post-timing-fix observation of 85 degrees for a physical 90-degree turn.
 - Motor B drive polarity is inverted at the board configuration layer so a
   positive command produces forward motion and positive E1 feedback, matching
   motor A/E0. This sign was confirmed in the powered right-wheel retest.
@@ -221,11 +234,15 @@ for normal development.
 ```text
 g_car_pb21_pressed
 g_car_pb21_press_count
+g_car_pb21_interrupt_count
 g_car_pb4_pressed
 g_car_pb4_press_count
+g_car_pb4_interrupt_count
 g_car_pb5_pressed
 g_car_pb5_press_count
-g_car_last_button_move_counts
+g_car_pb5_interrupt_count
+g_car_last_button_yaw_mdeg
+g_car_last_button_id
 g_car_reset_cause
 g_car_control_mode
 g_car_control_block_reason

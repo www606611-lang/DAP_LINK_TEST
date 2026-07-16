@@ -76,6 +76,8 @@ void WheelYawControl_Init(uint32_t now_ms)
     g_snapshot.right_speed_target_pps = 0.0f;
     g_snapshot.update_count = 0U;
     g_snapshot.elapsed_ms = 0U;
+    g_snapshot.last_interval_ms = 0U;
+    g_snapshot.max_interval_ms = 0U;
     g_snapshot.last_result = WHEEL_YAW_CONTROL_OK;
     g_snapshot.imu_ready = false;
     g_snapshot.running = false;
@@ -225,6 +227,10 @@ void WheelYawControl_Task(uint32_t now_ms)
     }
 
     g_last_update_ms = now_ms;
+    g_snapshot.last_interval_ms = elapsed_ms;
+    if (elapsed_ms > g_snapshot.max_interval_ms) {
+        g_snapshot.max_interval_ms = elapsed_ms;
+    }
     if (elapsed_ms > WHEEL_YAW_DT_MAX_MS) {
         elapsed_ms = WHEEL_YAW_CONTROL_UPDATE_INTERVAL_MS;
     }
@@ -395,6 +401,8 @@ static wheel_yaw_control_result_t wheel_yaw_start(
     g_snapshot.right_speed_target_pps = 0.0f;
     g_snapshot.update_count = 0U;
     g_snapshot.elapsed_ms = 0U;
+    g_snapshot.last_interval_ms = 0U;
+    g_snapshot.max_interval_ms = 0U;
     g_snapshot.last_result = WHEEL_YAW_CONTROL_OK;
     g_snapshot.imu_ready = true;
     g_snapshot.running = true;

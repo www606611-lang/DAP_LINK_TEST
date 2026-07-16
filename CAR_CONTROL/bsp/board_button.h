@@ -13,6 +13,7 @@ typedef enum {
 
 void BoardButton_Init(uint32_t now_ms);
 void BoardButton_Task(uint32_t now_ms);
+bool BoardButton_OnGpioInterrupt(uint32_t interrupt_index, uint32_t now_ms);
 
 bool BoardButton_IsPressed(void);
 bool BoardButton_GetPressEvent(void);
@@ -20,5 +21,6 @@ bool BoardButton_GetReleaseEvent(void);
 bool BoardButton_IsPressedId(board_button_id_t button);
 bool BoardButton_GetPressEventId(board_button_id_t button);
 bool BoardButton_GetReleaseEventId(board_button_id_t button);
+uint32_t BoardButton_GetInterruptCountId(board_button_id_t button);
 
 #endif
