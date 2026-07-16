@@ -3,6 +3,7 @@
 #include "bluetooth_uart.h"
 #include "board_motor_safe.h"
 #include "encoder_input.h"
+#include "icm20948.h"
 #include "position_bringup_test.h"
 #include "speed_bringup_test.h"
 #include "wheel_position_control.h"
@@ -20,7 +21,7 @@
 static char g_line[SPEED_TUNING_LINE_SIZE];
 static uint32_t g_last_wave_ms;
 
-static void speed_tuning_process_line(char *line);
+static void speed_tuning_process_line(char *line, uint32_t now_ms);
 static uint16_t speed_tuning_tokenize(
     char *line, char **tokens, uint16_t capacity);
 static bool speed_tuning_parse_float(const char *text, float *value);
@@ -34,6 +35,7 @@ static void speed_tuning_send_config(void);
 static void speed_tuning_send_status(void);
 static void speed_tuning_send_position_config(void);
 static void speed_tuning_send_position_status(void);
+static void speed_tuning_send_imu_status(uint32_t now_ms);
 static void speed_tuning_send_wave(uint32_t now_ms);
 static void speed_tuning_write_u32(uint32_t value);
 static void speed_tuning_write_i32(int32_t value);
@@ -43,7 +45,7 @@ static int32_t speed_tuning_round_float(float value);
 void SpeedTuningConsole_Init(void)
 {
     g_last_wave_ms = 0U;
-    BluetoothUart_WriteText("OK READY v=4\r\n");
+    BluetoothUart_WriteText("OK READY v=5\r\n");
 }
 
 void SpeedTuningConsole_Task(uint32_t now_ms)
@@ -54,13 +56,13 @@ void SpeedTuningConsole_Task(uint32_t now_ms)
     if (result == BLUETOOTH_UART_LINE_OVERFLOW) {
         BluetoothUart_WriteText("ERR line\r\n");
     } else if (result == BLUETOOTH_UART_LINE_READY) {
-        speed_tuning_process_line(g_line);
+        speed_tuning_process_line(g_line, now_ms);
     }
 
     speed_tuning_send_wave(now_ms);
 }
 
-static void speed_tuning_process_line(char *line)
+static void speed_tuning_process_line(char *line, uint32_t now_ms)
 {
     char *tokens[SPEED_TUNING_TOKEN_MAX];
     uint16_t token_count = speed_tuning_tokenize(
@@ -142,6 +144,23 @@ static void speed_tuning_process_line(char *line)
         return;
     }
     if ((token_count == 2U) &&
+        (strcmp(tokens[0], "imu") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        speed_tuning_send_imu_status(now_ms);
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "imu") == 0) &&
+        (strcmp(tokens[1], "zero") == 0)) {
+        if (!ICM20948_IsReady()) {
+            BluetoothUart_WriteText("ERR imu_offline\r\n");
+        } else {
+            ICM20948_ResetYaw();
+            BluetoothUart_WriteText("OK IMU ZERO\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
         (strcmp(tokens[0], "pos") == 0) &&
         (strcmp(tokens[1], "stat") == 0)) {
         speed_tuning_send_position_status();
@@ -213,7 +232,7 @@ static void speed_tuning_process_line(char *line)
     }
 
     BluetoothUart_WriteText(
-        "ERR use spd get|set|run|stop|stat or pos get|set|run [stress]|stop|stat\r\n");
+        "ERR use spd|pos commands or imu stat|zero\r\n");
 }
 
 static uint16_t speed_tuning_tokenize(
@@ -525,6 +544,61 @@ static void speed_tuning_send_position_status(void)
     BluetoothUart_WriteText(" hz=");
     speed_tuning_write_u32(
         BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+    BluetoothUart_WriteText("\r\n");
+}
+
+static void speed_tuning_send_imu_status(uint32_t now_ms)
+{
+    icm20948_snapshot_t imu;
+
+    if (!ICM20948_GetSnapshot(&imu)) {
+        BluetoothUart_WriteText("ERR imu_status\r\n");
+        return;
+    }
+
+    BluetoothUart_WriteText("ISTAT ready=");
+    speed_tuning_write_u32(imu.ready ? 1U : 0U);
+    BluetoothUart_WriteText(" state=");
+    speed_tuning_write_u32((uint32_t) imu.state);
+    BluetoothUart_WriteText(" addr=");
+    speed_tuning_write_u32(imu.address7);
+    BluetoothUart_WriteText(" who=");
+    speed_tuning_write_u32(imu.who_am_i);
+    BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) imu.last_result);
+    BluetoothUart_WriteText(" samples=");
+    speed_tuning_write_u32(imu.sample_count);
+    BluetoothUart_WriteText(" errors=");
+    speed_tuning_write_u32(imu.read_error_count);
+    BluetoothUart_WriteText(" age=");
+    speed_tuning_write_u32(now_ms - imu.last_sample_ms);
+    BluetoothUart_WriteText(" ax=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.ax_g * 1000.0f));
+    BluetoothUart_WriteText(" ay=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.ay_g * 1000.0f));
+    BluetoothUart_WriteText(" az=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.az_g * 1000.0f));
+    BluetoothUart_WriteText(" gx=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.gx_dps * 1000.0f));
+    BluetoothUart_WriteText(" gy=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.gy_dps * 1000.0f));
+    BluetoothUart_WriteText(" gz=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.data.gz_dps * 1000.0f));
+    BluetoothUart_WriteText(" roll=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.roll_deg * 1000.0f));
+    BluetoothUart_WriteText(" pitch=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.pitch_deg * 1000.0f));
+    BluetoothUart_WriteText(" yaw=");
+    speed_tuning_write_i32(
+        speed_tuning_round_float(imu.yaw_deg * 1000.0f));
     BluetoothUart_WriteText("\r\n");
 }
 

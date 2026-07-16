@@ -4,7 +4,8 @@ param(
     [ValidateSet(
         "Get", "Set", "Run", "Step", "Reverse", "Sweep", "Lease",
         "Stop", "Status", "PositionGet", "PositionSet", "PositionRun",
-        "PositionStress", "PositionStop", "PositionStatus")]
+        "PositionStress", "PositionStop", "PositionStatus",
+        "ImuStatus", "ImuZero")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -308,6 +309,12 @@ try {
         }
         "PositionStatus" {
             [void](Invoke-Protocol "pos stat" @("PSTAT ", "ERR "))
+        }
+        "ImuStatus" {
+            [void](Invoke-Protocol "imu stat" @("ISTAT ", "ERR "))
+        }
+        "ImuZero" {
+            [void](Invoke-Protocol "imu zero" @("OK IMU ZERO", "ERR "))
         }
         "Run" {
             $runCommand = "spd run"

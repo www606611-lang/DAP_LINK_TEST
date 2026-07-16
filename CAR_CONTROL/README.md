@@ -116,6 +116,28 @@ The position bring-up application also provides
 `PositionBringupTest_RequestMove(delta_counts)` for one-shot physical-button
 moves without changing the remote single-run or stress-profile target.
 
+## Reusable ICM20948 API
+
+`drivers/device/icm20948/icm20948.h` owns the external IMU protocol and uses
+the polling I2C0 driver on `PA0/PA1`:
+
+```c
+ICM20948_Init(now_ms);
+ICM20948_Task(now_ms);
+ICM20948_GetSnapshot(&snapshot);
+ICM20948_IsReady();
+ICM20948_ResetYaw();
+```
+
+Initialization probes `0x69` and then `0x68`, requires `WHO_AM_I=0xEA`, and
+performs a 400-sample stationary gyro calibration. The application schedules
+samples every 10 ms. Snapshot acceleration is in g, angular rate in degrees per
+second, temperature in degrees Celsius, and roll/pitch/yaw in degrees. Startup,
+configuration, calibration, and read failures remain visible through explicit
+state/result/error fields and the driver retries an offline device once per
+second. The Bluetooth console accepts `imu stat` and `imu zero`; these commands
+do not arm either motor.
+
 ## Bluetooth speed tuner
 
 `tools/speed_tuner/Launch-SpeedTuner.cmd` opens the Windows GUI. Connect a
@@ -138,6 +160,8 @@ limit, live progress, recovery totals, and a 24-segment stress button. During a
 position run, VOFA+ receives the
 six-channel `position` group and the tool records `latest_position_wave.json`
 plus `latest_position_telemetry.csv` under `tools/speed_tuner/runtime`.
+The command-line companion also provides `-Action ImuStatus` and
+`-Action ImuZero` through the same TCP bridge or by direct serial access.
 
 ## Build and flash
 
@@ -199,6 +223,23 @@ g_car_position_sync_active
 g_car_position_update_count
 g_car_position_last_result
 g_car_position_settled
+g_car_imu_ready
+g_car_imu_state
+g_car_imu_result
+g_car_imu_address7
+g_car_imu_who_am_i
+g_car_imu_sample_count
+g_car_imu_read_error_count
+g_car_imu_sample_age_ms
+g_car_imu_ax_mg
+g_car_imu_ay_mg
+g_car_imu_az_mg
+g_car_imu_gx_mdps
+g_car_imu_gy_mdps
+g_car_imu_gz_mdps
+g_car_imu_roll_mdeg
+g_car_imu_pitch_mdeg
+g_car_imu_yaw_mdeg
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
 ```

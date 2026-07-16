@@ -14,6 +14,8 @@ const MOTOR_A_PWM   = PWM.addInstance();
 const MOTOR_B_PWM   = PWM.addInstance();
 const SPI           = scripting.addModule("/ti/driverlib/SPI", {}, false);
 const SPI_LCD       = SPI.addInstance();
+const I2C           = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const IMU_I2C       = I2C.addInstance();
 const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
 const BLUETOOTH_UART = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
@@ -155,6 +157,18 @@ SPI_LCD.DMA_CHANNEL_EVENT2.dstLength          = "BYTE";
 SPI_LCD.DMA_CHANNEL_EVENT2.srcLength          = "BYTE";
 SPI_LCD.DMA_CHANNEL_EVENT2.addressMode        = "b2f";
 SPI_LCD.DMA_CHANNEL_EVENT2.peripheral.$assign = "DMA_CH2";
+
+IMU_I2C.$name                           = "I2C_0";
+IMU_I2C.basicEnableController           = true;
+IMU_I2C.advDigitalGlitchFilter          = "CLOCKS_1";
+IMU_I2C.enableDMAEvent1                 = false;
+IMU_I2C.enableDMAEvent2                 = false;
+IMU_I2C.basicControllerStandardBusSpeed = "Fast";
+IMU_I2C.peripheral.$assign              = "I2C0";
+IMU_I2C.peripheral.sdaPin.$assign       = "PA0";
+IMU_I2C.peripheral.sclPin.$assign       = "PA1";
+IMU_I2C.sdaPinConfig.$name              = "IMU_I2C_SDA_PIN";
+IMU_I2C.sclPinConfig.$name              = "IMU_I2C_SCL_PIN";
 
 BLUETOOTH_UART.$name                            = "BLUETOOTH_UART";
 BLUETOOTH_UART.targetBaudRate                   = 9600;

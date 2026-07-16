@@ -553,3 +553,30 @@ baseline. Position-loop tuning is considered complete for straight relative
 moves. One synchronized Stress 24 run remains as a regression check before the
 position module is frozen for higher-loop integration; it is not expected to
 require further tuning unless that regression exposes a fault.
+
+## 2026-07-16: ICM20948 I2C0 bring-up
+
+The plugged-in ICM20948 is now served by a device driver over a dedicated
+polling I2C0 layer. SysConfig assigns `PA0` to SDA and `PA1` to SCL. The device
+driver probes both legal AD0 addresses, validates identity, configures the
+accelerometer and gyro, collects a 400-sample stationary gyro bias, and then
+updates at 100 Hz. Motor outputs remain high impedance throughout IMU bring-up.
+
+The flashed board returned:
+
+```text
+state: READY (2)
+I2C address: 0x69
+WHO_AM_I: 0xEA
+read errors: 0
+sample count: 7736 -> 7906 -> 8082
+sample age: 6 ms -> 0 ms -> 0 ms
+stationary acceleration: approximately (-0.28, -0.15, +1.01) g
+stationary angular rate: within approximately +/-0.15 dps
+```
+
+Acceleration magnitude was approximately 1.06 g at the board's resting tilt,
+which is physically plausible. Roll/pitch and integrated yaw are exposed for
+observation, but no angle controller is allowed to arm the motors yet. The
+remaining sensor gate is to rotate the chassis deliberately in both directions
+and record the sign of `gz` and yaw before defining vehicle-positive yaw.

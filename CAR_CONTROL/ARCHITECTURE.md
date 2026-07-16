@@ -13,6 +13,7 @@ app/main
   -> bsp/board_motor_safe
   -> bsp/board_wheel_drive
   -> drivers/mcu/encoder_input
+  -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
   -> bsp/board_wheel_drive -> drivers/device/at8236
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
@@ -34,11 +35,13 @@ control cascade
   `wheel_speed_control` owns the verified-unit left/right inner loops.
 - `diagnostics`: reset and first-fault evidence without initiating a second
   software reset.
-- `drivers/device`: external devices such as ST7789 and the current AT8236
-  dual-channel command layer. ICM20948 and line sensors remain future work.
+- `drivers/device`: external devices such as ST7789, ICM20948, and the current
+  AT8236 dual-channel command layer. The ICM20948 owns register-bank selection,
+  sensor setup, calibration, units, and attitude estimates. Line sensors remain
+  future work.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
-  motor PWM output, and UART3 interrupt-RX/nonblocking-TX transport. I2C and CAN
-  remain future work.
+  motor PWM output, UART3 interrupt-RX/nonblocking-TX transport, and the polling
+  I2C0 transaction layer used by the IMU. CAN remains future work.
 - `app`: scheduling, display, commands, and mode transitions.
 
 ## Integration gates
@@ -65,10 +68,14 @@ control cascade
    forward/reverse and a 24-segment multi-distance alternating suspended-wheel
    regression are validated. Position-specific slew and bounded stall recovery
    handle low-speed static friction without changing the verified speed mode.
-9. Yaw loop: IMU validation, then yaw output into the speed loop.
-10. Line tracking: line sensor validation, then steering correction into the
+9. IMU: ICM20948 identity, 100 Hz accelerometer/gyro sampling, startup bias
+   calibration, fresh-sample reporting, and stationary zero drift are verified.
+   Yaw sign under a deliberate chassis turn remains the gate before motorized
+   yaw-loop work.
+10. Yaw loop: verified IMU yaw output into the speed loop.
+11. Line tracking: line sensor validation, then steering correction into the
    speed loop.
-11. Mode arbitration: only one outer loop may own speed targets at a time. The
+12. Mode arbitration: only one outer loop may own speed targets at a time. The
     owner must refresh its target command within 100 ms; the speed loop then
     refreshes the independent 200 ms hardware lease.
 

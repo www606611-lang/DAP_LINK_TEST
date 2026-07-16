@@ -14,7 +14,7 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | Motor channel B / right wheel | PA23 TIMG7_CCP0/BIN1, PA24 TIMG7_CCP1/BIN2; forward command inverted | Bench confirmed | 20 kHz PWM; drives BOUT/U3; paired with encoder channel 1 |
 | Encoder channel 0 / motor A / left wheel | PB0 A, PB1 B; forward sign inverted | Bench confirmed | Physical board, hand-turn calibration, and powered left-wheel test |
 | Encoder channel 1 / motor B / right wheel | PB2 A, PB3 B; forward sign native | Bench confirmed | Hand-turn and corrected powered-motor tests both produce positive forward feedback |
-| IMU I2C | PA0 SDA, PA1 SCL | Pending | Old firmware only |
+| ICM20948 IMU I2C0 | PA0 SDA, PA1 SCL | Bench confirmed | Module responds at 7-bit address `0x69`; `WHO_AM_I=0xEA`; 100 Hz reads verified with zero I2C errors |
 | Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
 | K230 UART | PA21 TX, PA22 RX in old firmware | Pending | Legacy firmware mapping; not enabled yet |
 | Bluetooth UART3 | PA26 TX, PA25 RX | Configured; bench pending | Reuses the `DAP_LINK_TEST` mapping and generated 9600 baud setting; all Tianmengxing pins are available on the headers |

@@ -6,6 +6,7 @@
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
+#include "icm20948.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "speed_bringup_test.h"
@@ -66,6 +67,23 @@ volatile bool g_car_position_sync_active;
 volatile uint32_t g_car_position_update_count;
 volatile uint32_t g_car_position_last_result;
 volatile bool g_car_position_settled;
+volatile bool g_car_imu_ready;
+volatile uint32_t g_car_imu_state;
+volatile uint32_t g_car_imu_result;
+volatile uint32_t g_car_imu_address7;
+volatile uint32_t g_car_imu_who_am_i;
+volatile uint32_t g_car_imu_sample_count;
+volatile uint32_t g_car_imu_read_error_count;
+volatile uint32_t g_car_imu_sample_age_ms;
+volatile int32_t g_car_imu_ax_mg;
+volatile int32_t g_car_imu_ay_mg;
+volatile int32_t g_car_imu_az_mg;
+volatile int32_t g_car_imu_gx_mdps;
+volatile int32_t g_car_imu_gy_mdps;
+volatile int32_t g_car_imu_gz_mdps;
+volatile int32_t g_car_imu_roll_mdeg;
+volatile int32_t g_car_imu_pitch_mdeg;
+volatile int32_t g_car_imu_yaw_mdeg;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 
@@ -86,6 +104,7 @@ int main(void)
     BoardWheelDrive_Init();
     BoardButton_Init(delay_get_ms());
     ControlSupervisor_Init(ResetDiagnostics_IsSuspicious());
+    ICM20948_Init(delay_get_ms());
     EncoderInput_Init(delay_get_ms());
     EncoderInput_SetInverted(ENCODER_INPUT_0,
         BOARD_ENCODER_0_FORWARD_INVERTED != 0);
@@ -133,6 +152,7 @@ int main(void)
         any_release_event = pb21_release_event || pb4_release_event ||
             pb5_release_event;
         EncoderInput_Task(now_ms);
+        ICM20948_Task(now_ms);
         BluetoothUart_Task(now_ms);
         SpeedTuningConsole_Task(now_ms);
         ControlSupervisor_Task(now_ms);
@@ -208,7 +228,7 @@ static void app_display_init(void)
 {
     ST7789_Fill(ST7789_COLOR_BLACK);
     ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U, ST7789_COLOR_BLUE);
-    ST7789_ShowString(8U, 5U, "CAR POSITION CASCADE", ST7789_8X16,
+    ST7789_ShowString(8U, 5U, "CAR POSITION + IMU", ST7789_8X16,
         ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
 }
 
@@ -251,7 +271,18 @@ static void app_display_update(uint32_t now_ms)
         (long) g_car_position_right_speed_target_pps,
         (long) g_car_encoder_0_speed_pps,
         (long) g_car_encoder_1_speed_pps);
-    ST7789_Printf(8U, 138U, ST7789_8X16, ST7789_COLOR_WHITE,
+    ST7789_FillRect(0U, 138U, ST7789_WIDTH, 18U,
+        ST7789_COLOR_BLACK);
+    ST7789_Printf(8U, 138U, ST7789_6X8,
+        g_car_imu_ready ? ST7789_COLOR_GREEN : ST7789_COLOR_RED,
+        ST7789_COLOR_BLACK,
+        "IMU:%s ID:%02lX Y:%7ld GZ:%7ld N:%lu",
+        g_car_imu_ready ? "OK" : "ERR",
+        (unsigned long) g_car_imu_who_am_i,
+        (long) g_car_imu_yaw_mdeg,
+        (long) g_car_imu_gz_mdps,
+        (unsigned long) g_car_imu_sample_count);
+    ST7789_Printf(8U, 147U, ST7789_6X8, ST7789_COLOR_WHITE,
         ST7789_COLOR_BLACK, "SYNC:%5ld C:%4ld INV:%lu/%lu",
         (long) g_car_position_sync_error_count,
         (long) g_car_position_sync_correction_pps,
@@ -271,6 +302,7 @@ static void app_update_debug_state(void)
     encoder_input_snapshot_t encoder_1;
     wheel_speed_control_snapshot_t speed;
     wheel_position_control_snapshot_t position;
+    icm20948_snapshot_t imu;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
     g_car_pb4_pressed = BoardButton_IsPressedId(
@@ -319,6 +351,28 @@ static void app_update_debug_state(void)
         g_car_position_update_count = position.update_count;
         g_car_position_last_result = (uint32_t) position.last_result;
         g_car_position_settled = position.settled;
+    }
+
+    if (ICM20948_GetSnapshot(&imu)) {
+        uint32_t now_ms = delay_get_ms();
+
+        g_car_imu_ready = imu.ready;
+        g_car_imu_state = (uint32_t) imu.state;
+        g_car_imu_result = (uint32_t) imu.last_result;
+        g_car_imu_address7 = imu.address7;
+        g_car_imu_who_am_i = imu.who_am_i;
+        g_car_imu_sample_count = imu.sample_count;
+        g_car_imu_read_error_count = imu.read_error_count;
+        g_car_imu_sample_age_ms = now_ms - imu.last_sample_ms;
+        g_car_imu_ax_mg = app_round_float(imu.data.ax_g * 1000.0f);
+        g_car_imu_ay_mg = app_round_float(imu.data.ay_g * 1000.0f);
+        g_car_imu_az_mg = app_round_float(imu.data.az_g * 1000.0f);
+        g_car_imu_gx_mdps = app_round_float(imu.data.gx_dps * 1000.0f);
+        g_car_imu_gy_mdps = app_round_float(imu.data.gy_dps * 1000.0f);
+        g_car_imu_gz_mdps = app_round_float(imu.data.gz_dps * 1000.0f);
+        g_car_imu_roll_mdeg = app_round_float(imu.roll_deg * 1000.0f);
+        g_car_imu_pitch_mdeg = app_round_float(imu.pitch_deg * 1000.0f);
+        g_car_imu_yaw_mdeg = app_round_float(imu.yaw_deg * 1000.0f);
     }
 
     if (EncoderInput_GetSnapshot(ENCODER_INPUT_0, &encoder_0) &&

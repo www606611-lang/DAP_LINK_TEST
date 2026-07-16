@@ -145,7 +145,8 @@ function Test-ControlCommand([string]$line) {
     if ($line -match '^spd (get|stop|stat)$' -or
         $line -match '^spd run(?: (?:step|reverse|sweep|lease))?$' -or
         $line -match '^pos (get|stop|stat)$' -or
-        $line -match '^pos run(?: stress)?$') {
+        $line -match '^pos run(?: stress)?$' -or
+        $line -match '^imu (stat|zero)$') {
         return $true
     }
     if ($line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
