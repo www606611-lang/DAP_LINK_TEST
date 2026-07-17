@@ -7,8 +7,8 @@ param(
         "PositionStress", "PositionStop", "PositionStatus",
         "ImuStatus", "ImuZero", "YawGet", "YawSet", "YawRun",
         "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
-        "HeadingRun", "HeadingStop", "HeadingStatus", "LineStatus",
-        "LineCal")]
+        "HeadingRun", "HeadingStop", "HeadingStatus", "LineGet",
+        "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -47,6 +47,14 @@ param(
     [uint16]$HeadingLimit = 650,
     [single]$HeadingDeadband = 0.5,
     [uint16]$HeadingDuration = 6000,
+    [single]$LineKp = 12.0,
+    [single]$LineKi = 0.0,
+    [single]$LineKd = 0.0,
+    [single]$LineBaseSpeed = 700.0,
+    [single]$LineMaxCorrection = 400.0,
+    [uint16]$LineLimit = 500,
+    [single]$LineDeadband = 2.0,
+    [uint16]$LineDuration = 4000,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -269,6 +277,29 @@ function Get-HeadingSetCommand {
         $HeadingDuration.ToString($culture))
 }
 
+function Get-LineSetCommand {
+    if (($LineKp -le 0) -or ($LineKp -gt 100) -or
+        ($LineKi -lt 0) -or ($LineKi -gt 100) -or
+        ($LineKd -lt 0) -or ($LineKd -gt 20) -or
+        ($LineBaseSpeed -lt 100) -or
+        (($LineBaseSpeed + $LineMaxCorrection) -gt 6000) -or
+        ($LineMaxCorrection -le 0) -or
+        ($LineLimit -lt 100) -or ($LineLimit -gt 1000) -or
+        ($LineDeadband -lt 0) -or ($LineDeadband -gt 20) -or
+        ($LineDuration -lt 500) -or ($LineDuration -gt 10000)) {
+        throw "Line-tracking configuration is outside firmware range."
+    }
+    return ('line set {0} {1} {2} {3} {4} {5} {6} {7}' -f
+        $LineKp.ToString('0.####', $culture),
+        $LineKi.ToString('0.####', $culture),
+        $LineKd.ToString('0.####', $culture),
+        $LineBaseSpeed.ToString('0.####', $culture),
+        $LineMaxCorrection.ToString('0.####', $culture),
+        $LineLimit.ToString($culture),
+        $LineDeadband.ToString('0.####', $culture),
+        $LineDuration.ToString($culture))
+}
+
 function Parse-Status([string]$line) {
     $values = @{}
     foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
@@ -420,14 +451,16 @@ function Save-HeadingStatus([hashtable]$values, [string]$csvPath) {
     }
 }
 
-function Save-LineStatus([hashtable]$values) {
+function Save-LineStatus([hashtable]$values, [string]$csvPath = "") {
+    $timestamp = [DateTime]::Now.ToString("o")
     $status = [ordered]@{
-        timestamp = [DateTime]::Now.ToString("o")
+        timestamp = $timestamp
         source = $transport
         port = if ($transport -eq "tcp_bridge") {
             "$BridgeHost`:$BridgePort"
         } else { $Port }
         state = $values['state']
+        sensor_state = $values['sensor']
         raw = [uint32]$values['raw']
         active_mask = [uint32]$values['mask']
         active_count = [uint32]$values['count']
@@ -440,12 +473,43 @@ function Save-LineStatus([hashtable]$values) {
         bus_transaction_count = [uint32]$values['busTx']
         bus_recovery_count = [uint32]$values['busRec']
         bus_result = [uint32]$values['busRes']
+        base_speed_pps = [int]$values['base']
+        correction_pps = [int]$values['corr']
+        left_target_pps = [int]$values['tL']
+        right_target_pps = [int]$values['tR']
+        left_speed_pps = [int]$values['vL']
+        right_speed_pps = [int]$values['vR']
+        left_output_permille = [int]$values['outL']
+        right_output_permille = [int]$values['outR']
         result = [uint32]$values['res']
+        sensor_result = [uint32]$values['sensorRes']
         high_impedance = ($values['hz'] -eq '1')
+        line_interval_ms = [uint32]$values['lineDt']
+        line_max_interval_ms = [uint32]$values['lineMax']
+        loop_max_interval_ms = [uint32]$values['loopMax']
+        lcd_max_duration_ms = [uint32]$values['lcdMax']
     }
     [System.IO.File]::WriteAllText(
         (Join-Path $runtimeDir "latest_line_status.json"),
         ($status | ConvertTo-Json), $utf8NoBom)
+
+    if ($csvPath -ne "") {
+        $row = @(
+            $timestamp, $values['state'], $values['raw'], $values['mask'],
+            $values['count'], $values['error'], $values['seen'],
+            $values['base'], $values['corr'], $values['tL'],
+            $values['tR'], $values['vL'], $values['vR'],
+            $values['outL'], $values['outR'], $values['res'],
+            $values['hz'], $values['age'], $values['lineDt'],
+            $values['lineMax'], $values['loopMax'], $values['lcdMax']) -join ','
+        [System.IO.File]::AppendAllText(
+            $csvPath, "$row`r`n", $utf8NoBom)
+        if ($transport -ne "tcp_bridge") {
+            [System.IO.File]::AppendAllText(
+                (Join-Path $runtimeDir "latest_line_telemetry.csv"),
+                "$row`r`n", $utf8NoBom)
+        }
+    }
 }
 
 if ($Takeover) {
@@ -458,6 +522,8 @@ try {
     $yawRunActive = $false
     $headingRunRequested = $false
     $headingRunActive = $false
+    $lineRunRequested = $false
+    $lineRunActive = $false
     $bridgeConnected = $false
     if ((-not $Takeover) -and (-not $DirectSerial)) {
         $bridgeConnected = Connect-Bridge
@@ -576,6 +642,25 @@ try {
         }
         "HeadingStatus" {
             [void](Invoke-Protocol "heading stat" @("HSTAT ", "ERR "))
+        }
+        "LineGet" {
+            [void](Invoke-Protocol "line get" @("OK LCFG ", "ERR "))
+        }
+        "LineSet" {
+            [void](Invoke-Protocol (Get-LineSetCommand) @("OK LCFG ", "ERR "))
+        }
+        "LineRun" {
+            if ($ApplyConfig) {
+                [void](Invoke-Protocol (Get-LineSetCommand) @("OK LCFG ", "ERR "))
+            } else {
+                [void](Invoke-Protocol "line get" @("OK LCFG ", "ERR "))
+            }
+            [void](Invoke-Protocol "line run" @("OK LINE RUN", "ERR "))
+            $lineRunRequested = $true
+            $lineRunActive = $true
+        }
+        "LineStop" {
+            [void](Invoke-Protocol "line stop" @("OK LINE STOP", "ERR "))
         }
         "LineStatus" {
             $response = Invoke-Protocol "line stat" @("LSTAT ", "ERR ")
@@ -744,6 +829,57 @@ try {
             throw "Heading run ended in state=$terminalState result=$terminalResult high_z=$terminalHighZ."
         }
     }
+
+    if ($lineRunRequested) {
+        $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
+        $csvPath = Join-Path $runtimeDir "line_run_$stamp.csv"
+        $latestCsvPath = Join-Path $runtimeDir "latest_line_telemetry.csv"
+        $header = "timestamp,state,raw,mask,count,line_error,line_seen,base_speed_pps,correction_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z,sample_age_ms,line_interval_ms,line_max_interval_ms,loop_max_interval_ms,lcd_max_duration_ms`r`n"
+        [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
+        if ($transport -ne "tcp_bridge") {
+            [System.IO.File]::WriteAllText(
+                $latestCsvPath, $header, $utf8NoBom)
+        }
+
+        $deadline = [DateTime]::Now.AddMilliseconds($RunTimeoutMs)
+        $finished = $false
+        $observedRunning = $false
+        $terminalState = $null
+        $terminalResult = $null
+        $terminalHighZ = $null
+        while ([DateTime]::Now -lt $deadline) {
+            Start-Sleep -Milliseconds $PollMs
+            $statusLine = Invoke-Protocol "line stat" @("LSTAT ", "ERR ")
+            if (-not $statusLine.StartsWith("LSTAT ")) { continue }
+            $values = Parse-Status $statusLine
+            Save-LineStatus $values $csvPath
+            if ($values['state'] -eq 'RUN') {
+                $observedRunning = $true
+                continue
+            }
+            if (($observedRunning -and
+                    ($values['state'] -in @('DONE', 'ABORT', 'LOCKED'))) -or
+                ((-not $observedRunning) -and
+                    ($values['state'] -in @('ABORT', 'LOCKED')))) {
+                $finished = $true
+                $terminalState = $values['state']
+                $terminalResult = $values['res']
+                $terminalHighZ = $values['hz']
+                $lineRunActive = $false
+                break
+            }
+        }
+        if (-not $finished) {
+            [void](Invoke-Protocol "line stop" @("OK LINE STOP", "ERR "))
+            $lineRunActive = $false
+            throw "Line-tracking run did not reach a terminal state before timeout."
+        }
+        Write-Host "CAPTURE $csvPath"
+        if (($terminalState -ne 'DONE') -or ($terminalResult -ne '0') -or
+            ($terminalHighZ -ne '1')) {
+            throw "Line run ended in state=$terminalState result=$terminalResult high_z=$terminalHighZ."
+        }
+    }
 } finally {
     if ($yawRunActive) {
         try {
@@ -754,6 +890,12 @@ try {
     if ($headingRunActive) {
         try {
             [void](Invoke-Protocol "heading stop" @("OK HEADING STOP", "ERR "))
+        } catch {
+        }
+    }
+    if ($lineRunActive) {
+        try {
+            [void](Invoke-Protocol "line stop" @("OK LINE STOP", "ERR "))
         } catch {
         }
     }

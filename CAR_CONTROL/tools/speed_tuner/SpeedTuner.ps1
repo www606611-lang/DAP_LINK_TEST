@@ -2,7 +2,8 @@
 param(
     [switch]$AutoConnect,
     [switch]$StartMinimized,
-    [switch]$StartYawMode
+    [switch]$StartYawMode,
+    [switch]$StartLineMode
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -42,6 +43,9 @@ $script:latestPositionTelemetryPath = Join-Path $script:runtimeDir "latest_posit
 $script:latestYawWavePath = Join-Path $script:runtimeDir "latest_yaw_wave.json"
 $script:latestYawStatusPath = Join-Path $script:runtimeDir "latest_yaw_status.json"
 $script:latestYawTelemetryPath = Join-Path $script:runtimeDir "latest_yaw_telemetry.csv"
+$script:latestLineWavePath = Join-Path $script:runtimeDir "latest_line_wave.json"
+$script:latestLineStatusPath = Join-Path $script:runtimeDir "latest_line_status.json"
+$script:latestLineTelemetryPath = Join-Path $script:runtimeDir "latest_line_telemetry.csv"
 $script:lastPortPath = Join-Path $script:runtimeDir "last_port.txt"
 $script:sessionLogPath = Join-Path $script:runtimeDir (
     "session_{0}.log" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
@@ -51,9 +55,12 @@ $script:positionTelemetryCsvPath = Join-Path $script:runtimeDir (
     "position_telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
 $script:yawTelemetryCsvPath = Join-Path $script:runtimeDir (
     "yaw_telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
+$script:lineTelemetryCsvPath = Join-Path $script:runtimeDir (
+    "line_telemetry_{0}.csv" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
 $telemetryHeader = "timestamp,left_target_pps,left_speed_pps,right_target_pps,right_speed_pps,left_output_permille,right_output_permille`r`n"
 $positionTelemetryHeader = "timestamp,left_target_count,left_count,right_target_count,right_count,left_speed_target_pps,right_speed_target_pps`r`n"
 $yawTelemetryHeader = "timestamp,target_mdeg,current_mdeg,error_mdeg,yaw_rate_mdps,turn_target_pps,left_speed_pps,right_speed_pps`r`n"
+$lineTelemetryHeader = "timestamp,line_error,correction_pps,left_target_pps,left_speed_pps,right_target_pps,right_speed_pps,active_count`r`n"
 [System.IO.File]::WriteAllText(
     $script:telemetryCsvPath, $telemetryHeader, $script:utf8NoBom)
 [System.IO.File]::WriteAllText(
@@ -70,6 +77,12 @@ $yawTelemetryHeader = "timestamp,target_mdeg,current_mdeg,error_mdeg,yaw_rate_md
 [System.IO.File]::WriteAllText(
     $script:latestYawTelemetryPath,
     $yawTelemetryHeader, $script:utf8NoBom)
+[System.IO.File]::WriteAllText(
+    $script:lineTelemetryCsvPath,
+    $lineTelemetryHeader, $script:utf8NoBom)
+[System.IO.File]::WriteAllText(
+    $script:latestLineTelemetryPath,
+    $lineTelemetryHeader, $script:utf8NoBom)
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "CAR Control Tuner | VOFA 13470 | MCP 13471"
@@ -162,7 +175,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^pos (get|stop|stat)$' -or
         $line -match '^pos run(?: stress)?$' -or
         $line -match '^heading (get|run|stop|stat)$' -or
-        $line -match '^line (stat|cal)$' -or
+        $line -match '^line (get|run|stop|stat|cal)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$') {
         return $true
@@ -174,6 +187,9 @@ function Test-ControlCommand([string]$line) {
         return $true
     }
     if ($line -match '^heading set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
+        return $true
+    }
+    if ($line -match '^line set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
         return $true
     }
     return $line -match '^yaw set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+)(?: \d+)?)?$'
@@ -512,6 +528,60 @@ function Forward-YawWave([hashtable]$values) {
     } catch {}
 }
 
+function Parse-LineWaveLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        '^linewave:(?<error>-?\d+),(?<corr>-?\d+),(?<lt>-?\d+),(?<ls>-?\d+),(?<rt>-?\d+),(?<rs>-?\d+),(?<count>\d+)$')
+    if (-not $match.Success) { return $null }
+    return @{
+        line_error = [int]$match.Groups['error'].Value
+        correction_pps = [int]$match.Groups['corr'].Value
+        left_target_pps = [int]$match.Groups['lt'].Value
+        left_speed_pps = [int]$match.Groups['ls'].Value
+        right_target_pps = [int]$match.Groups['rt'].Value
+        right_speed_pps = [int]$match.Groups['rs'].Value
+        active_count = [int]$match.Groups['count'].Value
+    }
+}
+
+function Forward-LineWave([hashtable]$values) {
+    $timestamp = [DateTime]::Now.ToString("o")
+    $fireWater = "line: {0}, {1}, {2}, {3}, {4}, {5}" -f
+        $values['line_error'],
+        $values['correction_pps'],
+        $values['left_target_pps'],
+        $values['left_speed_pps'],
+        $values['right_target_pps'],
+        $values['right_speed_pps']
+    $lineWave = [ordered]@{
+        timestamp = $timestamp
+        line_error = $values['line_error']
+        correction_pps = $values['correction_pps']
+        left_target_pps = $values['left_target_pps']
+        left_speed_pps = $values['left_speed_pps']
+        right_target_pps = $values['right_target_pps']
+        right_speed_pps = $values['right_speed_pps']
+        active_count = $values['active_count']
+    }
+    $row = @(
+        $timestamp, $values['line_error'], $values['correction_pps'],
+        $values['left_target_pps'], $values['left_speed_pps'],
+        $values['right_target_pps'], $values['right_speed_pps'],
+        $values['active_count']) -join ','
+    Broadcast-VofaLine $fireWater
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestLineWavePath,
+            ($lineWave | ConvertTo-Json), $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:lineTelemetryCsvPath,
+            "$row`r`n", $script:utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            $script:latestLineTelemetryPath,
+            "$row`r`n", $script:utf8NoBom)
+    } catch {}
+}
+
 function Refresh-Ports {
     $selected = $portCombo.Text
     if (($selected -eq "") -and (Test-Path $script:lastPortPath)) {
@@ -634,6 +704,106 @@ function Update-YawConfigFromLine([string]$line) {
         $box.SelectionStart = 0
         $box.SelectionLength = 0
     }
+}
+
+function Update-LineConfigFromLine([string]$line) {
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $line,
+        'kp=(?<kp>[-0-9.]+)\s+ki=(?<ki>[-0-9.]+)\s+kd=(?<kd>[-0-9.]+)\s+base=(?<base>[-0-9.]+)\s+max=(?<max>[-0-9.]+)\s+limit=(?<limit>\d+)\s+dead=(?<dead>[-0-9.]+)\s+duration=(?<duration>\d+)')
+    if (-not $match.Success) { return }
+
+    $lineKpBox.Text = $match.Groups['kp'].Value
+    $lineKiBox.Text = $match.Groups['ki'].Value
+    $lineKdBox.Text = $match.Groups['kd'].Value
+    $lineBaseBox.Text = $match.Groups['base'].Value
+    $lineMaxBox.Text = $match.Groups['max'].Value
+    $lineLimitBox.Text = $match.Groups['limit'].Value
+    $lineDeadbandBox.Text = $match.Groups['dead'].Value
+    $lineDurationBox.Text = $match.Groups['duration'].Value
+    foreach ($box in @(
+        $lineKpBox, $lineKiBox, $lineKdBox, $lineBaseBox,
+        $lineMaxBox, $lineLimitBox, $lineDeadbandBox,
+        $lineDurationBox)) {
+        $box.SelectionStart = 0
+        $box.SelectionLength = 0
+    }
+}
+
+function Parse-KeyValueLine([string]$line) {
+    $values = @{}
+    foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
+        $line, '(?<key>[A-Za-z][A-Za-z0-9]*)=(?<value>[^\s]+)')) {
+        $values[$match.Groups['key'].Value] = $match.Groups['value'].Value
+    }
+    return $values
+}
+
+function Save-LineStatus([hashtable]$values) {
+    $status = [ordered]@{
+        timestamp = [DateTime]::Now.ToString("o")
+        state = $values['state']
+        sensor_state = $values['sensor']
+        raw = [uint32]$values['raw']
+        active_mask = [uint32]$values['mask']
+        active_count = [uint32]$values['count']
+        line_error = [int]$values['error']
+        line_seen = ($values['seen'] -eq '1')
+        sample_age_ms = [uint32]$values['age']
+        base_speed_pps = [int]$values['base']
+        correction_pps = [int]$values['corr']
+        left_target_pps = [int]$values['tL']
+        right_target_pps = [int]$values['tR']
+        left_speed_pps = [int]$values['vL']
+        right_speed_pps = [int]$values['vR']
+        left_output_permille = [int]$values['outL']
+        right_output_permille = [int]$values['outR']
+        result = [uint32]$values['res']
+        high_impedance = ($values['hz'] -eq '1')
+        line_interval_ms = [uint32]$values['lineDt']
+        line_max_interval_ms = [uint32]$values['lineMax']
+    }
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestLineStatusPath,
+            ($status | ConvertTo-Json), $script:utf8NoBom)
+    } catch {}
+}
+
+function Update-LineStatusFromLine([string]$line) {
+    if (-not $line.StartsWith('LSTAT ')) { return $false }
+    $values = Parse-KeyValueLine $line
+    foreach ($key in @(
+        'state', 'sensor', 'raw', 'mask', 'count', 'error', 'seen',
+        'age', 'base', 'corr', 'tL', 'tR', 'vL', 'vR', 'outL',
+        'outR', 'res', 'hz', 'lineDt', 'lineMax')) {
+        if (-not $values.ContainsKey($key)) { return $false }
+    }
+
+    $lineStateValue.Text = $values['state']
+    $lineSensorStateValue.Text = $values['sensor']
+    $lineResultValue.Text = $values['res']
+    $lineRawValue.Text = '0x{0:X2}' -f [int]$values['raw']
+    $lineBitsValue.Text = ([Convert]::ToString(
+        [int]$values['mask'], 2)).PadLeft(8, '0') +
+        ' (' + $values['count'] + ')'
+    $lineErrorValue.Text = $values['error']
+    $lineCorrectionValue.Text = $values['corr'] + ' pps'
+    $lineTargetValue.Text = $values['tL'] + ' / ' +
+        $values['tR'] + ' pps'
+    $lineSpeedValue.Text = $values['vL'] + ' / ' +
+        $values['vR'] + ' pps'
+    $lineOutputValue.Text = $values['outL'] + ' / ' +
+        $values['outR']
+    $lineAgeValue.Text = $values['age'] + ' ms'
+    if ($values['hz'] -eq '1') {
+        $lineHighZValue.Text = 'HIGH-Z'
+        $lineHighZValue.ForeColor = [System.Drawing.Color]::ForestGreen
+    } else {
+        $lineHighZValue.Text = 'ARMED'
+        $lineHighZValue.ForeColor = [System.Drawing.Color]::DarkOrange
+    }
+    Save-LineStatus $values
+    return $true
 }
 
 function Save-PositionStatus([hashtable]$values) {
@@ -848,6 +1018,16 @@ function Process-Line([string]$line) {
         }
         return
     }
+    if ($line.StartsWith('linewave:')) {
+        $lineWave = Parse-LineWaveLine $line
+        if ($null -ne $lineWave) {
+            Broadcast-ControlLine $line
+            Forward-LineWave $lineWave
+        } else {
+            Add-Log "RX dropped malformed line frame." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
     if ($line.StartsWith('STAT ')) {
         if (Update-StatusFromLine $line) {
             Broadcast-ControlLine $line
@@ -872,6 +1052,14 @@ function Process-Line([string]$line) {
         }
         return
     }
+    if ($line.StartsWith('LSTAT ')) {
+        if (Update-LineStatusFromLine $line) {
+            Broadcast-ControlLine $line
+        } else {
+            Add-Log "RX dropped malformed line status." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
     Broadcast-ControlLine $line
     if ($line.StartsWith('OK CFG ')) {
         Update-ConfigFromLine $line
@@ -879,6 +1067,8 @@ function Process-Line([string]$line) {
         Update-PositionConfigFromLine $line
     } elseif ($line.StartsWith('OK YCFG ')) {
         Update-YawConfigFromLine $line
+    } elseif ($line.StartsWith('OK LCFG ')) {
+        Update-LineConfigFromLine $line
     }
     $color = if ($line.StartsWith('ERR ')) {
         [System.Drawing.Color]::Firebrick
@@ -1041,6 +1231,60 @@ function Read-YawUiConfig {
         $boost.ToString($culture))
 }
 
+function Read-LineUiConfig {
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $style = [System.Globalization.NumberStyles]::Float
+    [single]$kp = 0
+    [single]$ki = 0
+    [single]$kd = 0
+    [single]$baseSpeed = 0
+    [single]$maxCorrection = 0
+    [uint16]$limit = 0
+    [single]$deadband = 0
+    [uint16]$duration = 0
+
+    $valid = [single]::TryParse(
+            $lineKpBox.Text, $style, $culture, [ref]$kp) -and
+        [single]::TryParse(
+            $lineKiBox.Text, $style, $culture, [ref]$ki) -and
+        [single]::TryParse(
+            $lineKdBox.Text, $style, $culture, [ref]$kd) -and
+        [single]::TryParse(
+            $lineBaseBox.Text, $style, $culture, [ref]$baseSpeed) -and
+        [single]::TryParse(
+            $lineMaxBox.Text, $style, $culture, [ref]$maxCorrection) -and
+        [uint16]::TryParse($lineLimitBox.Text, [ref]$limit) -and
+        [single]::TryParse(
+            $lineDeadbandBox.Text, $style, $culture, [ref]$deadband) -and
+        [uint16]::TryParse($lineDurationBox.Text, [ref]$duration)
+    if (-not $valid) {
+        Add-Log "Line parameter format error." ([System.Drawing.Color]::Firebrick)
+        return $null
+    }
+    if (($kp -le 0) -or ($kp -gt 100) -or
+        ($ki -lt 0) -or ($ki -gt 100) -or
+        ($kd -lt 0) -or ($kd -gt 20) -or
+        ($baseSpeed -lt 100) -or
+        (($baseSpeed + $maxCorrection) -gt 6000) -or
+        ($maxCorrection -le 0) -or
+        ($limit -lt 100) -or ($limit -gt 1000) -or
+        ($deadband -lt 0) -or ($deadband -gt 20) -or
+        ($duration -lt 500) -or ($duration -gt 10000)) {
+        Add-Log "Line parameter outside firmware range." ([System.Drawing.Color]::Firebrick)
+        return $null
+    }
+
+    return ('line set {0} {1} {2} {3} {4} {5} {6} {7}' -f
+        $kp.ToString('0.####', $culture),
+        $ki.ToString('0.####', $culture),
+        $kd.ToString('0.####', $culture),
+        $baseSpeed.ToString('0.####', $culture),
+        $maxCorrection.ToString('0.####', $culture),
+        $limit.ToString($culture),
+        $deadband.ToString('0.####', $culture),
+        $duration.ToString($culture))
+}
+
 $connectionGroup = New-Object System.Windows.Forms.GroupBox
 $connectionGroup.Text = "Connection"
 $connectionGroup.Location = New-Object System.Drawing.Point(12, 10)
@@ -1083,9 +1327,12 @@ $positionTab = New-Object System.Windows.Forms.TabPage
 $positionTab.Text = "Position loop"
 $yawTab = New-Object System.Windows.Forms.TabPage
 $yawTab.Text = "Yaw loop"
+$lineTab = New-Object System.Windows.Forms.TabPage
+$lineTab.Text = "Line tracking"
 [void]$parameterTabs.TabPages.Add($speedTab)
 [void]$parameterTabs.TabPages.Add($positionTab)
 [void]$parameterTabs.TabPages.Add($yawTab)
+[void]$parameterTabs.TabPages.Add($lineTab)
 $parameterGroup = $speedTab
 
 $parameterGroup.Controls.Add((New-Label "Kp" 15 23 105))
@@ -1247,6 +1494,68 @@ $yawStopButton.Size = New-Object System.Drawing.Size(98, 27)
 $yawStopButton.BackColor = [System.Drawing.Color]::MistyRose
 $yawTab.Controls.Add($yawStopButton)
 
+$lineColumns = @(12, 190, 368, 546)
+$lineLabelsTop = @('Kp', 'Ki', 'Kd', 'Base speed (pps)')
+$lineDefaultsTop = @('12.0000', '0.0000', '0.0000', '700')
+$lineTopBoxes = @()
+for ($index = 0; $index -lt $lineColumns.Count; $index++) {
+    $lineTab.Controls.Add((New-Label $lineLabelsTop[$index] $lineColumns[$index] 2 160))
+    $box = New-TextBox $lineDefaultsTop[$index] $lineColumns[$index] 21 160
+    $lineTab.Controls.Add($box)
+    $lineTopBoxes += $box
+}
+$lineKpBox = $lineTopBoxes[0]
+$lineKiBox = $lineTopBoxes[1]
+$lineKdBox = $lineTopBoxes[2]
+$lineBaseBox = $lineTopBoxes[3]
+
+$lineLabelsBottom = @(
+    'Max correction (pps)', 'PWM limit', 'Deadband', 'Duration (ms)')
+$lineDefaultsBottom = @('400', '500', '2.0000', '4000')
+$lineBottomBoxes = @()
+for ($index = 0; $index -lt $lineColumns.Count; $index++) {
+    $lineTab.Controls.Add((New-Label $lineLabelsBottom[$index] $lineColumns[$index] 47 160))
+    $box = New-TextBox $lineDefaultsBottom[$index] $lineColumns[$index] 66 160
+    $lineTab.Controls.Add($box)
+    $lineBottomBoxes += $box
+}
+$lineMaxBox = $lineBottomBoxes[0]
+$lineLimitBox = $lineBottomBoxes[1]
+$lineDeadbandBox = $lineBottomBoxes[2]
+$lineDurationBox = $lineBottomBoxes[3]
+
+$lineReadButton = New-Object System.Windows.Forms.Button
+$lineReadButton.Text = 'Read'
+$lineReadButton.Location = New-Object System.Drawing.Point(15, 96)
+$lineReadButton.Size = New-Object System.Drawing.Size(92, 27)
+$lineTab.Controls.Add($lineReadButton)
+
+$lineApplyButton = New-Object System.Windows.Forms.Button
+$lineApplyButton.Text = 'Apply'
+$lineApplyButton.Location = New-Object System.Drawing.Point(117, 96)
+$lineApplyButton.Size = New-Object System.Drawing.Size(92, 27)
+$lineTab.Controls.Add($lineApplyButton)
+
+$lineCalButton = New-Object System.Windows.Forms.Button
+$lineCalButton.Text = 'Calibrate'
+$lineCalButton.Location = New-Object System.Drawing.Point(219, 96)
+$lineCalButton.Size = New-Object System.Drawing.Size(92, 27)
+$lineTab.Controls.Add($lineCalButton)
+
+$lineRunButton = New-Object System.Windows.Forms.Button
+$lineRunButton.Text = 'Run'
+$lineRunButton.Location = New-Object System.Drawing.Point(515, 96)
+$lineRunButton.Size = New-Object System.Drawing.Size(98, 27)
+$lineRunButton.BackColor = [System.Drawing.Color]::Honeydew
+$lineTab.Controls.Add($lineRunButton)
+
+$lineStopButton = New-Object System.Windows.Forms.Button
+$lineStopButton.Text = 'Stop'
+$lineStopButton.Location = New-Object System.Drawing.Point(623, 96)
+$lineStopButton.Size = New-Object System.Drawing.Size(98, 27)
+$lineStopButton.BackColor = [System.Drawing.Color]::MistyRose
+$lineTab.Controls.Add($lineStopButton)
+
 $statusGroup = New-Object System.Windows.Forms.GroupBox
 $statusGroup.Text = "Live status"
 $statusGroup.Location = New-Object System.Drawing.Point(12, 252)
@@ -1391,6 +1700,57 @@ $yawStatusGroup.Controls.Add((New-Label 'Output L/R' 575 84 70))
 $yawOutputValue = New-Label '--' 645 84 80
 $yawStatusGroup.Controls.Add($yawOutputValue)
 
+$lineStatusGroup = New-Object System.Windows.Forms.GroupBox
+$lineStatusGroup.Text = 'Line tracking live status'
+$lineStatusGroup.Location = New-Object System.Drawing.Point(12, 252)
+$lineStatusGroup.Size = New-Object System.Drawing.Size(736, 142)
+$lineStatusGroup.Visible = $false
+$form.Controls.Add($lineStatusGroup)
+
+$lineStatusGroup.Controls.Add((New-Label 'State' 15 20 45))
+$lineStateValue = New-Label '--' 60 20 75
+$lineStateValue.Font = New-Object System.Drawing.Font(
+    'Consolas', 10, [System.Drawing.FontStyle]::Bold)
+$lineStatusGroup.Controls.Add($lineStateValue)
+$lineStatusGroup.Controls.Add((New-Label 'Sensor' 145 20 50))
+$lineSensorStateValue = New-Label '--' 195 20 80
+$lineStatusGroup.Controls.Add($lineSensorStateValue)
+$lineStatusGroup.Controls.Add((New-Label 'Motor' 360 20 50))
+$lineHighZValue = New-Label '--' 410 20 85
+$lineHighZValue.Font = New-Object System.Drawing.Font(
+    'Consolas', 10, [System.Drawing.FontStyle]::Bold)
+$lineStatusGroup.Controls.Add($lineHighZValue)
+$lineStatusGroup.Controls.Add((New-Label 'Result' 575 20 50))
+$lineResultValue = New-Label '--' 625 20 70
+$lineStatusGroup.Controls.Add($lineResultValue)
+
+$lineStatusGroup.Controls.Add((New-Label 'Raw' 15 51 35))
+$lineRawValue = New-Label '--' 50 51 65
+$lineStatusGroup.Controls.Add($lineRawValue)
+$lineStatusGroup.Controls.Add((New-Label 'Mask/count' 125 51 75))
+$lineBitsValue = New-Label '--' 200 51 120
+$lineBitsValue.Font = New-Object System.Drawing.Font('Consolas', 9)
+$lineStatusGroup.Controls.Add($lineBitsValue)
+$lineStatusGroup.Controls.Add((New-Label 'Error' 335 51 40))
+$lineErrorValue = New-Label '--' 375 51 55
+$lineStatusGroup.Controls.Add($lineErrorValue)
+$lineStatusGroup.Controls.Add((New-Label 'Correction' 455 51 70))
+$lineCorrectionValue = New-Label '--' 525 51 120
+$lineStatusGroup.Controls.Add($lineCorrectionValue)
+
+$lineStatusGroup.Controls.Add((New-Label 'Target L/R' 15 84 70))
+$lineTargetValue = New-Label '--' 85 84 135
+$lineStatusGroup.Controls.Add($lineTargetValue)
+$lineStatusGroup.Controls.Add((New-Label 'Speed L/R' 235 84 65))
+$lineSpeedValue = New-Label '--' 300 84 135
+$lineStatusGroup.Controls.Add($lineSpeedValue)
+$lineStatusGroup.Controls.Add((New-Label 'Output L/R' 450 84 70))
+$lineOutputValue = New-Label '--' 520 84 100
+$lineStatusGroup.Controls.Add($lineOutputValue)
+$lineStatusGroup.Controls.Add((New-Label 'Age' 630 84 30))
+$lineAgeValue = New-Label '--' 660 84 60
+$lineStatusGroup.Controls.Add($lineAgeValue)
+
 $logGroup = New-Object System.Windows.Forms.GroupBox
 $logGroup.Text = "Command log"
 $logGroup.Location = New-Object System.Drawing.Point(12, 402)
@@ -1489,19 +1849,35 @@ $yawApplyButton.Add_Click({
 $yawRunButton.Add_Click({ [void](Send-Command 'yaw run') })
 $yawStopButton.Add_Click({ [void](Send-Command 'yaw stop') })
 
+$lineReadButton.Add_Click({ [void](Send-Command 'line get') })
+$lineApplyButton.Add_Click({
+    $command = Read-LineUiConfig
+    if ($null -ne $command) {
+        [void](Send-Command $command)
+    }
+})
+$lineCalButton.Add_Click({ [void](Send-Command 'line cal') })
+$lineRunButton.Add_Click({ [void](Send-Command 'line run') })
+$lineStopButton.Add_Click({ [void](Send-Command 'line stop') })
+
 $parameterTabs.Add_SelectedIndexChanged({
     $isPosition = ($parameterTabs.SelectedTab -eq $positionTab)
     $isYaw = ($parameterTabs.SelectedTab -eq $yawTab)
+    $isLine = ($parameterTabs.SelectedTab -eq $lineTab)
     $script:activeMode = if ($isPosition) {
         'position'
     } elseif ($isYaw) {
         'yaw'
+    } elseif ($isLine) {
+        'line'
     } else {
         'speed'
     }
-    $statusGroup.Visible = (-not $isPosition) -and (-not $isYaw)
+    $statusGroup.Visible = (-not $isPosition) -and
+        (-not $isYaw) -and (-not $isLine)
     $positionStatusGroup.Visible = $isPosition
     $yawStatusGroup.Visible = $isYaw
+    $lineStatusGroup.Visible = $isLine
     $script:lastStatusPoll = [DateTime]::Now
     if (($null -ne $script:serial) -and $script:serial.IsOpen) {
         if ($isPosition) {
@@ -1510,6 +1886,9 @@ $parameterTabs.Add_SelectedIndexChanged({
         } elseif ($isYaw) {
             [void](Send-Command 'yaw get')
             [void](Send-Command 'yaw stat' $true)
+        } elseif ($isLine) {
+            [void](Send-Command 'line get')
+            [void](Send-Command 'line stat' $true)
         } else {
             [void](Send-Command "spd get")
             [void](Send-Command "spd stat" $true)
@@ -1554,6 +1933,8 @@ $timer.Add_Tick({
                 [void](Send-Command "pos get")
             } elseif ($script:activeMode -eq 'yaw') {
                 [void](Send-Command 'yaw get')
+            } elseif ($script:activeMode -eq 'line') {
+                [void](Send-Command 'line get')
             } else {
                 [void](Send-Command "spd get")
             }
@@ -1561,7 +1942,7 @@ $timer.Add_Tick({
         }
         $externalControlActive =
             (($now - $script:lastExternalCommandAt).TotalMilliseconds -lt 900)
-        $statusPollMs = if ($script:activeMode -in @('position', 'yaw')) {
+        $statusPollMs = if ($script:activeMode -in @('position', 'yaw', 'line')) {
             600
         } else {
             400
@@ -1572,6 +1953,8 @@ $timer.Add_Tick({
                 [void](Send-Command "pos stat" $true)
             } elseif ($script:activeMode -eq 'yaw') {
                 [void](Send-Command 'yaw stat' $true)
+            } elseif ($script:activeMode -eq 'line') {
+                [void](Send-Command 'line stat' $true)
             } else {
                 [void](Send-Command "spd stat" $true)
             }
@@ -1598,6 +1981,15 @@ if ($StartYawMode) {
     $statusGroup.Visible = $false
     $positionStatusGroup.Visible = $false
     $yawStatusGroup.Visible = $true
+    $lineStatusGroup.Visible = $false
+}
+if ($StartLineMode) {
+    $parameterTabs.SelectedTab = $lineTab
+    $script:activeMode = 'line'
+    $statusGroup.Visible = $false
+    $positionStatusGroup.Visible = $false
+    $yawStatusGroup.Visible = $false
+    $lineStatusGroup.Visible = $true
 }
 if ($StartMinimized) {
     $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized

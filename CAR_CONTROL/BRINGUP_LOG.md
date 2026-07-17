@@ -833,3 +833,46 @@ remained zero. All checks were performed with the motor outputs in high
 impedance. The retained `line_error` during `seen=0` records the last observed
 side and is not a valid current-line measurement; future control must always
 gate it with `line_seen`.
+
+## 2026-07-17: supervised line-tracking outer-loop bring-up
+
+`WheelLineTrackingControl` now owns the validated wheel-speed loop through the
+dedicated `LINE_TRACKING` supervisor mode. The line sensor and outer loop both
+run at `100 Hz`. A `100 ms` command lease, a `60 ms` observation-age limit,
+board-button stop requests, and every non-corner line loss retain the immediate
+supervised high-impedance stop path. The reusable controller remains separate
+from the temporary timed bring-up workflow and tuner protocol.
+
+The accepted ground-test configuration was:
+
+```text
+Kp / Ki / Kd:       30.0 / 0.0 / 0.0
+base speed:          300 pps
+maximum correction:  900 pps
+deadband:               2 line-error units
+PWM limit:             750 permille
+duration:            10000 ms
+```
+
+The taped route's acute corner produces a wide sensor pattern. When at least
+four channels are active, the controller preserves the last unambiguous turn
+direction, reduces base speed to `250 pps`, and applies at least `350 pps` of
+differential correction. This prevents the earlier failure in which the car
+continued almost straight across the corner. If the line temporarily leaves
+the array during an already confirmed and direction-locked corner, the
+controller continues the same turn with `500 pps` correction for at most
+`1200 ms`. Reacquisition ends that blind search immediately; expiration still
+stops in high impedance. This exception does not apply to ordinary line loss
+or to a wide pattern with no known turn direction.
+
+The first locked-turn run stopped between the corner and its following straight
+because immediate line-loss handling removed motor torque. A `700 ms / 350
+pps` reacquisition attempt then turned farther but still stopped short. In the
+accepted run, the final search command was `+750/-250 pps`; the outgoing line
+was reacquired after approximately one second at the opposite edge of the
+array. Error then converged through `+35, +30, +20, +10, +5, 0`, the car
+continued along the following straight, and the timed run ended with result
+zero and high impedance. The operator physically confirmed that the vehicle
+completed the acute turn and entered the straight section. This validates that
+corner transition at `300 pps`; other corner geometries and a complete lap
+remain separate ground-test coverage.

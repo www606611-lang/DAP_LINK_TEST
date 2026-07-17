@@ -12,6 +12,7 @@
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "line_sensor_bringup.h"
+#include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "runtime_metrics.h"
@@ -21,6 +22,7 @@
 #include "ti_msp_dl_config.h"
 #include "wheel_position_control.h"
 #include "wheel_heading_control.h"
+#include "wheel_line_tracking_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
 #include "yaw_bringup_test.h"
@@ -156,6 +158,16 @@ volatile uint32_t g_car_line_sensor_calibration_count;
 volatile uint32_t g_car_line_sensor_last_result;
 volatile bool g_car_line_sensor_seen;
 volatile bool g_car_line_sensor_ready;
+volatile uint32_t g_car_line_tracking_test_state;
+volatile uint32_t g_car_line_tracking_run_count;
+volatile int32_t g_car_line_tracking_error;
+volatile int32_t g_car_line_tracking_base_target_pps;
+volatile int32_t g_car_line_tracking_correction_pps;
+volatile int32_t g_car_line_tracking_left_target_pps;
+volatile int32_t g_car_line_tracking_right_target_pps;
+volatile uint32_t g_car_line_tracking_update_count;
+volatile uint32_t g_car_line_tracking_elapsed_ms;
+volatile uint32_t g_car_line_tracking_last_result;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 volatile uint32_t g_car_jdy31_config_state;
@@ -194,11 +206,13 @@ int main(void)
     WheelPositionControl_Init(delay_get_ms());
     WheelYawControl_Init(delay_get_ms());
     WheelHeadingControl_Init(delay_get_ms());
+    WheelLineTrackingControl_Init(delay_get_ms());
     SpeedBringupTest_Init(ResetDiagnostics_IsSuspicious());
     PositionBringupTest_Init(ResetDiagnostics_IsSuspicious());
     YawBringupTest_Init(ResetDiagnostics_IsSuspicious());
     HeadingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     LineSensorBringup_Init(delay_get_ms());
+    LineTrackingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
         CAR_JDY31_CONFIGURE_ON_BOOT != 0);
@@ -266,6 +280,9 @@ int main(void)
             } else if (HeadingBringupTest_IsActive()) {
                 HeadingBringupTest_RequestStop();
                 g_car_last_button_yaw_mdeg = 0;
+            } else if (LineTrackingBringupTest_IsActive()) {
+                LineTrackingBringupTest_RequestStop();
+                g_car_last_button_yaw_mdeg = 0;
             } else if (YawBringupTest_IsActive()) {
                 YawBringupTest_RequestStop();
                 g_car_last_button_yaw_mdeg = 0;
@@ -287,9 +304,11 @@ int main(void)
         PositionBringupTest_Task(now_ms, false);
         YawBringupTest_Task(now_ms);
         HeadingBringupTest_Task(now_ms);
+        LineTrackingBringupTest_Task(now_ms);
         WheelPositionControl_Task(now_ms);
         WheelYawControl_Task(now_ms);
         WheelHeadingControl_Task(now_ms);
+        WheelLineTrackingControl_Task(now_ms);
         WheelSpeedControl_Task(now_ms);
 
         if (pb21_press_event) {
@@ -384,10 +403,12 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     uint32_t display_elapsed_ms = g_car_yaw_elapsed_ms;
     bool heading_active = HeadingBringupTest_IsActive();
     bool yaw_active = YawBringupTest_IsActive();
+    bool line_tracking_active = LineTrackingBringupTest_IsActive();
     bool angle_motion_active = heading_active || yaw_active;
-    const char *control_state = heading_active ?
-        HeadingBringupTest_GetStateText() :
-        YawBringupTest_GetStateText();
+    const char *control_state = line_tracking_active ?
+        LineTrackingBringupTest_GetStateText() :
+        (heading_active ? HeadingBringupTest_GetStateText() :
+            YawBringupTest_GetStateText());
     uint16_t angle_color = (g_car_imu_ready &&
         g_car_imu_attitude_valid) ? ST7789_COLOR_YELLOW : ST7789_COLOR_RED;
     uint16_t state_color = ST7789_COLOR_WHITE;
@@ -441,6 +462,9 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     if (heading_active) {
         (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
             (long) g_car_heading_base_target_pps);
+    } else if (line_tracking_active) {
+        (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
+            (long) g_car_line_tracking_base_target_pps);
     } else if (command_mdeg == 0) {
         (void) snprintf(command_text, sizeof(command_text), "CMD: ---");
     } else {
@@ -449,6 +473,9 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     }
     (void) snprintf(state_text, sizeof(state_text), "%-6.6s",
         control_state);
+    if (line_tracking_active) {
+        display_elapsed_ms = g_car_line_tracking_elapsed_ms;
+    }
     if (display_elapsed_ms > 99990U) {
         display_elapsed_ms = 99990U;
     }
@@ -516,7 +543,9 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
         }
     }
 
-    if (heading_active) {
+    if (line_tracking_active) {
+        state_color = ST7789_COLOR_CYAN;
+    } else if (heading_active) {
         state_color = (HeadingBringupTest_GetState() ==
             HEADING_BRINGUP_TEST_ARMING) ?
             ST7789_COLOR_YELLOW : ST7789_COLOR_CYAN;
@@ -619,6 +648,7 @@ static void app_update_debug_state(void)
     wheel_position_control_snapshot_t position;
     wheel_yaw_control_snapshot_t yaw;
     wheel_heading_control_snapshot_t heading;
+    wheel_line_tracking_snapshot_t line_tracking;
     line_sensor_snapshot_t line_sensor;
     icm20948_snapshot_t imu;
     jdy31_config_snapshot_t jdy31;
@@ -764,6 +794,26 @@ static void app_update_debug_state(void)
             (uint32_t) line_sensor.last_result;
         g_car_line_sensor_seen = line_sensor.line_seen;
         g_car_line_sensor_ready = line_sensor.ready;
+    }
+
+    g_car_line_tracking_test_state =
+        (uint32_t) LineTrackingBringupTest_GetState();
+    g_car_line_tracking_run_count =
+        LineTrackingBringupTest_GetRunCount();
+    if (WheelLineTrackingControl_GetSnapshot(&line_tracking)) {
+        g_car_line_tracking_error = line_tracking.line_error;
+        g_car_line_tracking_base_target_pps = app_round_float(
+            line_tracking.base_speed_target_pps);
+        g_car_line_tracking_correction_pps = app_round_float(
+            line_tracking.correction_target_pps);
+        g_car_line_tracking_left_target_pps = app_round_float(
+            line_tracking.left_speed_target_pps);
+        g_car_line_tracking_right_target_pps = app_round_float(
+            line_tracking.right_speed_target_pps);
+        g_car_line_tracking_update_count = line_tracking.update_count;
+        g_car_line_tracking_elapsed_ms = line_tracking.elapsed_ms;
+        g_car_line_tracking_last_result =
+            (uint32_t) line_tracking.last_result;
     }
 
     if (ICM20948_GetSnapshot(&imu)) {

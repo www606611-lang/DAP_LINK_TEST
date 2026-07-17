@@ -8,11 +8,13 @@
 #include "icm20948.h"
 #include "i2c1_polling.h"
 #include "line_sensor_bringup.h"
+#include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
 #include "runtime_metrics.h"
 #include "speed_bringup_test.h"
 #include "wheel_position_control.h"
 #include "wheel_heading_control.h"
+#include "wheel_line_tracking_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
 #include "yaw_bringup_test.h"
@@ -24,7 +26,7 @@
 
 #define SPEED_TUNING_LINE_SIZE  96U
 #define SPEED_TUNING_TOKEN_MAX  14U
-#define SPEED_TUNING_WAVE_INTERVAL_MS 100U
+#define SPEED_TUNING_WAVE_INTERVAL_MS 50U
 
 static char g_line[SPEED_TUNING_LINE_SIZE];
 static uint32_t g_last_wave_ms;
@@ -45,6 +47,7 @@ static void speed_tuning_send_position_config(void);
 static void speed_tuning_send_position_status(void);
 static void speed_tuning_send_heading_config(void);
 static void speed_tuning_send_heading_status(void);
+static void speed_tuning_send_line_config(void);
 static void speed_tuning_send_line_status(uint32_t now_ms);
 static void speed_tuning_send_yaw_config(void);
 static void speed_tuning_send_yaw_status(void);
@@ -97,6 +100,12 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     }
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "get") == 0)) {
+        speed_tuning_send_line_config();
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "line") == 0) &&
         (strcmp(tokens[1], "stat") == 0)) {
         speed_tuning_send_line_status(now_ms);
         return;
@@ -110,6 +119,56 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
             BluetoothUart_WriteText("ERR busy\r\n");
         } else {
             BluetoothUart_WriteText("OK LINE CAL\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "run") == 0)) {
+        if (LineTrackingBringupTest_RequestStart()) {
+            BluetoothUart_WriteText("OK LINE RUN\r\n");
+        } else {
+            BluetoothUart_WriteText("ERR run_state\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "stop") == 0)) {
+        LineTrackingBringupTest_RequestStop();
+        BluetoothUart_WriteText("OK LINE STOP\r\n");
+        return;
+    }
+    if ((token_count == 10U) &&
+        (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "set") == 0)) {
+        line_tracking_bringup_config_t config;
+        line_tracking_bringup_config_result_t result;
+        uint16_t duration_ms;
+
+        if (!LineTrackingBringupTest_GetConfig(&config) ||
+            !speed_tuning_parse_float(tokens[2], &config.control.kp) ||
+            !speed_tuning_parse_float(tokens[3], &config.control.ki) ||
+            !speed_tuning_parse_float(tokens[4], &config.control.kd) ||
+            !speed_tuning_parse_float(tokens[5], &config.base_speed_pps) ||
+            !speed_tuning_parse_float(
+                tokens[6], &config.control.max_correction_pps) ||
+            !speed_tuning_parse_u16(
+                tokens[7], &config.output_limit_permille) ||
+            !speed_tuning_parse_float(
+                tokens[8], &config.control.deadband) ||
+            !speed_tuning_parse_u16(tokens[9], &duration_ms)) {
+            BluetoothUart_WriteText("ERR number\r\n");
+            return;
+        }
+        config.duration_ms = duration_ms;
+        result = LineTrackingBringupTest_SetConfig(&config);
+        if (result == LINE_TRACKING_BRINGUP_CONFIG_BUSY) {
+            BluetoothUart_WriteText("ERR busy\r\n");
+        } else if (result != LINE_TRACKING_BRINGUP_CONFIG_OK) {
+            BluetoothUart_WriteText("ERR range\r\n");
+        } else {
+            speed_tuning_send_line_config();
         }
         return;
     }
@@ -421,7 +480,7 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     }
 
     BluetoothUart_WriteText(
-        "ERR use spd|pos|yaw|imu commands or fw update\r\n");
+        "ERR use spd|pos|yaw|heading|line|imu or fw update\r\n");
 }
 
 static uint16_t speed_tuning_tokenize(
@@ -1020,19 +1079,54 @@ static void speed_tuning_send_heading_status(void)
     BluetoothUart_WriteText("\r\n");
 }
 
+static void speed_tuning_send_line_config(void)
+{
+    line_tracking_bringup_config_t config;
+
+    if (!LineTrackingBringupTest_GetConfig(&config)) {
+        BluetoothUart_WriteText("ERR config\r\n");
+        return;
+    }
+    BluetoothUart_WriteText("OK LCFG kp=");
+    speed_tuning_write_float4(config.control.kp);
+    BluetoothUart_WriteText(" ki=");
+    speed_tuning_write_float4(config.control.ki);
+    BluetoothUart_WriteText(" kd=");
+    speed_tuning_write_float4(config.control.kd);
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_float4(config.base_speed_pps);
+    BluetoothUart_WriteText(" max=");
+    speed_tuning_write_float4(config.control.max_correction_pps);
+    BluetoothUart_WriteText(" limit=");
+    speed_tuning_write_u32(config.output_limit_permille);
+    BluetoothUart_WriteText(" dead=");
+    speed_tuning_write_float4(config.control.deadband);
+    BluetoothUart_WriteText(" duration=");
+    speed_tuning_write_u32(config.duration_ms);
+    BluetoothUart_WriteText("\r\n");
+}
+
 static void speed_tuning_send_line_status(uint32_t now_ms)
 {
+    app_runtime_metrics_snapshot_t runtime;
     line_sensor_snapshot_t sensor;
     i2c1_polling_snapshot_t bus;
+    wheel_line_tracking_snapshot_t line_tracking;
+    wheel_speed_control_snapshot_t speed;
     uint32_t sample_age_ms;
 
-    if (!LineSensorBringup_GetSnapshot(&sensor) ||
-        !I2C1Polling_GetSnapshot(&bus)) {
+    if (!AppRuntimeMetrics_GetSnapshot(&runtime) ||
+        !LineSensorBringup_GetSnapshot(&sensor) ||
+        !I2C1Polling_GetSnapshot(&bus) ||
+        !WheelLineTrackingControl_GetSnapshot(&line_tracking) ||
+        !WheelSpeedControl_GetSnapshot(&speed)) {
         BluetoothUart_WriteText("ERR status\r\n");
         return;
     }
     sample_age_ms = now_ms - sensor.last_sample_ms;
     BluetoothUart_WriteText("LSTAT state=");
+    BluetoothUart_WriteText(LineTrackingBringupTest_GetStateText());
+    BluetoothUart_WriteText(" sensor=");
     BluetoothUart_WriteText(LineSensorBringup_GetStateText());
     BluetoothUart_WriteText(" raw=");
     speed_tuning_write_u32(sensor.raw);
@@ -1058,17 +1152,49 @@ static void speed_tuning_send_line_status(uint32_t now_ms)
     speed_tuning_write_u32(bus.recovery_count);
     BluetoothUart_WriteText(" busRes=");
     speed_tuning_write_u32((uint32_t) bus.last_result);
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.base_speed_target_pps));
+    BluetoothUart_WriteText(" corr=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.correction_target_pps));
+    BluetoothUart_WriteText(" tL=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.left_speed_target_pps));
+    BluetoothUart_WriteText(" tR=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.right_speed_target_pps));
+    BluetoothUart_WriteText(" vL=");
+    speed_tuning_write_i32(speed.left_measured_pps);
+    BluetoothUart_WriteText(" vR=");
+    speed_tuning_write_i32(speed.right_measured_pps);
+    BluetoothUart_WriteText(" outL=");
+    speed_tuning_write_i32(speed.left_output_permille);
+    BluetoothUart_WriteText(" outR=");
+    speed_tuning_write_i32(speed.right_output_permille);
     BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) line_tracking.last_result);
+    BluetoothUart_WriteText(" sensorRes=");
     speed_tuning_write_u32((uint32_t) sensor.last_result);
     BluetoothUart_WriteText(" hz=");
     speed_tuning_write_u32(
         BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+    BluetoothUart_WriteText(" lineDt=");
+    speed_tuning_write_u32(line_tracking.last_interval_ms);
+    BluetoothUart_WriteText(" lineMax=");
+    speed_tuning_write_u32(line_tracking.max_interval_ms);
+    BluetoothUart_WriteText(" loopMax=");
+    speed_tuning_write_u32(runtime.loop_max_interval_ms);
+    BluetoothUart_WriteText(" lcdMax=");
+    speed_tuning_write_u32(runtime.display_max_duration_ms);
     BluetoothUart_WriteText("\r\n");
 }
 
 static void speed_tuning_send_wave(uint32_t now_ms)
 {
     wheel_heading_control_snapshot_t heading;
+    line_sensor_snapshot_t line_sensor;
+    wheel_line_tracking_snapshot_t line_tracking;
     wheel_position_control_snapshot_t position;
     wheel_speed_control_snapshot_t speed;
     wheel_yaw_control_snapshot_t yaw;
@@ -1078,6 +1204,31 @@ static void speed_tuning_send_wave(uint32_t now_ms)
         return;
     }
     g_last_wave_ms = now_ms;
+
+    if (WheelLineTrackingControl_GetSnapshot(&line_tracking) &&
+        line_tracking.running &&
+        LineSensorBringup_GetSnapshot(&line_sensor) &&
+        WheelSpeedControl_GetSnapshot(&speed)) {
+        BluetoothUart_WriteText("linewave:");
+        speed_tuning_write_i32(line_tracking.line_error);
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            line_tracking.correction_target_pps));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            line_tracking.left_speed_target_pps));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed.left_measured_pps);
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            line_tracking.right_speed_target_pps));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed.right_measured_pps);
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_u32(line_sensor.active_count);
+        BluetoothUart_WriteText("\r\n");
+        return;
+    }
 
     if (WheelHeadingControl_GetSnapshot(&heading) && heading.running &&
         WheelSpeedControl_GetSnapshot(&speed)) {
