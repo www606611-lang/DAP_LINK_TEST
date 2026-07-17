@@ -4,6 +4,26 @@ Formal MSPM0G3507 car-control firmware, rebuilt from the clean PB21/LCD bring-up
 baseline. The older `DAP_LINK_TEST` and `DIANSAI_MOTOR_DRIVER_BOARD` projects are
 reference sources only; they are not copied wholesale into this target.
 
+## Source layout
+
+```text
+app/main.c + app/car_app.*   top-level scheduler and interaction policy
+app/bringup/                 supervised validation workflows
+app/services/                application services such as firmware update
+app/tuning/                  Bluetooth command and telemetry protocol
+control/                     reusable control algorithms and cascaded loops
+bsp/                         board wiring, wheel mapping, and safe resources
+drivers/device/              external-device protocols
+drivers/mcu/                 MCU peripheral drivers
+drivers/utility/             hardware-independent helpers
+diagnostics/                 reset and runtime timing evidence
+experiments/                 code excluded from production targets
+```
+
+The superseded open-loop motor workflow is retained under
+`experiments/legacy_motor_bringup` for historical reference and is not linked
+into `car_control`.
+
 ## Current safety baseline
 
 - PB21, SW2/PB4, and SW1/PB5 are active-low with a 20 ms software

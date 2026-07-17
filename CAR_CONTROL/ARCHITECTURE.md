@@ -6,13 +6,13 @@ bootloader/main -> bootloader/boot_uart + bootloader/boot_flash
 
 app/main
   -> app/car_app interaction policy
-  -> app/firmware_update -> SRAM boot mailbox
+  -> app/services/firmware_update -> SRAM boot mailbox
      -> drivers/mcu/system_watchdog
-  -> app/position_bringup_test
-  -> app/speed_bringup_test
-  -> app/yaw_bringup_test + app/heading_bringup_test
-  -> app/line_tracking_bringup_test
-  -> app/speed_tuning_console -> drivers/mcu/bluetooth_uart
+  -> app/bringup/position_bringup_test
+  -> app/bringup/speed_bringup_test
+  -> app/bringup/yaw_bringup_test + app/bringup/heading_bringup_test
+  -> app/bringup/line_tracking_bringup_test
+  -> app/tuning/speed_tuning_console -> drivers/mcu/bluetooth_uart
   -> control/control_supervisor
   -> control/wheel_position_control -> control/wheel_speed_control
   -> control/wheel_yaw_control -> control/wheel_speed_control
@@ -66,7 +66,11 @@ control cascade
 - `app`: scheduling, display, commands, and mode transitions. `car_app` is the
   hardware-independent top-level interaction policy; `main` adapts its actions
   to the temporary bring-up workflows without embedding button priority or
-  stop-before-start rules in the scheduler.
+  stop-before-start rules in the scheduler. Runtime bring-up workflows,
+  services, and tuning protocol code are grouped in dedicated subdirectories.
+- `experiments`: code retained for historical or learning value but excluded
+  from production targets. The superseded open-loop motor bring-up workflow is
+  archived here instead of remaining in the active application directory.
 - `platform/mspm0g3507`: immutable Flash/SRAM partition constants and linker
   layouts shared by the application and resident Bootloader.
 - `bootloader`: isolated 115200-baud JDY-31 update protocol, safe motor-pin
