@@ -178,4 +178,5 @@ Target   100 .. 6000 pps
 Limit    100 .. 1000 permille
 Pos sync Kp   0 .. 20 pps/count
 Pos sync max  0 .. 6000 pps
+Line duration 500 .. 60000 ms
 ```

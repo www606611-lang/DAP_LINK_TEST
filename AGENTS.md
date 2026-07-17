@@ -68,6 +68,15 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 - Any board button must stop an active bring-up motion before it can start a
   different motion.
 
+## Line-Tracking Test Route
+
+- The ground-test route is a five-corner closed loop made from black tape.
+- Its fixed corner set is one right-angle corner, three obtuse corners, and
+  one acute corner. The straight segments are approximately 30-45 cm long.
+- A full-lap line-tracking claim must cover all five corners. A few wide-line
+  events during a short run are not sufficient evidence of a completed lap,
+  and the acute corner must be judged separately from the other four.
+
 ## Git Workflow
 
 - Do not commit experimental firmware before physical acceptance.
@@ -101,6 +110,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   recorded in `CAR_CONTROL/BRINGUP_LOG.md`.
 - The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
   left, right, and no-line states with zero I2C errors.
-- The current work in progress is the supervised line-tracking outer loop.
-  Preserve the validated standalone speed, position, Yaw, and Heading loops;
-  do not commit line-tracking motion code until its ground test is accepted.
+- The supervised line-tracking outer loop is ground validated on the fixed
+  five-corner route at a commanded 1200 pps base speed. The current work in
+  progress is finding its higher-speed operating envelope. Preserve the
+  accepted 1200 pps behavior and the validated standalone speed, position,
+  Yaw, and Heading loops; do not commit higher-speed changes until their
+  ground test is accepted.

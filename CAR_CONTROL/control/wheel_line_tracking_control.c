@@ -19,14 +19,17 @@
 #define WHEEL_LINE_TRACKING_INTEGRAL_LIMIT              100.0f
 #define WHEEL_LINE_TRACKING_DERIVATIVE_TAU_S              0.04f
 #define WHEEL_LINE_TRACKING_WIDE_LINE_COUNT                4U
-#define WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS        250.0f
+#define WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS        300.0f
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS   500.0f
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX           3U
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX           5.0f
-#define WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS         600U
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS         350U
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS    150.0f
 #define WHEEL_LINE_TRACKING_CORNER_MIN_CORRECTION_PPS    350.0f
 #define WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS 600.0f
+#define WHEEL_LINE_TRACKING_CORNER_SEARCH_RAMP_MS          200U
 #define WHEEL_LINE_TRACKING_CORNER_REACQUIRE_MS          1800U
-#define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S         600.0f
+#define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S        1200.0f
 #define WHEEL_LINE_TRACKING_SLOWDOWN_FRACTION               0.65f
 
 static wheel_line_tracking_config_t g_config;
@@ -47,6 +50,7 @@ static int8_t g_last_turn_sign;
 static bool g_corner_active;
 static bool g_corner_recovery_active;
 static bool g_corner_line_search_active;
+static bool g_corner_turn_committed;
 
 static bool wheel_line_tracking_speed_is_valid(float speed_pps);
 static bool wheel_line_tracking_observation_is_valid(
@@ -103,6 +107,7 @@ void WheelLineTrackingControl_Init(uint32_t now_ms)
     g_corner_active = false;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
+    g_corner_turn_committed = false;
 }
 
 bool WheelLineTrackingControl_ConfigIsValid(
@@ -155,6 +160,8 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     bool line_seen,
     uint32_t observation_ms, uint32_t now_ms)
 {
+    int8_t start_turn_sign = g_last_turn_sign;
+
     if (g_snapshot.running) {
         g_snapshot.last_result = WHEEL_LINE_TRACKING_BUSY;
         return g_snapshot.last_result;
@@ -169,6 +176,16 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
         g_snapshot.last_result = line_seen ?
             WHEEL_LINE_TRACKING_SENSOR_STALE :
             WHEEL_LINE_TRACKING_LINE_LOST;
+        return g_snapshot.last_result;
+    }
+    if ((float) line_error < -g_config.deadband) {
+        start_turn_sign = 1;
+    } else if ((float) line_error > g_config.deadband) {
+        start_turn_sign = -1;
+    }
+    if ((active_count >= WHEEL_LINE_TRACKING_WIDE_LINE_COUNT) &&
+        (start_turn_sign == 0)) {
+        g_snapshot.last_result = WHEEL_LINE_TRACKING_BAD_COMMAND;
         return g_snapshot.last_result;
     }
     if (WheelSpeedControl_StartForMode(
@@ -209,13 +226,15 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     g_integral = 0.0f;
     g_previous_error = -(float) line_error;
     g_filtered_derivative = 0.0f;
-    g_last_turn_sign = ((float) line_error < -g_config.deadband) ?
-        1 : (((float) line_error > g_config.deadband) ? -1 : 0);
+    g_last_turn_sign = start_turn_sign;
     g_corner_active =
         active_count >= WHEEL_LINE_TRACKING_WIDE_LINE_COUNT;
     g_corner_turn_sign = g_corner_active ? g_last_turn_sign : 0;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
+    g_corner_turn_committed = g_corner_active &&
+        (wheel_line_tracking_abs((float) line_error) >
+            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX);
     g_effective_base_speed_pps =
         (g_corner_active &&
             (base_speed_pps > WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS)) ?
@@ -261,6 +280,7 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
                 CAR_CONTROL_BLOCK_EMERGENCY_STOP);
             return WHEEL_LINE_TRACKING_LINE_LOST;
         }
+        g_corner_turn_committed = true;
         g_snapshot.active_count = 0U;
         g_snapshot.command_age_ms = 0U;
         g_snapshot.observation_age_ms = now_ms - observation_ms;
@@ -294,14 +314,24 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
         g_corner_recovery_active = false;
         g_corner_centered_since_ms = 0U;
         if (entering_corner) {
-            if ((g_last_turn_sign == 0) &&
-                (wheel_line_tracking_abs((float) line_error) >
-                    g_config.deadband)) {
+            if (wheel_line_tracking_abs((float) line_error) >
+                g_config.deadband) {
                 g_last_turn_sign = (line_error < 0) ? 1 : -1;
             }
             g_corner_turn_sign = g_last_turn_sign;
+            g_corner_turn_committed =
+                wheel_line_tracking_abs((float) line_error) >
+                    WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX;
+        } else if (wheel_line_tracking_abs((float) line_error) >
+            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX) {
+            g_corner_turn_committed = true;
         }
     } else {
+        if (g_corner_active &&
+            (wheel_line_tracking_abs((float) line_error) >
+                WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX)) {
+            g_corner_turn_committed = true;
+        }
         if (!g_corner_active && !g_corner_recovery_active &&
             (wheel_line_tracking_abs((float) line_error) >
                 g_config.deadband)) {
@@ -314,7 +344,7 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
             g_corner_turn_sign = (line_error < 0) ? 1 : -1;
             g_corner_centered_since_ms = 0U;
         }
-        if (g_corner_active &&
+        if (g_corner_active && g_corner_turn_committed &&
             (active_count <= WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX) &&
             (wheel_line_tracking_abs((float) line_error) <=
                 WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX)) {
@@ -349,6 +379,7 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
     float headroom_pps;
     float desired_base_speed_pps;
     float maximum_base_increase_pps;
+    bool corner_exit_candidate;
 
     if (!g_snapshot.running) {
         return;
@@ -430,9 +461,17 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         g_config.kd * g_filtered_derivative;
     correction_pps = wheel_line_tracking_clamp(
         correction_pps, -correction_limit, correction_limit);
-    if ((g_corner_active || g_corner_recovery_active) &&
+    corner_exit_candidate = g_corner_active &&
+        g_corner_turn_committed && g_snapshot.line_seen &&
+        (g_snapshot.active_count <=
+            WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX) &&
+        (wheel_line_tracking_abs((float) g_snapshot.line_error) <=
+            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX);
+    if (g_corner_active &&
         (g_corner_turn_sign != 0) &&
-        ((g_snapshot.active_count >= WHEEL_LINE_TRACKING_WIDE_LINE_COUNT) ||
+        !corner_exit_candidate &&
+        (!g_corner_turn_committed ||
+            (g_snapshot.active_count >= WHEEL_LINE_TRACKING_WIDE_LINE_COUNT) ||
             (control_error != 0.0f) || !g_snapshot.line_seen)) {
         float corner_correction =
             wheel_line_tracking_abs(correction_pps);
@@ -445,20 +484,56 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         if (!g_snapshot.line_seen &&
             (corner_correction <
                 WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS)) {
-            corner_correction =
-                WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS;
+            float search_correction =
+                WHEEL_LINE_TRACKING_CORNER_MIN_CORRECTION_PPS;
+            uint32_t search_elapsed_ms =
+                now_ms - g_corner_line_lost_since_ms;
+
+            if (search_elapsed_ms >=
+                WHEEL_LINE_TRACKING_CORNER_SEARCH_RAMP_MS) {
+                search_correction =
+                    WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS;
+            } else {
+                search_correction +=
+                    (WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS -
+                        WHEEL_LINE_TRACKING_CORNER_MIN_CORRECTION_PPS) *
+                    (float) search_elapsed_ms /
+                    (float) WHEEL_LINE_TRACKING_CORNER_SEARCH_RAMP_MS;
+            }
+            if (corner_correction < search_correction) {
+                corner_correction = search_correction;
+            }
         }
         if (corner_correction > correction_limit) {
             corner_correction = correction_limit;
         }
         correction_pps = (g_corner_turn_sign > 0) ?
             corner_correction : -corner_correction;
+    } else if (corner_exit_candidate &&
+        (g_corner_turn_sign != 0)) {
+        float exit_correction =
+            WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS;
+
+        if (exit_correction > correction_limit) {
+            exit_correction = correction_limit;
+        }
+        correction_pps = (g_corner_turn_sign > 0) ?
+            exit_correction : -exit_correction;
     }
     g_previous_error = control_error;
 
     desired_base_speed_pps = g_snapshot.line_seen ?
         wheel_line_tracking_effective_base_speed(
             g_requested_base_speed_pps, correction_pps) : 0.0f;
+    if (corner_exit_candidate &&
+        (desired_base_speed_pps <
+            WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS)) {
+        desired_base_speed_pps =
+            WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS;
+        if (desired_base_speed_pps > g_requested_base_speed_pps) {
+            desired_base_speed_pps = g_requested_base_speed_pps;
+        }
+    }
     if (desired_base_speed_pps <= g_effective_base_speed_pps) {
         g_effective_base_speed_pps = desired_base_speed_pps;
     } else {
@@ -470,12 +545,14 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         }
     }
     g_snapshot.base_speed_target_pps = g_effective_base_speed_pps;
-    if (g_corner_recovery_active && (control_error == 0.0f) &&
-        (g_snapshot.active_count <= 2U) &&
-        (g_effective_base_speed_pps >=
-            (g_requested_base_speed_pps - 1.0f))) {
+    if (g_corner_recovery_active && g_snapshot.line_seen &&
+        (g_snapshot.active_count <=
+            WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX) &&
+        (wheel_line_tracking_abs((float) g_snapshot.line_error) <=
+            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX)) {
         g_corner_recovery_active = false;
         g_corner_turn_sign = 0;
+        g_corner_turn_committed = false;
     }
     g_snapshot.correction_target_pps = correction_pps;
     g_snapshot.left_speed_target_pps =
@@ -496,6 +573,12 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
 
 void WheelLineTrackingControl_Stop(car_control_block_reason_t reason)
 {
+    int8_t resume_turn_sign = 0;
+
+    if ((reason == CAR_CONTROL_BLOCK_TEST_COMPLETE) &&
+        g_corner_active && (g_corner_turn_sign != 0)) {
+        resume_turn_sign = g_corner_turn_sign;
+    }
     if (g_snapshot.running) {
         WheelSpeedControl_Stop(reason);
     }
@@ -514,10 +597,11 @@ void WheelLineTrackingControl_Stop(car_control_block_reason_t reason)
     g_requested_base_speed_pps = 0.0f;
     g_effective_base_speed_pps = 0.0f;
     g_corner_turn_sign = 0;
-    g_last_turn_sign = 0;
+    g_last_turn_sign = resume_turn_sign;
     g_corner_active = false;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
+    g_corner_turn_committed = false;
 }
 
 bool WheelLineTrackingControl_GetSnapshot(
@@ -570,6 +654,7 @@ static void wheel_line_tracking_fault(
     g_corner_active = false;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
+    g_corner_turn_committed = false;
 }
 
 static float wheel_line_tracking_abs(float value)

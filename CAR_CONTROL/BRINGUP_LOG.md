@@ -887,3 +887,35 @@ episodes. No I2C errors occurred; measured maxima were `27 ms` for line-control
 updates, `19 ms` for the main loop, and `17 ms` for an LCD slice. This validates
 the tested route at `300 pps`; higher speeds and additional line geometries
 remain separate ground-test coverage.
+
+### Five-corner route high-speed baseline
+
+The fixed closed route contains one right-angle corner, three obtuse corners,
+one acute corner, and approximately 30-45 cm straight sections. Higher-speed
+testing retained the accepted `Kp=30`, `Ki=0`, `Kd=0`, `900 pps` correction
+limit, and `750 permille` speed-output limit while raising the requested base
+speed to `1200 pps`.
+
+Corner handling now commits the selected turn direction before blind search,
+ramps lost-line pivot correction from `350` to `600 pps` over `200 ms`, and
+accelerates the recovered base-speed command at `1200 pps/s`. A centered
+corner exit no longer waits at a weak `300/300 pps` command: it drives through
+with a `500 pps` base and `150 pps` residual turn correction for up to `350
+ms`, allowing the chassis to finish aligning with the outgoing straight. The
+operator reported that the resulting motion was basically smooth.
+
+Timed tests now treat their configured duration as a minimum. After that
+deadline, tracking continues until `count<=2` and `|error|<=5` remain stable
+for `250 ms`; a `3000 ms` grace deadline still forces high impedance. This
+prevents a normal timed test from stopping in the middle of a corner. The
+bring-up protocol accepts runs up to `60000 ms`.
+
+Three consecutive `30 s` runs completed with result zero and high impedance.
+A subsequent `60.27 s` continuous run covered 19 wide-line entries and five
+complete lost-line recoveries. The longest recovery was `937 ms`, below the
+`1800 ms` safety limit. Average effective base speed was `705 pps` in the
+first half and `691 pps` in the second half, showing no meaningful late-run
+degradation. I2C errors remained zero, the maximum line-control interval was
+`27 ms`, and the run stopped on `count=2 / error=0` with motor outputs in high
+impedance. This establishes `1200 pps` as the accepted route baseline; higher
+requested speeds remain experimental.

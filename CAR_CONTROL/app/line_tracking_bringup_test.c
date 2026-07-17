@@ -9,13 +9,19 @@
 #define LINE_TRACKING_BRINGUP_DEFAULT_BASE_SPEED_PPS 700.0f
 #define LINE_TRACKING_BRINGUP_DEFAULT_OUTPUT_LIMIT    500U
 #define LINE_TRACKING_BRINGUP_DEFAULT_DURATION_MS    4000U
+#define LINE_TRACKING_BRINGUP_FINISH_GRACE_MS         3000U
+#define LINE_TRACKING_BRINGUP_FINISH_STABLE_MS         250U
+#define LINE_TRACKING_BRINGUP_FINISH_ERROR_MAX           5
+#define LINE_TRACKING_BRINGUP_FINISH_COUNT_MAX           2U
 
 static line_tracking_bringup_test_state_t g_state;
 static line_tracking_bringup_config_t g_config;
 static uint32_t g_run_count;
 static uint32_t g_run_deadline_ms;
+static uint32_t g_finish_stable_since_ms;
 static bool g_start_requested;
 static bool g_stop_requested;
+static bool g_finish_stable;
 
 static void line_tracking_bringup_start(uint32_t now_ms);
 static void line_tracking_bringup_stop(
@@ -37,8 +43,10 @@ void LineTrackingBringupTest_Init(bool reset_locked)
     g_config.duration_ms = LINE_TRACKING_BRINGUP_DEFAULT_DURATION_MS;
     g_run_count = 0U;
     g_run_deadline_ms = 0U;
+    g_finish_stable_since_ms = 0U;
     g_start_requested = false;
     g_stop_requested = false;
+    g_finish_stable = false;
 }
 
 void LineTrackingBringupTest_Task(uint32_t now_ms)
@@ -77,19 +85,51 @@ void LineTrackingBringupTest_Task(uint32_t now_ms)
                 g_state = LINE_TRACKING_BRINGUP_TEST_ABORTED;
                 return;
             }
-            if (line_tracking_bringup_deadline_reached(
-                    now_ms, g_run_deadline_ms)) {
-                line_tracking_bringup_stop(
-                    CAR_CONTROL_BLOCK_TEST_COMPLETE,
-                    LINE_TRACKING_BRINGUP_TEST_COMPLETE);
-                return;
-            }
             if (!LineSensorBringup_GetSnapshot(&sensor) ||
                 !sensor.ready) {
                 WheelLineTrackingControl_Stop(
                     CAR_CONTROL_BLOCK_EMERGENCY_STOP);
                 g_state = LINE_TRACKING_BRINGUP_TEST_ABORTED;
                 return;
+            }
+            if (line_tracking_bringup_deadline_reached(
+                    now_ms, g_run_deadline_ms)) {
+                int32_t line_error = sensor.line_error;
+                bool centered;
+
+                if (line_error < 0) {
+                    line_error = -line_error;
+                }
+                centered = sensor.line_seen &&
+                    (sensor.active_count <=
+                        LINE_TRACKING_BRINGUP_FINISH_COUNT_MAX) &&
+                    (line_error <=
+                        LINE_TRACKING_BRINGUP_FINISH_ERROR_MAX);
+
+                if (centered) {
+                    if (!g_finish_stable) {
+                        g_finish_stable = true;
+                        g_finish_stable_since_ms = now_ms;
+                    } else if (((uint32_t) (now_ms -
+                            g_finish_stable_since_ms)) >=
+                            LINE_TRACKING_BRINGUP_FINISH_STABLE_MS) {
+                        line_tracking_bringup_stop(
+                            CAR_CONTROL_BLOCK_TEST_COMPLETE,
+                            LINE_TRACKING_BRINGUP_TEST_COMPLETE);
+                        return;
+                    }
+                } else {
+                    g_finish_stable = false;
+                }
+
+                if (line_tracking_bringup_deadline_reached(now_ms,
+                        g_run_deadline_ms +
+                            LINE_TRACKING_BRINGUP_FINISH_GRACE_MS)) {
+                    line_tracking_bringup_stop(
+                        CAR_CONTROL_BLOCK_TEST_COMPLETE,
+                        LINE_TRACKING_BRINGUP_TEST_COMPLETE);
+                    return;
+                }
             }
             if (WheelLineTrackingControl_SetCommand(
                     g_config.base_speed_pps,
@@ -234,6 +274,8 @@ static void line_tracking_bringup_start(uint32_t now_ms)
         return;
     }
     g_run_deadline_ms = now_ms + g_config.duration_ms;
+    g_finish_stable_since_ms = 0U;
+    g_finish_stable = false;
     g_run_count++;
     g_state = LINE_TRACKING_BRINGUP_TEST_RUNNING;
 }

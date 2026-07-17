@@ -286,7 +286,7 @@ function Get-LineSetCommand {
         ($LineMaxCorrection -le 0) -or
         ($LineLimit -lt 100) -or ($LineLimit -gt 1000) -or
         ($LineDeadband -lt 0) -or ($LineDeadband -gt 20) -or
-        ($LineDuration -lt 500) -or ($LineDuration -gt 10000)) {
+        ($LineDuration -lt 500) -or ($LineDuration -gt 60000)) {
         throw "Line-tracking configuration is outside firmware range."
     }
     return ('line set {0} {1} {2} {3} {4} {5} {6} {7}' -f
