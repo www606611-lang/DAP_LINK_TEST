@@ -1015,3 +1015,38 @@ error. After restart, the firmware reported `READY`, zero motor targets and
 outputs, high impedance, and `WSTAT active=1`, with the refresh count increasing
 normally. This validates both fault recovery and the normal JDY-31 update path
 while the hardware watchdog feature is enabled.
+
+## 2026-07-17: formal application interaction state machine
+
+The physical-button policy previously lived as a priority chain inside
+`main.c`. It is now isolated in hardware-independent `car_app.c` with explicit
+`LOCKED`, `READY`, `SERVICE`, and `MOTION_ACTIVE` states. The state machine
+selects one active workflow deterministically, blocks new button motion during
+reset lockout or JDY-31/update service, and converts any button press during an
+active workflow into `STOP_ACTIVE` before a different command can start. The
+existing ready-state mapping remains PB21 `+45 degrees`, PB4 `-60 degrees`, and
+PB5 `+90 degrees`; none of the validated control-loop implementations or
+tunings changed.
+
+Host coverage verifies all three Yaw mappings, deterministic active-workflow
+priority, service and suspicious-reset lockout, stop priority during service,
+and state-transition counting. Both MCU toolchains build successfully and the
+two host tests pass. The 111072-byte GCC image with CRC32 `0xAAC271C9` was
+wirelessly programmed in 31.0 seconds. After restart, the board reported:
+
+```text
+ASTAT state=READY workflow=0 action=0 yaw=0 transitions=0 hz=1
+LSTAT state=READY ... tL=0 tR=0 vL=0 vR=0 outL=0 outR=0 hz=1
+WSTAT active=1 kicks=24939 hz=1
+```
+
+The line sensor also restarted with zero read or bus-recovery errors. This
+validates cold-start state reporting and motor-safe idle behavior.
+
+The subsequent ground regression exercised the `+90`, `-60`, and `+45 degree`
+button commands, followed by repeated PB21 `+45 degree` starts interrupted by
+PB4 during motion. The final observed stop occurred near `+15.9 degrees` and
+reported result 9 (`WHEEL_YAW_CONTROL_STOPPED`) with zero targets, zero PWM
+outputs, and high impedance. No `-60 degree` target followed any PB4 stop, so
+the second button press stopped the active workflow without queuing a new
+turn. The operator confirmed that the physical stop was immediate and normal.

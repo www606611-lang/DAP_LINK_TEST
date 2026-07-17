@@ -4,6 +4,7 @@
 #include "board_resources.h"
 #include "board_wheel_drive.h"
 #include "bluetooth_uart.h"
+#include "car_app.h"
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
@@ -32,9 +33,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define APP_PB21_YAW_DEG       45.0f
-#define APP_SW2_PB4_YAW_DEG   -60.0f
-#define APP_SW1_PB5_YAW_DEG    90.0f
 #define APP_BUTTON_ID_NONE       0U
 #define APP_BUTTON_ID_PB4        4U
 #define APP_BUTTON_ID_PB5        5U
@@ -171,6 +169,10 @@ volatile uint32_t g_car_line_tracking_elapsed_ms;
 volatile uint32_t g_car_line_tracking_last_result;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
+volatile uint32_t g_car_app_state;
+volatile uint32_t g_car_app_active_workflow;
+volatile uint32_t g_car_app_last_action;
+volatile uint32_t g_car_app_transition_count;
 volatile uint32_t g_car_jdy31_config_state;
 volatile uint32_t g_car_jdy31_uart_baud;
 volatile int32_t g_car_jdy31_reported_baud_code;
@@ -178,6 +180,8 @@ volatile bool g_car_jdy31_config_success;
 
 static void app_display_init(void);
 static void app_display_update(uint32_t now_ms, uint8_t phase);
+static void app_process_car_action(
+    const car_app_snapshot_t *snapshot);
 static void app_format_signed_tenths(
     char *buffer, size_t buffer_size, int32_t value_milli);
 static void app_update_debug_state(void);
@@ -215,6 +219,7 @@ int main(void)
     HeadingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     LineSensorBringup_Init(delay_get_ms());
     LineTrackingBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    CarApp_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
         CAR_JDY31_CONFIGURE_ON_BOOT != 0);
@@ -238,8 +243,9 @@ int main(void)
         bool pb21_release_event;
         bool pb4_release_event;
         bool pb5_release_event;
-        bool any_press_event;
         bool any_release_event;
+        car_app_inputs_t car_app_inputs;
+        car_app_snapshot_t car_app_snapshot;
 
         AppRuntimeMetrics_RecordLoop(now_ms);
         BoardButton_Task(now_ms);
@@ -255,8 +261,6 @@ int main(void)
             BOARD_BUTTON_ID_SW2_PB4);
         pb5_release_event = BoardButton_GetReleaseEventId(
             BOARD_BUTTON_ID_SW1_PB5);
-        any_press_event = pb21_press_event || pb4_press_event ||
-            pb5_press_event;
         any_release_event = pb21_release_event || pb4_release_event ||
             pb5_release_event;
         EncoderInput_Task(now_ms);
@@ -269,38 +273,24 @@ int main(void)
         }
         FirmwareUpdate_Task();
         ControlSupervisor_Task(now_ms);
-        if (any_press_event && !JDY31_ConfigIsExclusive() &&
-            !FirmwareUpdate_IsPending()) {
-            if (SpeedBringupTest_GetState() ==
-                    SPEED_BRINGUP_TEST_RUNNING) {
-                SpeedBringupTest_RequestStop();
-                g_car_last_button_yaw_mdeg = 0;
-            } else if (PositionBringupTest_GetState() ==
-                    POSITION_BRINGUP_TEST_RUNNING) {
-                PositionBringupTest_RequestStop();
-                g_car_last_button_yaw_mdeg = 0;
-            } else if (HeadingBringupTest_IsActive()) {
-                HeadingBringupTest_RequestStop();
-                g_car_last_button_yaw_mdeg = 0;
-            } else if (LineTrackingBringupTest_IsActive()) {
-                LineTrackingBringupTest_RequestStop();
-                g_car_last_button_yaw_mdeg = 0;
-            } else if (YawBringupTest_IsActive()) {
-                YawBringupTest_RequestStop();
-                g_car_last_button_yaw_mdeg = 0;
-            } else if (pb21_press_event) {
-                if (YawBringupTest_RequestTurn(APP_PB21_YAW_DEG)) {
-                    g_car_last_button_yaw_mdeg = 45000;
-                }
-            } else if (pb4_press_event) {
-                if (YawBringupTest_RequestTurn(
-                        APP_SW2_PB4_YAW_DEG)) {
-                    g_car_last_button_yaw_mdeg = -60000;
-                }
-            } else if (pb5_press_event &&
-                YawBringupTest_RequestTurn(APP_SW1_PB5_YAW_DEG)) {
-                g_car_last_button_yaw_mdeg = 90000;
-            }
+        car_app_inputs.service_active = JDY31_ConfigIsExclusive() ||
+            FirmwareUpdate_IsPending();
+        car_app_inputs.speed_test_active =
+            SpeedBringupTest_GetState() == SPEED_BRINGUP_TEST_RUNNING;
+        car_app_inputs.position_test_active =
+            PositionBringupTest_GetState() ==
+                POSITION_BRINGUP_TEST_RUNNING;
+        car_app_inputs.heading_test_active =
+            HeadingBringupTest_IsActive();
+        car_app_inputs.line_test_active =
+            LineTrackingBringupTest_IsActive();
+        car_app_inputs.yaw_test_active = YawBringupTest_IsActive();
+        car_app_inputs.pb21_press_event = pb21_press_event;
+        car_app_inputs.pb4_press_event = pb4_press_event;
+        car_app_inputs.pb5_press_event = pb5_press_event;
+        CarApp_Step(&car_app_inputs);
+        if (CarApp_GetSnapshot(&car_app_snapshot)) {
+            app_process_car_action(&car_app_snapshot);
         }
         SpeedBringupTest_Task(now_ms, false);
         PositionBringupTest_Task(now_ms, false);
@@ -355,6 +345,41 @@ int main(void)
 
         SystemWatchdog_Kick();
         __WFI();
+    }
+}
+
+static void app_process_car_action(
+    const car_app_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+
+    if (snapshot->action == CAR_APP_ACTION_STOP_ACTIVE) {
+        switch (snapshot->active_workflow) {
+            case CAR_APP_WORKFLOW_SPEED_TEST:
+                SpeedBringupTest_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_POSITION_TEST:
+                PositionBringupTest_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_HEADING_TEST:
+                HeadingBringupTest_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_LINE_TEST:
+                LineTrackingBringupTest_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_YAW_TEST:
+                YawBringupTest_RequestStop();
+                break;
+            default:
+                break;
+        }
+        g_car_last_button_yaw_mdeg = 0;
+    } else if ((snapshot->action == CAR_APP_ACTION_START_YAW) &&
+        YawBringupTest_RequestTurn(
+            (float) snapshot->yaw_command_mdeg / 1000.0f)) {
+        g_car_last_button_yaw_mdeg = snapshot->yaw_command_mdeg;
     }
 }
 
@@ -655,6 +680,7 @@ static void app_update_debug_state(void)
     line_sensor_snapshot_t line_sensor;
     icm20948_snapshot_t imu;
     jdy31_config_snapshot_t jdy31;
+    car_app_snapshot_t car_app;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
     g_car_pb21_interrupt_count = BoardButton_GetInterruptCountId(
@@ -672,6 +698,13 @@ static void app_update_debug_state(void)
     g_car_control_block_reason =
         (uint32_t) ControlSupervisor_GetBlockReason();
     g_car_motor_high_impedance = BoardMotorSafe_IsHighImpedance();
+    if (CarApp_GetSnapshot(&car_app)) {
+        g_car_app_state = (uint32_t) car_app.state;
+        g_car_app_active_workflow =
+            (uint32_t) car_app.active_workflow;
+        g_car_app_last_action = (uint32_t) car_app.action;
+        g_car_app_transition_count = car_app.transition_count;
+    }
     g_car_speed_test_state = (uint32_t) SpeedBringupTest_GetState();
     g_car_speed_test_run_count = SpeedBringupTest_GetRunCount();
     g_car_position_test_state =

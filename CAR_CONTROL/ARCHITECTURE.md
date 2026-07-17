@@ -5,6 +5,7 @@ bootloader/main -> bootloader/boot_uart + bootloader/boot_flash
   -> drivers/utility/crc32 -> platform/mspm0g3507 memory layout
 
 app/main
+  -> app/car_app interaction policy
   -> app/firmware_update -> SRAM boot mailbox
      -> drivers/mcu/system_watchdog
   -> app/position_bringup_test
@@ -62,7 +63,10 @@ control cascade
 - `drivers/utility`: hardware-independent helpers and algorithms. The IMU
   attitude estimator owns quaternion integration, gravity-vector correction,
   Euler conversion, and relative-yaw tracking; it has no I2C or board access.
-- `app`: scheduling, display, commands, and mode transitions.
+- `app`: scheduling, display, commands, and mode transitions. `car_app` is the
+  hardware-independent top-level interaction policy; `main` adapts its actions
+  to the temporary bring-up workflows without embedding button priority or
+  stop-before-start rules in the scheduler.
 - `platform/mspm0g3507`: immutable Flash/SRAM partition constants and linker
   layouts shared by the application and resident Bootloader.
 - `bootloader`: isolated 115200-baud JDY-31 update protocol, safe motor-pin
@@ -112,6 +116,10 @@ control cascade
     loop pass. A watchdog reset enters suspicious-reset lockout, and the normal
     wireless updater explicitly powers down WWDT0 before its software-reset
     handoff so Bootloader erase/program operations cannot be interrupted.
+14. Application coordinator: top-level `LOCKED`, `READY`, `SERVICE`, and
+    `MOTION_ACTIVE` interaction states are host-tested. Any physical button
+    stops the active workflow before another command can start; service and
+    suspicious-reset states reject new physical motion requests.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies without
 linking MCU drivers. Hardware-dependent control and safety paths still require

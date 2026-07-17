@@ -60,6 +60,22 @@ position, yaw, heading, or line-tracking mode only through the supervised
 speed-loop owner API, so unimplemented modules cannot arm the motors by
 changing a mode.
 
+## Application coordinator
+
+`app/car_app.h` is the hardware-independent top-level interaction policy. It
+tracks `LOCKED`, `READY`, `SERVICE`, and `MOTION_ACTIVE` states and reports the
+currently active bring-up workflow. A suspicious reset stays locked, while
+JDY-31 configuration and firmware update enter service state and reject new
+physical-button motion requests.
+
+When a supervised motion workflow is active, any of the three board buttons
+produces only `STOP_ACTIVE`; it cannot immediately start a different motion.
+When ready, the existing physical Yaw commands remain PB21 `+45 degrees`,
+SW2/PB4 `-60 degrees`, and SW1/PB5 `+90 degrees`. `main.c` is now a thin
+adapter from these policy actions to the already validated bring-up modules.
+The read-only `app stat` command and CLI `AppStatus` action expose state,
+workflow, last action, requested Yaw, transition count, and motor high-Z state.
+
 ## Reusable wheel-drive API
 
 `bsp/board_wheel_drive.h` is the single product-facing motor-output API:
@@ -425,6 +441,10 @@ g_car_line_sensor_seen
 g_car_line_sensor_ready
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
+g_car_app_state
+g_car_app_active_workflow
+g_car_app_last_action
+g_car_app_transition_count
 ```
 
 See `HARDWARE_MAP.md` before enabling any additional peripheral and
@@ -444,4 +464,6 @@ ctest --test-dir build-host-tests -C Debug --output-on-failure
 ```
 
 The current suite verifies strict line-test completion, center-stability reset,
-grace timeout failure, and 32-bit millisecond-counter wraparound.
+grace timeout failure, 32-bit millisecond-counter wraparound, application-state
+transitions, service/reset lockout, deterministic workflow priority, physical
+button Yaw mapping, and stop-before-start behavior.

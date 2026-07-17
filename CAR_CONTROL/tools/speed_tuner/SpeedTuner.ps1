@@ -178,6 +178,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^line (get|run|stop|stat|cal)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$' -or
+        $line -match '^app stat$' -or
         $line -match '^wdt (stat|test)$') {
         return $true
     }

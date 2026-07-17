@@ -9,7 +9,7 @@ param(
         "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
         "HeadingRun", "HeadingStop", "HeadingStatus", "LineGet",
         "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
-        "WatchdogStatus", "WatchdogTest")]
+        "AppStatus", "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -677,6 +677,9 @@ try {
         }
         "LineCal" {
             [void](Invoke-Protocol "line cal" @("OK LINE CAL", "ERR "))
+        }
+        "AppStatus" {
+            [void](Invoke-Protocol "app stat" @("ASTAT ", "ERR "))
         }
         "WatchdogStatus" {
             [void](Invoke-Protocol "wdt stat" @("WSTAT ", "ERR "))

@@ -2,6 +2,7 @@
 
 #include "bluetooth_uart.h"
 #include "board_motor_safe.h"
+#include "car_app.h"
 #include "encoder_input.h"
 #include "firmware_update.h"
 #include "heading_bringup_test.h"
@@ -97,6 +98,31 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
         } else {
             BluetoothUart_WriteText("ERR motor_active\r\n");
         }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "app") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        car_app_snapshot_t app;
+
+        if (!CarApp_GetSnapshot(&app)) {
+            BluetoothUart_WriteText("ERR app_state\r\n");
+            return;
+        }
+        BluetoothUart_WriteText("ASTAT state=");
+        BluetoothUart_WriteText(CarApp_GetStateText());
+        BluetoothUart_WriteText(" workflow=");
+        speed_tuning_write_u32((uint32_t) app.active_workflow);
+        BluetoothUart_WriteText(" action=");
+        speed_tuning_write_u32((uint32_t) app.action);
+        BluetoothUart_WriteText(" yaw=");
+        speed_tuning_write_i32(app.yaw_command_mdeg);
+        BluetoothUart_WriteText(" transitions=");
+        speed_tuning_write_u32(app.transition_count);
+        BluetoothUart_WriteText(" hz=");
+        speed_tuning_write_u32(
+            BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+        BluetoothUart_WriteText("\r\n");
         return;
     }
     if ((token_count == 2U) &&
