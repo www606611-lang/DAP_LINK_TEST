@@ -162,6 +162,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^pos (get|stop|stat)$' -or
         $line -match '^pos run(?: stress)?$' -or
         $line -match '^heading (get|run|stop|stat)$' -or
+        $line -match '^line (stat|cal)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$') {
         return $true

@@ -7,7 +7,8 @@ param(
         "PositionStress", "PositionStop", "PositionStatus",
         "ImuStatus", "ImuZero", "YawGet", "YawSet", "YawRun",
         "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
-        "HeadingRun", "HeadingStop", "HeadingStatus")]
+        "HeadingRun", "HeadingStop", "HeadingStatus", "LineStatus",
+        "LineCal")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -419,6 +420,34 @@ function Save-HeadingStatus([hashtable]$values, [string]$csvPath) {
     }
 }
 
+function Save-LineStatus([hashtable]$values) {
+    $status = [ordered]@{
+        timestamp = [DateTime]::Now.ToString("o")
+        source = $transport
+        port = if ($transport -eq "tcp_bridge") {
+            "$BridgeHost`:$BridgePort"
+        } else { $Port }
+        state = $values['state']
+        raw = [uint32]$values['raw']
+        active_mask = [uint32]$values['mask']
+        active_count = [uint32]$values['count']
+        line_error = [int]$values['error']
+        line_seen = ($values['seen'] -eq '1')
+        sample_count = [uint32]$values['samples']
+        error_count = [uint32]$values['errors']
+        calibration_count = [uint32]$values['cal']
+        sample_age_ms = [uint32]$values['age']
+        bus_transaction_count = [uint32]$values['busTx']
+        bus_recovery_count = [uint32]$values['busRec']
+        bus_result = [uint32]$values['busRes']
+        result = [uint32]$values['res']
+        high_impedance = ($values['hz'] -eq '1')
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $runtimeDir "latest_line_status.json"),
+        ($status | ConvertTo-Json), $utf8NoBom)
+}
+
 if ($Takeover) {
     Stop-GuiOwner
 }
@@ -547,6 +576,15 @@ try {
         }
         "HeadingStatus" {
             [void](Invoke-Protocol "heading stat" @("HSTAT ", "ERR "))
+        }
+        "LineStatus" {
+            $response = Invoke-Protocol "line stat" @("LSTAT ", "ERR ")
+            if ($response.StartsWith("LSTAT ")) {
+                Save-LineStatus (Parse-Status $response)
+            }
+        }
+        "LineCal" {
+            [void](Invoke-Protocol "line cal" @("OK LINE CAL", "ERR "))
         }
         "Run" {
             $runCommand = "spd run"

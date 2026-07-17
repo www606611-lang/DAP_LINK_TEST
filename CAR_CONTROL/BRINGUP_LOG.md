@@ -804,3 +804,32 @@ near `-0.87 degrees`. Correction remained between approximately `-60` and
 and Heading updates, and `17 ms` for an LCD slice. The run ended with result
 zero and high impedance. The operator confirmed the ground path was acceptable
 and did not show an exaggerated S shape.
+
+## 2026-07-17: eight-channel line-sensor bring-up
+
+The board schematic maps the line-sensor connector to `PA17/SCL` and
+`PA16/SDA`. A polling I2C1 MCU driver and a separate external-device driver
+were added without changing the validated motor, speed, position, Yaw, or
+Heading loops. The module responds at 7-bit address `0x12`; firmware writes
+control register `0x01`, reads data register `0x30`, and samples every `20 ms`.
+The eight active-low channel weights are:
+
+```text
+-35, -25, -15, -5, +5, +15, +25, +35
+```
+
+Physical static tests produced:
+
+```text
+center:  raw=0xE7 mask=0x18 count=2 error=  0 seen=1
+left:    raw=0x3F mask=0xC0 count=2 error=-30 seen=1
+right:   raw=0xFC mask=0x03 count=2 error=+30 seen=1
+no line: raw=0xFF mask=0x00 count=0          seen=0
+```
+
+The center reading repeated identically across five queries. After more than
+23,000 samples, both the device read-error count and I2C bus-recovery count
+remained zero. All checks were performed with the motor outputs in high
+impedance. The retained `line_error` during `seen=0` records the last observed
+side and is not a valid current-line measurement; future control must always
+gate it with `line_seen`.

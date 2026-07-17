@@ -15,7 +15,7 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | Encoder channel 0 / motor A / left wheel | PB0 A, PB1 B; forward sign inverted | Bench confirmed | Physical board, hand-turn calibration, and powered left-wheel test |
 | Encoder channel 1 / motor B / right wheel | PB2 A, PB3 B; forward sign native | Bench confirmed | Hand-turn and corrected powered-motor tests both produce positive forward feedback |
 | ICM20948 IMU I2C0 | PA0 SDA, PA1 SCL | Bench confirmed | Module responds at 7-bit address `0x69`; `WHO_AM_I=0xEA`; 100 Hz reads verified with zero I2C errors |
-| Line sensor I2C | PA16 SDA, PA17 SCL | Pending | Old firmware only |
+| Eight-channel line sensor I2C1 | PA16 SDA, PA17 SCL | Bench confirmed | Board CN1 pins 3/2; 7-bit address `0x12`; active-low channels; centered, left, right, and no-line states verified with zero I2C errors |
 | K230 UART | PA21 TX, PA22 RX in old firmware | Pending | Legacy firmware mapping; not enabled yet |
 | Bluetooth UART3 | PA26 TX, PA25 RX | Verified at 115200 baud | JDY-31A reports `BAUD=8`; all Tianmengxing pins are available on the headers |
 | CAN | PA12/PA13 or PA26/PA27 | Conflict | PA26 is now reserved for Bluetooth UART3 TX; CAN remains disabled |

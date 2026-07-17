@@ -16,6 +16,7 @@ const SPI           = scripting.addModule("/ti/driverlib/SPI", {}, false);
 const SPI_LCD       = SPI.addInstance();
 const I2C           = scripting.addModule("/ti/driverlib/I2C", {}, false);
 const IMU_I2C       = I2C.addInstance();
+const LINE_I2C      = I2C.addInstance();
 const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
 const BLUETOOTH_UART = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
@@ -175,6 +176,18 @@ IMU_I2C.peripheral.sdaPin.$assign       = "PA0";
 IMU_I2C.peripheral.sclPin.$assign       = "PA1";
 IMU_I2C.sdaPinConfig.$name              = "IMU_I2C_SDA_PIN";
 IMU_I2C.sclPinConfig.$name              = "IMU_I2C_SCL_PIN";
+
+LINE_I2C.$name                           = "I2C_1";
+LINE_I2C.basicEnableController           = true;
+LINE_I2C.advDigitalGlitchFilter          = "CLOCKS_1";
+LINE_I2C.enableDMAEvent1                 = false;
+LINE_I2C.enableDMAEvent2                 = false;
+LINE_I2C.basicControllerStandardBusSpeed = "Fast";
+LINE_I2C.peripheral.$assign              = "I2C1";
+LINE_I2C.peripheral.sdaPin.$assign       = "PA16";
+LINE_I2C.peripheral.sclPin.$assign       = "PA17";
+LINE_I2C.sdaPinConfig.$name              = "LINE_I2C_SDA_PIN";
+LINE_I2C.sclPinConfig.$name              = "LINE_I2C_SCL_PIN";
 
 BLUETOOTH_UART.$name                            = "BLUETOOTH_UART";
 BLUETOOTH_UART.targetBaudRate                   = 115200;

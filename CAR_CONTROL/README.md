@@ -159,6 +159,32 @@ deadband, and a `400 pps` maximum correction. The bring-up profile drives at
 VOFA+ Yaw channels carry target, current, error, rate, correction, and the two
 measured wheel speeds.
 
+## Reusable line-sensor API
+
+`drivers/device/line_sensor/line_sensor.h` owns the external eight-channel
+module protocol and uses the polling I2C1 driver on `PA16/PA17`:
+
+```c
+LineSensor_Init(now_ms);
+LineSensor_Task(now_ms);
+LineSensor_RequestCalibration(now_ms);
+LineSensor_GetSnapshot(&snapshot);
+```
+
+The board connector is `5 V, PA17/SCL, PA16/SDA, GND`. The module uses 7-bit
+address `0x12`, control register `0x01`, and data register `0x30`. Channels are
+active-low and use weights `-35, -25, -15, -5, 5, 15, 25, 35`, so left is
+negative and right is positive. Sampling runs every `20 ms`; calibration and
+boot delays are nonblocking. `line_seen` is the validity flag for
+`line_error`: when the line is lost, the last error is intentionally retained
+for a future recovery policy and must not be treated as a current observation.
+
+Bluetooth commands `line stat` and `line cal` expose sensor and I2C health
+without arming the motors. The CLI actions are `LineStatus` and `LineCal`, and
+the latest parsed state is written to `latest_line_status.json`. At idle the
+LCD footer shows the eight active bits, signed error, and `LINE`, `MISS`,
+`CAL`, or `ERR`.
+
 ## Reusable ICM20948 API
 
 `drivers/device/icm20948/icm20948.h` owns the external IMU protocol and uses
@@ -338,6 +364,17 @@ g_car_imu_quaternion_y_million
 g_car_imu_quaternion_z_million
 g_car_imu_attitude_valid
 g_car_imu_stationary
+g_car_line_sensor_state
+g_car_line_sensor_raw
+g_car_line_sensor_active_mask
+g_car_line_sensor_active_count
+g_car_line_sensor_error
+g_car_line_sensor_sample_count
+g_car_line_sensor_read_error_count
+g_car_line_sensor_calibration_count
+g_car_line_sensor_last_result
+g_car_line_sensor_seen
+g_car_line_sensor_ready
 g_car_encoder_count_difference
 g_car_encoder_speed_difference_pps
 ```

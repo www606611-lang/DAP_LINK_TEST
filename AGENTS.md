@@ -99,6 +99,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 - LCD dynamic updates are sliced to avoid the former 55-62 ms control stalls.
 - Continuous Heading control is ground validated with the promoted defaults
   recorded in `CAR_CONTROL/BRINGUP_LOG.md`.
-- The next integration step is composing Heading correction with position and
-  line-tracking base-speed commands. Preserve the validated standalone loops
-  while introducing that coordination layer.
+- The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
+  left, right, and no-line states with zero I2C errors.
+- The current work in progress is the supervised line-tracking outer loop.
+  Preserve the validated standalone speed, position, Yaw, and Heading loops;
+  do not commit line-tracking motion code until its ground test is accepted.

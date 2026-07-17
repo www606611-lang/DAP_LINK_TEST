@@ -11,6 +11,7 @@
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
+#include "line_sensor_bringup.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "runtime_metrics.h"
@@ -144,6 +145,17 @@ volatile int32_t g_car_heading_right_target_pps;
 volatile uint32_t g_car_heading_update_count;
 volatile uint32_t g_car_heading_elapsed_ms;
 volatile uint32_t g_car_heading_last_result;
+volatile uint32_t g_car_line_sensor_state;
+volatile uint32_t g_car_line_sensor_raw;
+volatile uint32_t g_car_line_sensor_active_mask;
+volatile uint32_t g_car_line_sensor_active_count;
+volatile int32_t g_car_line_sensor_error;
+volatile uint32_t g_car_line_sensor_sample_count;
+volatile uint32_t g_car_line_sensor_read_error_count;
+volatile uint32_t g_car_line_sensor_calibration_count;
+volatile uint32_t g_car_line_sensor_last_result;
+volatile bool g_car_line_sensor_seen;
+volatile bool g_car_line_sensor_ready;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 volatile uint32_t g_car_jdy31_config_state;
@@ -186,6 +198,7 @@ int main(void)
     PositionBringupTest_Init(ResetDiagnostics_IsSuspicious());
     YawBringupTest_Init(ResetDiagnostics_IsSuspicious());
     HeadingBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    LineSensorBringup_Init(delay_get_ms());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
         CAR_JDY31_CONFIGURE_ON_BOOT != 0);
@@ -232,6 +245,7 @@ int main(void)
             pb5_release_event;
         EncoderInput_Task(now_ms);
         ICM20948_Task(now_ms);
+        LineSensorBringup_Task(now_ms);
         BluetoothUart_Task(now_ms);
         JDY31_ConfigTask(now_ms);
         if (!JDY31_ConfigIsExclusive()) {
@@ -356,6 +370,9 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     char error_text[16];
     char rate_text[16];
     char timer_text[12];
+    char line_text[24];
+    char line_state_text[9];
+    char line_bits[9];
     const char *key_text = "KEY ----";
     uint16_t key_color = ST7789_COLOR_WHITE;
     int32_t angle_mdeg = g_car_imu_yaw_mdeg;
@@ -366,12 +383,18 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     int32_t error_mdeg = g_car_yaw_error_mdeg;
     uint32_t display_elapsed_ms = g_car_yaw_elapsed_ms;
     bool heading_active = HeadingBringupTest_IsActive();
+    bool yaw_active = YawBringupTest_IsActive();
+    bool angle_motion_active = heading_active || yaw_active;
     const char *control_state = heading_active ?
         HeadingBringupTest_GetStateText() :
         YawBringupTest_GetStateText();
     uint16_t angle_color = (g_car_imu_ready &&
         g_car_imu_attitude_valid) ? ST7789_COLOR_YELLOW : ST7789_COLOR_RED;
     uint16_t state_color = ST7789_COLOR_WHITE;
+    uint16_t line_color = ST7789_COLOR_RED;
+    uint8_t line_index;
+    int32_t line_error_magnitude = g_car_line_sensor_error;
+    char line_error_sign = '+';
 
     (void) now_ms;
 
@@ -432,6 +455,41 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     (void) snprintf(timer_text, sizeof(timer_text), "T%2lu.%02lus",
         (unsigned long) (display_elapsed_ms / 1000U),
         (unsigned long) ((display_elapsed_ms % 1000U) / 10U));
+
+    for (line_index = 0U; line_index < 8U; line_index++) {
+        uint8_t bit = (uint8_t) (0x80U >> line_index);
+
+        line_bits[line_index] =
+            ((g_car_line_sensor_active_mask & bit) != 0U) ? '1' : '0';
+    }
+    line_bits[8] = '\0';
+    if (line_error_magnitude < 0) {
+        line_error_sign = '-';
+        line_error_magnitude = -line_error_magnitude;
+    }
+    if (line_error_magnitude > 99) {
+        line_error_magnitude = 99;
+    }
+    (void) snprintf(line_text, sizeof(line_text), "L%s E%c%02ld",
+        line_bits, line_error_sign, (long) line_error_magnitude);
+    if (g_car_line_sensor_ready) {
+        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
+            g_car_line_sensor_seen ? "LINE" : "MISS");
+        line_color = g_car_line_sensor_seen ?
+            ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW;
+    } else if ((g_car_line_sensor_state ==
+            (uint32_t) LINE_SENSOR_STATE_BOOT_WAIT) ||
+        (g_car_line_sensor_state ==
+            (uint32_t) LINE_SENSOR_STATE_CALIBRATION_ON) ||
+        (g_car_line_sensor_state ==
+            (uint32_t) LINE_SENSOR_STATE_CALIBRATION_OFF_WAIT)) {
+        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
+            "CAL");
+        line_color = ST7789_COLOR_YELLOW;
+    } else {
+        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
+            "ERR");
+    }
 
     if (g_car_pb21_pressed) {
         key_text = "KEY PB21";
@@ -496,13 +554,24 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
             break;
 
         case APP_DISPLAY_PHASE_FOOTER:
-            ST7789_PrintfFast(8U, 151U, ST7789_8X16,
-                ST7789_COLOR_WHITE, ST7789_COLOR_BLACK,
-                "RATE %s", rate_text);
-            ST7789_ShowAsciiStringFast(120U, 151U, key_text,
-                ST7789_8X16, key_color, ST7789_COLOR_BLACK);
-            ST7789_ShowAsciiStringFast(224U, 151U, command_text,
-                ST7789_8X16, ST7789_COLOR_WHITE, ST7789_COLOR_BLACK);
+            if (angle_motion_active) {
+                ST7789_PrintfFast(8U, 151U, ST7789_8X16,
+                    ST7789_COLOR_WHITE, ST7789_COLOR_BLACK,
+                    "RATE %s", rate_text);
+                ST7789_ShowAsciiStringFast(120U, 151U, key_text,
+                    ST7789_8X16, key_color, ST7789_COLOR_BLACK);
+                ST7789_ShowAsciiStringFast(224U, 151U, command_text,
+                    ST7789_8X16, ST7789_COLOR_WHITE,
+                    ST7789_COLOR_BLACK);
+            } else {
+                ST7789_ShowAsciiStringFast(8U, 151U, line_text,
+                    ST7789_8X16, line_color, ST7789_COLOR_BLACK);
+                ST7789_ShowAsciiStringFast(120U, 151U, key_text,
+                    ST7789_8X16, key_color, ST7789_COLOR_BLACK);
+                ST7789_ShowAsciiStringFast(224U, 151U,
+                    line_state_text, ST7789_8X16, line_color,
+                    ST7789_COLOR_BLACK);
+            }
             break;
 
         case APP_DISPLAY_PHASE_HEADER:
@@ -550,6 +619,7 @@ static void app_update_debug_state(void)
     wheel_position_control_snapshot_t position;
     wheel_yaw_control_snapshot_t yaw;
     wheel_heading_control_snapshot_t heading;
+    line_sensor_snapshot_t line_sensor;
     icm20948_snapshot_t imu;
     jdy31_config_snapshot_t jdy31;
 
@@ -677,6 +747,23 @@ static void app_update_debug_state(void)
             g_car_yaw_last_result = (uint32_t) heading.last_result;
             g_car_yaw_settled = false;
         }
+    }
+
+    if (LineSensorBringup_GetSnapshot(&line_sensor)) {
+        g_car_line_sensor_state = (uint32_t) line_sensor.state;
+        g_car_line_sensor_raw = line_sensor.raw;
+        g_car_line_sensor_active_mask = line_sensor.active_mask;
+        g_car_line_sensor_active_count = line_sensor.active_count;
+        g_car_line_sensor_error = line_sensor.line_error;
+        g_car_line_sensor_sample_count = line_sensor.sample_count;
+        g_car_line_sensor_read_error_count =
+            line_sensor.read_error_count;
+        g_car_line_sensor_calibration_count =
+            line_sensor.calibration_count;
+        g_car_line_sensor_last_result =
+            (uint32_t) line_sensor.last_result;
+        g_car_line_sensor_seen = line_sensor.line_seen;
+        g_car_line_sensor_ready = line_sensor.ready;
     }
 
     if (ICM20948_GetSnapshot(&imu)) {

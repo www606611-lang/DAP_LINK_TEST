@@ -6,6 +6,8 @@
 #include "firmware_update.h"
 #include "heading_bringup_test.h"
 #include "icm20948.h"
+#include "i2c1_polling.h"
+#include "line_sensor_bringup.h"
 #include "position_bringup_test.h"
 #include "runtime_metrics.h"
 #include "speed_bringup_test.h"
@@ -43,6 +45,7 @@ static void speed_tuning_send_position_config(void);
 static void speed_tuning_send_position_status(void);
 static void speed_tuning_send_heading_config(void);
 static void speed_tuning_send_heading_status(void);
+static void speed_tuning_send_line_status(uint32_t now_ms);
 static void speed_tuning_send_yaw_config(void);
 static void speed_tuning_send_yaw_status(void);
 static void speed_tuning_send_imu_status(uint32_t now_ms);
@@ -89,6 +92,24 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
             BluetoothUart_WriteText("OK FW UPDATE\r\n");
         } else {
             BluetoothUart_WriteText("ERR motor_active\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        speed_tuning_send_line_status(now_ms);
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "line") == 0) &&
+        (strcmp(tokens[1], "cal") == 0)) {
+        if (!BoardMotorSafe_IsHighImpedance()) {
+            BluetoothUart_WriteText("ERR motor_active\r\n");
+        } else if (!LineSensorBringup_RequestCalibration()) {
+            BluetoothUart_WriteText("ERR busy\r\n");
+        } else {
+            BluetoothUart_WriteText("OK LINE CAL\r\n");
         }
         return;
     }
@@ -996,6 +1017,52 @@ static void speed_tuning_send_heading_status(void)
     speed_tuning_write_u32(heading.max_interval_ms);
     BluetoothUart_WriteText(" lcdMax=");
     speed_tuning_write_u32(runtime.display_max_duration_ms);
+    BluetoothUart_WriteText("\r\n");
+}
+
+static void speed_tuning_send_line_status(uint32_t now_ms)
+{
+    line_sensor_snapshot_t sensor;
+    i2c1_polling_snapshot_t bus;
+    uint32_t sample_age_ms;
+
+    if (!LineSensorBringup_GetSnapshot(&sensor) ||
+        !I2C1Polling_GetSnapshot(&bus)) {
+        BluetoothUart_WriteText("ERR status\r\n");
+        return;
+    }
+    sample_age_ms = now_ms - sensor.last_sample_ms;
+    BluetoothUart_WriteText("LSTAT state=");
+    BluetoothUart_WriteText(LineSensorBringup_GetStateText());
+    BluetoothUart_WriteText(" raw=");
+    speed_tuning_write_u32(sensor.raw);
+    BluetoothUart_WriteText(" mask=");
+    speed_tuning_write_u32(sensor.active_mask);
+    BluetoothUart_WriteText(" count=");
+    speed_tuning_write_u32(sensor.active_count);
+    BluetoothUart_WriteText(" error=");
+    speed_tuning_write_i32(sensor.line_error);
+    BluetoothUart_WriteText(" seen=");
+    speed_tuning_write_u32(sensor.line_seen ? 1U : 0U);
+    BluetoothUart_WriteText(" samples=");
+    speed_tuning_write_u32(sensor.sample_count);
+    BluetoothUart_WriteText(" errors=");
+    speed_tuning_write_u32(sensor.read_error_count);
+    BluetoothUart_WriteText(" cal=");
+    speed_tuning_write_u32(sensor.calibration_count);
+    BluetoothUart_WriteText(" age=");
+    speed_tuning_write_u32(sample_age_ms);
+    BluetoothUart_WriteText(" busTx=");
+    speed_tuning_write_u32(bus.transaction_count);
+    BluetoothUart_WriteText(" busRec=");
+    speed_tuning_write_u32(bus.recovery_count);
+    BluetoothUart_WriteText(" busRes=");
+    speed_tuning_write_u32((uint32_t) bus.last_result);
+    BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) sensor.last_result);
+    BluetoothUart_WriteText(" hz=");
+    speed_tuning_write_u32(
+        BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
     BluetoothUart_WriteText("\r\n");
 }
 
