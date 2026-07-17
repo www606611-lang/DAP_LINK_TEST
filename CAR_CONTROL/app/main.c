@@ -8,6 +8,7 @@
 #include "delay.h"
 #include "encoder_input.h"
 #include "firmware_update.h"
+#include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "position_bringup_test.h"
@@ -18,6 +19,7 @@
 #include "st7789.h"
 #include "ti_msp_dl_config.h"
 #include "wheel_position_control.h"
+#include "wheel_heading_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
 #include "yaw_bringup_test.h"
@@ -129,6 +131,19 @@ volatile uint32_t g_car_yaw_update_count;
 volatile uint32_t g_car_yaw_elapsed_ms;
 volatile uint32_t g_car_yaw_last_result;
 volatile bool g_car_yaw_settled;
+volatile uint32_t g_car_heading_test_state;
+volatile uint32_t g_car_heading_test_run_count;
+volatile int32_t g_car_heading_target_mdeg;
+volatile int32_t g_car_heading_current_mdeg;
+volatile int32_t g_car_heading_error_mdeg;
+volatile int32_t g_car_heading_rate_mdps;
+volatile int32_t g_car_heading_base_target_pps;
+volatile int32_t g_car_heading_correction_pps;
+volatile int32_t g_car_heading_left_target_pps;
+volatile int32_t g_car_heading_right_target_pps;
+volatile uint32_t g_car_heading_update_count;
+volatile uint32_t g_car_heading_elapsed_ms;
+volatile uint32_t g_car_heading_last_result;
 volatile int32_t g_car_encoder_count_difference;
 volatile int32_t g_car_encoder_speed_difference_pps;
 volatile uint32_t g_car_jdy31_config_state;
@@ -166,9 +181,11 @@ int main(void)
     WheelSpeedControl_Init(delay_get_ms());
     WheelPositionControl_Init(delay_get_ms());
     WheelYawControl_Init(delay_get_ms());
+    WheelHeadingControl_Init(delay_get_ms());
     SpeedBringupTest_Init(ResetDiagnostics_IsSuspicious());
     PositionBringupTest_Init(ResetDiagnostics_IsSuspicious());
     YawBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    HeadingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
         CAR_JDY31_CONFIGURE_ON_BOOT != 0);
@@ -232,6 +249,9 @@ int main(void)
                     POSITION_BRINGUP_TEST_RUNNING) {
                 PositionBringupTest_RequestStop();
                 g_car_last_button_yaw_mdeg = 0;
+            } else if (HeadingBringupTest_IsActive()) {
+                HeadingBringupTest_RequestStop();
+                g_car_last_button_yaw_mdeg = 0;
             } else if (YawBringupTest_IsActive()) {
                 YawBringupTest_RequestStop();
                 g_car_last_button_yaw_mdeg = 0;
@@ -252,8 +272,10 @@ int main(void)
         SpeedBringupTest_Task(now_ms, false);
         PositionBringupTest_Task(now_ms, false);
         YawBringupTest_Task(now_ms);
+        HeadingBringupTest_Task(now_ms);
         WheelPositionControl_Task(now_ms);
         WheelYawControl_Task(now_ms);
+        WheelHeadingControl_Task(now_ms);
         WheelSpeedControl_Task(now_ms);
 
         if (pb21_press_event) {
@@ -343,7 +365,10 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
     int32_t target_mdeg = g_car_yaw_target_mdeg;
     int32_t error_mdeg = g_car_yaw_error_mdeg;
     uint32_t display_elapsed_ms = g_car_yaw_elapsed_ms;
-    const char *control_state = YawBringupTest_GetStateText();
+    bool heading_active = HeadingBringupTest_IsActive();
+    const char *control_state = heading_active ?
+        HeadingBringupTest_GetStateText() :
+        YawBringupTest_GetStateText();
     uint16_t angle_color = (g_car_imu_ready &&
         g_car_imu_attitude_valid) ? ST7789_COLOR_YELLOW : ST7789_COLOR_RED;
     uint16_t state_color = ST7789_COLOR_WHITE;
@@ -390,7 +415,10 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
         command_sign = '-';
         command_magnitude = -command_magnitude;
     }
-    if (command_mdeg == 0) {
+    if (heading_active) {
+        (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
+            (long) g_car_heading_base_target_pps);
+    } else if (command_mdeg == 0) {
         (void) snprintf(command_text, sizeof(command_text), "CMD: ---");
     } else {
         (void) snprintf(command_text, sizeof(command_text), "CMD:%c%03ld",
@@ -430,22 +458,28 @@ static void app_display_update(uint32_t now_ms, uint8_t phase)
         }
     }
 
-    switch (YawBringupTest_GetState()) {
-        case YAW_BRINGUP_TEST_ARMING:
-            state_color = ST7789_COLOR_YELLOW;
-            break;
-        case YAW_BRINGUP_TEST_RUNNING:
-            state_color = ST7789_COLOR_CYAN;
-            break;
-        case YAW_BRINGUP_TEST_COMPLETE:
-            state_color = ST7789_COLOR_GREEN;
-            break;
-        case YAW_BRINGUP_TEST_ABORTED:
-        case YAW_BRINGUP_TEST_LOCKED:
-            state_color = ST7789_COLOR_RED;
-            break;
-        default:
-            break;
+    if (heading_active) {
+        state_color = (HeadingBringupTest_GetState() ==
+            HEADING_BRINGUP_TEST_ARMING) ?
+            ST7789_COLOR_YELLOW : ST7789_COLOR_CYAN;
+    } else {
+        switch (YawBringupTest_GetState()) {
+            case YAW_BRINGUP_TEST_ARMING:
+                state_color = ST7789_COLOR_YELLOW;
+                break;
+            case YAW_BRINGUP_TEST_RUNNING:
+                state_color = ST7789_COLOR_CYAN;
+                break;
+            case YAW_BRINGUP_TEST_COMPLETE:
+                state_color = ST7789_COLOR_GREEN;
+                break;
+            case YAW_BRINGUP_TEST_ABORTED:
+            case YAW_BRINGUP_TEST_LOCKED:
+                state_color = ST7789_COLOR_RED;
+                break;
+            default:
+                break;
+        }
     }
 
     switch (phase) {
@@ -515,6 +549,7 @@ static void app_update_debug_state(void)
     wheel_speed_control_snapshot_t speed;
     wheel_position_control_snapshot_t position;
     wheel_yaw_control_snapshot_t yaw;
+    wheel_heading_control_snapshot_t heading;
     icm20948_snapshot_t imu;
     jdy31_config_snapshot_t jdy31;
 
@@ -541,6 +576,9 @@ static void app_update_debug_state(void)
     g_car_position_test_run_count = PositionBringupTest_GetRunCount();
     g_car_yaw_test_state = (uint32_t) YawBringupTest_GetState();
     g_car_yaw_test_run_count = YawBringupTest_GetRunCount();
+    g_car_heading_test_state =
+        (uint32_t) HeadingBringupTest_GetState();
+    g_car_heading_test_run_count = HeadingBringupTest_GetRunCount();
     if (JDY31_ConfigGetSnapshot(&jdy31)) {
         g_car_jdy31_config_state = (uint32_t) jdy31.state;
         g_car_jdy31_uart_baud = jdy31.uart_baud;
@@ -601,6 +639,44 @@ static void app_update_debug_state(void)
         g_car_yaw_elapsed_ms = yaw.elapsed_ms;
         g_car_yaw_last_result = (uint32_t) yaw.last_result;
         g_car_yaw_settled = yaw.settled;
+    }
+
+    if (WheelHeadingControl_GetSnapshot(&heading)) {
+        g_car_heading_target_mdeg =
+            app_round_float(heading.target_yaw_deg * 1000.0f);
+        g_car_heading_current_mdeg =
+            app_round_float(heading.current_yaw_deg * 1000.0f);
+        g_car_heading_error_mdeg =
+            app_round_float(heading.error_deg * 1000.0f);
+        g_car_heading_rate_mdps =
+            app_round_float(heading.yaw_rate_dps * 1000.0f);
+        g_car_heading_base_target_pps =
+            app_round_float(heading.base_speed_target_pps);
+        g_car_heading_correction_pps =
+            app_round_float(heading.correction_target_pps);
+        g_car_heading_left_target_pps =
+            app_round_float(heading.left_speed_target_pps);
+        g_car_heading_right_target_pps =
+            app_round_float(heading.right_speed_target_pps);
+        g_car_heading_update_count = heading.update_count;
+        g_car_heading_elapsed_ms = heading.elapsed_ms;
+        g_car_heading_last_result = (uint32_t) heading.last_result;
+        if (heading.running) {
+            g_car_yaw_target_mdeg = g_car_heading_target_mdeg;
+            g_car_yaw_current_mdeg = g_car_heading_current_mdeg;
+            g_car_yaw_error_mdeg = g_car_heading_error_mdeg;
+            g_car_yaw_rate_mdps = g_car_heading_rate_mdps;
+            g_car_yaw_turn_target_pps =
+                g_car_heading_correction_pps;
+            g_car_yaw_left_target_pps =
+                g_car_heading_left_target_pps;
+            g_car_yaw_right_target_pps =
+                g_car_heading_right_target_pps;
+            g_car_yaw_update_count = heading.update_count;
+            g_car_yaw_elapsed_ms = heading.elapsed_ms;
+            g_car_yaw_last_result = (uint32_t) heading.last_result;
+            g_car_yaw_settled = false;
+        }
     }
 
     if (ICM20948_GetSnapshot(&imu)) {

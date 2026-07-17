@@ -92,11 +92,11 @@ WheelSpeedControl_GetSnapshot(&snapshot);
 
 Targets are encoder pulses per second and are limited to `-6000..6000`. A
 successful update submits both PWM commands together. Exactly one of `SPEED`,
-`POSITION`, `YAW`, or `LINE_TRACKING` owns the inner loop. The owner must submit
-fresh targets at least every 100 ms; the inner loop refreshes a separate 200 ms
-hardware supervisor lease only while it remains healthy. Invalid targets,
-stale outer-loop commands, encoder access failure, output failure, or ownership
-loss return the board to high impedance.
+`POSITION`, `YAW`, `HEADING`, or `LINE_TRACKING` owns the inner loop. The owner
+must submit fresh targets at least every 100 ms; the inner loop refreshes a
+separate 200 ms hardware supervisor lease only while it remains healthy.
+Invalid targets, stale outer-loop commands, encoder access failure, output
+failure, or ownership loss return the board to high impedance.
 
 ## Reusable position-control API
 
@@ -128,6 +128,36 @@ a bounded recovery request, never exceeding the configured maximum speed.
 The position bring-up application also provides
 `PositionBringupTest_RequestMove(delta_counts)` for one-shot physical-button
 moves without changing the remote single-run or stress-profile target.
+
+## Reusable heading-control API
+
+`control/wheel_heading_control.h` combines a linear base-speed command with a
+differential Yaw correction while retaining the validated wheel-speed inner
+loop:
+
+```c
+WheelHeadingControl_SetConfig(&config);
+WheelHeadingControl_StartHoldCurrent(base_speed_pps, now_ms);
+WheelHeadingControl_SetCommand(target_yaw_deg, base_speed_pps, now_ms);
+WheelHeadingControl_Task(now_ms);
+WheelHeadingControl_Stop(reason);
+WheelHeadingControl_GetSnapshot(&snapshot);
+```
+
+The mixer uses `left = base - correction` and
+`right = base + correction`. Unlike the one-shot pivot Yaw controller, Heading
+control is continuous, has no minimum correction, and does not stop merely
+because it reaches the target. Its caller must refresh the target and base
+speed within 100 ms. A stale command, stale IMU sample, inner-loop ownership
+loss, or invalid target stops both wheels through the supervisor.
+
+The ground-validated defaults are `Kp=30`, `Ki=3`, `Kd=1.5`, a `0.5 degree`
+deadband, and a `400 pps` maximum correction. The bring-up profile drives at
+`1200 pps` for `6 s` with a `650 permille` PWM limit. Bluetooth commands are
+`heading get/set/run/stat/stop`; CLI runs save `latest_heading_status.json` and
+`latest_heading_telemetry.csv`. During Heading motion, the existing seven
+VOFA+ Yaw channels carry target, current, error, rate, correction, and the two
+measured wheel speeds.
 
 ## Reusable ICM20948 API
 

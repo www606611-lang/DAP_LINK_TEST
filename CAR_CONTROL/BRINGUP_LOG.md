@@ -770,3 +770,37 @@ four slices at `50 ms` intervals. The complete screen still updates in about
 to `21 ms`. The run completed at `89.009 degrees` with result zero and high
 impedance. Ground testing confirmed a substantial improvement in smoothness,
 so a full asynchronous LCD state machine is not currently justified.
+
+## 2026-07-17: continuous Heading control
+
+`WheelHeadingControl` adds a continuous outer loop for moving straight while
+holding a Yaw target. It owns the speed loop through the dedicated `HEADING`
+supervisor mode and mixes a base-speed command with equal-and-opposite Yaw
+correction. A separate 100 ms command lease prevents a stalled application
+from leaving the vehicle moving. The existing pivot Yaw controller and its
+ground-tuned parameters are unchanged.
+
+The first ground run used `Kp=15`, `Ki=0`, `Kd=1.5`, `1000 pps` base speed,
+and a `300 pps` correction limit for `2.5 s`. It completed safely but was too
+short for useful path assessment. Telemetry reached `-5.017 degrees`; the
+correction direction was correct but peaked at only about `70 pps`, confirming
+insufficient authority.
+
+The accepted run used:
+
+```text
+Kp / Ki / Kd:        30.0 / 3.0 / 1.5
+base speed:          1200 pps
+maximum correction:  400 pps
+deadband:               0.5 degrees
+PWM limit:             650 permille
+duration:             6000 ms
+```
+
+Across the longer run, heading reached a maximum of `+2.386 degrees`, crossed
+the target once, reached `-1.098 degrees` on the opposite side, and finished
+near `-0.87 degrees`. Correction remained between approximately `-60` and
+`+22 pps`; timing maxima remained `20 ms` for the main loop, `26 ms` for IMU
+and Heading updates, and `17 ms` for an LCD slice. The run ended with result
+zero and high impedance. The operator confirmed the ground path was acceptable
+and did not show an exaggerated S shape.

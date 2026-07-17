@@ -17,6 +17,7 @@
 #define WHEEL_SPEED_TARGET_SLEW_PPS_PER_S          2000.0f
 #define WHEEL_SPEED_POSITION_TARGET_SLEW_PPS_PER_S 4000.0f
 #define WHEEL_SPEED_YAW_TARGET_SLEW_PPS_PER_S      6000.0f
+#define WHEEL_SPEED_HEADING_TARGET_SLEW_PPS_PER_S  4000.0f
 #define WHEEL_SPEED_DEFAULT_OUTPUT_MAX  1000U
 
 static pid_controller_t g_left_pid;
@@ -527,6 +528,9 @@ static float wheel_speed_control_target_slew_rate(void)
     }
     if (g_owner_mode == CAR_CONTROL_MODE_YAW) {
         return WHEEL_SPEED_YAW_TARGET_SLEW_PPS_PER_S;
+    }
+    if (g_owner_mode == CAR_CONTROL_MODE_HEADING) {
+        return WHEEL_SPEED_HEADING_TARGET_SLEW_PPS_PER_S;
     }
     return WHEEL_SPEED_TARGET_SLEW_PPS_PER_S;
 }

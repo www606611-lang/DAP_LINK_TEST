@@ -91,6 +91,7 @@ add_custom_target(car_bootloader_syscfg
 
 add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/firmware_update.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/heading_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/position_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/runtime_metrics.c"
@@ -103,6 +104,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_wheel_drive.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/control_supervisor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/pid.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_heading_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_position_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_speed_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_yaw_control.c"

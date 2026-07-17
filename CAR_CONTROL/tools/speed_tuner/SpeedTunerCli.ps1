@@ -6,7 +6,8 @@ param(
         "Stop", "Status", "PositionGet", "PositionSet", "PositionRun",
         "PositionStress", "PositionStop", "PositionStatus",
         "ImuStatus", "ImuZero", "YawGet", "YawSet", "YawRun",
-        "YawStop", "YawStatus")]
+        "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
+        "HeadingRun", "HeadingStop", "HeadingStatus")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -37,6 +38,14 @@ param(
     [single]$YawSettleRate = 5.0,
     [uint16]$YawSettleTime = 300,
     [uint16]$YawTimeout = 5000,
+    [single]$HeadingKp = 30.0,
+    [single]$HeadingKi = 3.0,
+    [single]$HeadingKd = 1.5,
+    [single]$HeadingBaseSpeed = 1200.0,
+    [single]$HeadingMaxCorrection = 400.0,
+    [uint16]$HeadingLimit = 650,
+    [single]$HeadingDeadband = 0.5,
+    [uint16]$HeadingDuration = 6000,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -236,6 +245,29 @@ function Get-YawSetCommand {
         $YawBoost.ToString($culture))
 }
 
+function Get-HeadingSetCommand {
+    if (($HeadingKp -le 0) -or ($HeadingKp -gt 50) -or
+        ($HeadingKi -lt 0) -or ($HeadingKi -gt 20) -or
+        ($HeadingKd -lt 0) -or ($HeadingKd -gt 20) -or
+        ([Math]::Abs($HeadingBaseSpeed) -lt 100) -or
+        (([Math]::Abs($HeadingBaseSpeed) + $HeadingMaxCorrection) -gt 6000) -or
+        ($HeadingMaxCorrection -lt 10) -or
+        ($HeadingLimit -lt 100) -or ($HeadingLimit -gt 1000) -or
+        ($HeadingDeadband -lt 0) -or ($HeadingDeadband -gt 15) -or
+        ($HeadingDuration -lt 500) -or ($HeadingDuration -gt 10000)) {
+        throw "Heading configuration is outside firmware range."
+    }
+    return ('heading set {0} {1} {2} {3} {4} {5} {6} {7}' -f
+        $HeadingKp.ToString('0.####', $culture),
+        $HeadingKi.ToString('0.####', $culture),
+        $HeadingKd.ToString('0.####', $culture),
+        $HeadingBaseSpeed.ToString('0.####', $culture),
+        $HeadingMaxCorrection.ToString('0.####', $culture),
+        $HeadingLimit.ToString($culture),
+        $HeadingDeadband.ToString('0.####', $culture),
+        $HeadingDuration.ToString($culture))
+}
+
 function Parse-Status([string]$line) {
     $values = @{}
     foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
@@ -336,6 +368,57 @@ function Save-YawStatus([hashtable]$values, [string]$csvPath) {
     }
 }
 
+function Save-HeadingStatus([hashtable]$values, [string]$csvPath) {
+    $timestamp = [DateTime]::Now.ToString("o")
+    $status = [ordered]@{
+        timestamp = $timestamp
+        source = $transport
+        port = if ($transport -eq "tcp_bridge") {
+            "$BridgeHost`:$BridgePort"
+        } else { $Port }
+        state = $values['state']
+        target_mdeg = [int]$values['target']
+        current_mdeg = [int]$values['current']
+        error_mdeg = [int]$values['error']
+        yaw_rate_mdps = [int]$values['rate']
+        base_speed_pps = [int]$values['base']
+        correction_pps = [int]$values['corr']
+        left_target_pps = [int]$values['tL']
+        right_target_pps = [int]$values['tR']
+        left_speed_pps = [int]$values['vL']
+        right_speed_pps = [int]$values['vR']
+        left_output_permille = [int]$values['outL']
+        right_output_permille = [int]$values['outR']
+        result = [uint32]$values['res']
+        high_impedance = ($values['hz'] -eq '1')
+        loop_max_interval_ms = [uint32]$values['loopMax']
+        imu_max_interval_ms = [uint32]$values['imuMax']
+        heading_interval_ms = [uint32]$values['headDt']
+        heading_max_interval_ms = [uint32]$values['headMax']
+        lcd_max_duration_ms = [uint32]$values['lcdMax']
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $runtimeDir "latest_heading_status.json"),
+        ($status | ConvertTo-Json), $utf8NoBom)
+
+    if ($csvPath -ne "") {
+        $row = @(
+            $timestamp, $values['state'], $values['target'],
+            $values['current'], $values['error'], $values['rate'],
+            $values['base'], $values['corr'], $values['tL'],
+            $values['tR'], $values['vL'], $values['vR'],
+            $values['outL'], $values['outR'], $values['res'],
+            $values['hz'], $values['loopMax'], $values['imuMax'],
+            $values['headDt'], $values['headMax'],
+            $values['lcdMax']) -join ','
+        [System.IO.File]::AppendAllText(
+            $csvPath, "$row`r`n", $utf8NoBom)
+        [System.IO.File]::AppendAllText(
+            (Join-Path $runtimeDir "latest_heading_telemetry.csv"),
+            "$row`r`n", $utf8NoBom)
+    }
+}
+
 if ($Takeover) {
     Stop-GuiOwner
 }
@@ -344,6 +427,8 @@ try {
     $runCommand = $null
     $yawRunRequested = $false
     $yawRunActive = $false
+    $headingRunRequested = $false
+    $headingRunActive = $false
     $bridgeConnected = $false
     if ((-not $Takeover) -and (-not $DirectSerial)) {
         $bridgeConnected = Connect-Bridge
@@ -440,6 +525,28 @@ try {
         }
         "YawStatus" {
             [void](Invoke-Protocol "yaw stat" @("YSTAT ", "ERR "))
+        }
+        "HeadingGet" {
+            [void](Invoke-Protocol "heading get" @("OK HCFG ", "ERR "))
+        }
+        "HeadingSet" {
+            [void](Invoke-Protocol (Get-HeadingSetCommand) @("OK HCFG ", "ERR "))
+        }
+        "HeadingRun" {
+            if ($ApplyConfig) {
+                [void](Invoke-Protocol (Get-HeadingSetCommand) @("OK HCFG ", "ERR "))
+            } else {
+                [void](Invoke-Protocol "heading get" @("OK HCFG ", "ERR "))
+            }
+            [void](Invoke-Protocol "heading run" @("OK HEADING RUN", "ERR "))
+            $headingRunRequested = $true
+            $headingRunActive = $true
+        }
+        "HeadingStop" {
+            [void](Invoke-Protocol "heading stop" @("OK HEADING STOP", "ERR "))
+        }
+        "HeadingStatus" {
+            [void](Invoke-Protocol "heading stat" @("HSTAT ", "ERR "))
         }
         "Run" {
             $runCommand = "spd run"
@@ -553,10 +660,62 @@ try {
             throw "Yaw run ended in state=$terminalState result=$terminalResult high_z=$terminalHighZ."
         }
     }
+
+    if ($headingRunRequested) {
+        $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
+        $csvPath = Join-Path $runtimeDir "heading_run_$stamp.csv"
+        $latestCsvPath = Join-Path $runtimeDir "latest_heading_telemetry.csv"
+        $header = "timestamp,state,target_mdeg,current_mdeg,error_mdeg,yaw_rate_mdps,base_speed_pps,correction_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z,loop_max_interval_ms,imu_max_interval_ms,heading_interval_ms,heading_max_interval_ms,lcd_max_duration_ms`r`n"
+        [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
+        [System.IO.File]::WriteAllText($latestCsvPath, $header, $utf8NoBom)
+
+        $deadline = [DateTime]::Now.AddMilliseconds($RunTimeoutMs)
+        $finished = $false
+        $observedRunning = $false
+        $terminalState = $null
+        $terminalResult = $null
+        $terminalHighZ = $null
+        while ([DateTime]::Now -lt $deadline) {
+            Start-Sleep -Milliseconds $PollMs
+            $statusLine = Invoke-Protocol "heading stat" @("HSTAT ", "ERR ")
+            if (-not $statusLine.StartsWith("HSTAT ")) { continue }
+            $values = Parse-Status $statusLine
+            Save-HeadingStatus $values $csvPath
+            if ($values['state'] -eq 'RUN') {
+                $observedRunning = $true
+                continue
+            }
+            if ($observedRunning -and
+                ($values['state'] -in @('DONE', 'ABORT', 'LOCKED'))) {
+                $finished = $true
+                $terminalState = $values['state']
+                $terminalResult = $values['res']
+                $terminalHighZ = $values['hz']
+                $headingRunActive = $false
+                break
+            }
+        }
+        if (-not $finished) {
+            [void](Invoke-Protocol "heading stop" @("OK HEADING STOP", "ERR "))
+            $headingRunActive = $false
+            throw "Heading run did not reach a terminal state before timeout."
+        }
+        Write-Host "CAPTURE $csvPath"
+        if (($terminalState -ne 'DONE') -or ($terminalResult -ne '0') -or
+            ($terminalHighZ -ne '1')) {
+            throw "Heading run ended in state=$terminalState result=$terminalResult high_z=$terminalHighZ."
+        }
+    }
 } finally {
     if ($yawRunActive) {
         try {
             [void](Invoke-Protocol "yaw stop" @("OK YAW STOP", "ERR "))
+        } catch {
+        }
+    }
+    if ($headingRunActive) {
+        try {
+            [void](Invoke-Protocol "heading stop" @("OK HEADING STOP", "ERR "))
         } catch {
         }
     }

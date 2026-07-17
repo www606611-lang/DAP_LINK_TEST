@@ -4,11 +4,13 @@
 #include "board_motor_safe.h"
 #include "encoder_input.h"
 #include "firmware_update.h"
+#include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "position_bringup_test.h"
 #include "runtime_metrics.h"
 #include "speed_bringup_test.h"
 #include "wheel_position_control.h"
+#include "wheel_heading_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
 #include "yaw_bringup_test.h"
@@ -39,6 +41,8 @@ static void speed_tuning_send_config(void);
 static void speed_tuning_send_status(void);
 static void speed_tuning_send_position_config(void);
 static void speed_tuning_send_position_status(void);
+static void speed_tuning_send_heading_config(void);
+static void speed_tuning_send_heading_status(void);
 static void speed_tuning_send_yaw_config(void);
 static void speed_tuning_send_yaw_status(void);
 static void speed_tuning_send_imu_status(uint32_t now_ms);
@@ -172,6 +176,69 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
         return;
     }
     if ((token_count == 2U) &&
+        (strcmp(tokens[0], "heading") == 0) &&
+        (strcmp(tokens[1], "get") == 0)) {
+        speed_tuning_send_heading_config();
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "heading") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        speed_tuning_send_heading_status();
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "heading") == 0) &&
+        (strcmp(tokens[1], "run") == 0)) {
+        if (!YawBringupTest_IsActive() &&
+            HeadingBringupTest_RequestStart()) {
+            BluetoothUart_WriteText("OK HEADING RUN\r\n");
+        } else {
+            BluetoothUart_WriteText("ERR run_state\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "heading") == 0) &&
+        (strcmp(tokens[1], "stop") == 0)) {
+        HeadingBringupTest_RequestStop();
+        BluetoothUart_WriteText("OK HEADING STOP\r\n");
+        return;
+    }
+    if ((token_count == 10U) &&
+        (strcmp(tokens[0], "heading") == 0) &&
+        (strcmp(tokens[1], "set") == 0)) {
+        heading_bringup_config_t config;
+        heading_bringup_config_result_t result;
+        uint16_t duration_ms;
+
+        if (!HeadingBringupTest_GetConfig(&config) ||
+            !speed_tuning_parse_float(tokens[2], &config.control.kp) ||
+            !speed_tuning_parse_float(tokens[3], &config.control.ki) ||
+            !speed_tuning_parse_float(tokens[4], &config.control.kd) ||
+            !speed_tuning_parse_float(tokens[5], &config.base_speed_pps) ||
+            !speed_tuning_parse_float(
+                tokens[6], &config.control.max_correction_pps) ||
+            !speed_tuning_parse_u16(
+                tokens[7], &config.output_limit_permille) ||
+            !speed_tuning_parse_float(
+                tokens[8], &config.control.deadband_deg) ||
+            !speed_tuning_parse_u16(tokens[9], &duration_ms)) {
+            BluetoothUart_WriteText("ERR number\r\n");
+            return;
+        }
+        config.duration_ms = duration_ms;
+        result = HeadingBringupTest_SetConfig(&config);
+        if (result == HEADING_BRINGUP_CONFIG_BUSY) {
+            BluetoothUart_WriteText("ERR busy\r\n");
+        } else if (result != HEADING_BRINGUP_CONFIG_OK) {
+            BluetoothUart_WriteText("ERR range\r\n");
+        } else {
+            speed_tuning_send_heading_config();
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
         (strcmp(tokens[0], "yaw") == 0) &&
         (strcmp(tokens[1], "stat") == 0)) {
         speed_tuning_send_yaw_status();
@@ -180,7 +247,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "yaw") == 0) &&
         (strcmp(tokens[1], "run") == 0)) {
-        if (YawBringupTest_RequestStart()) {
+        if (!HeadingBringupTest_IsActive() &&
+            YawBringupTest_RequestStart()) {
             BluetoothUart_WriteText("OK YAW RUN\r\n");
         } else {
             BluetoothUart_WriteText("ERR run_state\r\n");
@@ -245,8 +313,11 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
         (strcmp(tokens[0], "imu") == 0) &&
         (strcmp(tokens[1], "zero") == 0)) {
         wheel_yaw_control_snapshot_t yaw;
+        wheel_heading_control_snapshot_t heading;
 
         if (!WheelYawControl_GetSnapshot(&yaw) || yaw.running ||
+            !WheelHeadingControl_GetSnapshot(&heading) ||
+            heading.running ||
             !BoardMotorSafe_IsHighImpedance()) {
             BluetoothUart_WriteText("ERR busy\r\n");
         } else if (!ICM20948_IsReady()) {
@@ -835,8 +906,102 @@ static void speed_tuning_send_yaw_status(void)
     BluetoothUart_WriteText("\r\n");
 }
 
+static void speed_tuning_send_heading_config(void)
+{
+    heading_bringup_config_t config;
+
+    if (!HeadingBringupTest_GetConfig(&config)) {
+        BluetoothUart_WriteText("ERR config\r\n");
+        return;
+    }
+    BluetoothUart_WriteText("OK HCFG kp=");
+    speed_tuning_write_float4(config.control.kp);
+    BluetoothUart_WriteText(" ki=");
+    speed_tuning_write_float4(config.control.ki);
+    BluetoothUart_WriteText(" kd=");
+    speed_tuning_write_float4(config.control.kd);
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_float4(config.base_speed_pps);
+    BluetoothUart_WriteText(" max=");
+    speed_tuning_write_float4(config.control.max_correction_pps);
+    BluetoothUart_WriteText(" limit=");
+    speed_tuning_write_u32(config.output_limit_permille);
+    BluetoothUart_WriteText(" dead=");
+    speed_tuning_write_float4(config.control.deadband_deg);
+    BluetoothUart_WriteText(" duration=");
+    speed_tuning_write_u32(config.duration_ms);
+    BluetoothUart_WriteText("\r\n");
+}
+
+static void speed_tuning_send_heading_status(void)
+{
+    app_runtime_metrics_snapshot_t runtime;
+    icm20948_snapshot_t imu;
+    wheel_heading_control_snapshot_t heading;
+    wheel_speed_control_snapshot_t speed;
+
+    if (!AppRuntimeMetrics_GetSnapshot(&runtime) ||
+        !ICM20948_GetSnapshot(&imu) ||
+        !WheelHeadingControl_GetSnapshot(&heading) ||
+        !WheelSpeedControl_GetSnapshot(&speed)) {
+        BluetoothUart_WriteText("ERR status\r\n");
+        return;
+    }
+    BluetoothUart_WriteText("HSTAT state=");
+    BluetoothUart_WriteText(HeadingBringupTest_GetStateText());
+    BluetoothUart_WriteText(" target=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.target_yaw_deg * 1000.0f));
+    BluetoothUart_WriteText(" current=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.current_yaw_deg * 1000.0f));
+    BluetoothUart_WriteText(" error=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.error_deg * 1000.0f));
+    BluetoothUart_WriteText(" rate=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.yaw_rate_dps * 1000.0f));
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.base_speed_target_pps));
+    BluetoothUart_WriteText(" corr=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.correction_target_pps));
+    BluetoothUart_WriteText(" tL=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.left_speed_target_pps));
+    BluetoothUart_WriteText(" tR=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        heading.right_speed_target_pps));
+    BluetoothUart_WriteText(" vL=");
+    speed_tuning_write_i32(speed.left_measured_pps);
+    BluetoothUart_WriteText(" vR=");
+    speed_tuning_write_i32(speed.right_measured_pps);
+    BluetoothUart_WriteText(" outL=");
+    speed_tuning_write_i32(speed.left_output_permille);
+    BluetoothUart_WriteText(" outR=");
+    speed_tuning_write_i32(speed.right_output_permille);
+    BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) heading.last_result);
+    BluetoothUart_WriteText(" hz=");
+    speed_tuning_write_u32(
+        BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+    BluetoothUart_WriteText(" loopMax=");
+    speed_tuning_write_u32(runtime.loop_max_interval_ms);
+    BluetoothUart_WriteText(" imuMax=");
+    speed_tuning_write_u32(imu.max_interval_ms);
+    BluetoothUart_WriteText(" headDt=");
+    speed_tuning_write_u32(heading.last_interval_ms);
+    BluetoothUart_WriteText(" headMax=");
+    speed_tuning_write_u32(heading.max_interval_ms);
+    BluetoothUart_WriteText(" lcdMax=");
+    speed_tuning_write_u32(runtime.display_max_duration_ms);
+    BluetoothUart_WriteText("\r\n");
+}
+
 static void speed_tuning_send_wave(uint32_t now_ms)
 {
+    wheel_heading_control_snapshot_t heading;
     wheel_position_control_snapshot_t position;
     wheel_speed_control_snapshot_t speed;
     wheel_yaw_control_snapshot_t yaw;
@@ -846,6 +1011,31 @@ static void speed_tuning_send_wave(uint32_t now_ms)
         return;
     }
     g_last_wave_ms = now_ms;
+
+    if (WheelHeadingControl_GetSnapshot(&heading) && heading.running &&
+        WheelSpeedControl_GetSnapshot(&speed)) {
+        BluetoothUart_WriteText("yawwave:");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            heading.target_yaw_deg * 1000.0f));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            heading.current_yaw_deg * 1000.0f));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            heading.error_deg * 1000.0f));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            heading.yaw_rate_dps * 1000.0f));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed_tuning_round_float(
+            heading.correction_target_pps));
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed.left_measured_pps);
+        BluetoothUart_WriteText(",");
+        speed_tuning_write_i32(speed.right_measured_pps);
+        BluetoothUart_WriteText("\r\n");
+        return;
+    }
 
     if (WheelYawControl_GetSnapshot(&yaw) && yaw.running &&
         WheelSpeedControl_GetSnapshot(&speed)) {

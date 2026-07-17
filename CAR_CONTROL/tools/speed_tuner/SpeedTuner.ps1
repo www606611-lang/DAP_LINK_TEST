@@ -161,6 +161,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^spd run(?: (?:step|reverse|sweep|lease))?$' -or
         $line -match '^pos (get|stop|stat)$' -or
         $line -match '^pos run(?: stress)?$' -or
+        $line -match '^heading (get|run|stop|stat)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$') {
         return $true
@@ -169,6 +170,9 @@ function Test-ControlCommand([string]$line) {
         return $true
     }
     if ($line -match '^pos set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?\d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+))?$') {
+        return $true
+    }
+    if ($line -match '^heading set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
         return $true
     }
     return $line -match '^yaw set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+)(?: \d+)?)?$'
