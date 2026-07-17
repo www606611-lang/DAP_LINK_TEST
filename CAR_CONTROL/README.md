@@ -52,8 +52,9 @@ reference sources only; they are not copied wholesale into this target.
   PA25 is MCU RX. Applying parameters does not start either motor.
 
 Direct mode requests remain blocked. Verified outer controllers enter
-position, yaw, or line-tracking mode only through the supervised speed-loop
-owner API, so unimplemented modules cannot arm the motors by changing a mode.
+position, yaw, heading, or line-tracking mode only through the supervised
+speed-loop owner API, so unimplemented modules cannot arm the motors by
+changing a mode.
 
 ## Reusable wheel-drive API
 
@@ -174,7 +175,7 @@ LineSensor_GetSnapshot(&snapshot);
 The board connector is `5 V, PA17/SCL, PA16/SDA, GND`. The module uses 7-bit
 address `0x12`, control register `0x01`, and data register `0x30`. Channels are
 active-low and use weights `-35, -25, -15, -5, 5, 15, 25, 35`, so left is
-negative and right is positive. Sampling runs every `20 ms`; calibration and
+negative and right is positive. Sampling runs every `10 ms`; calibration and
 boot delays are nonblocking. `line_seen` is the validity flag for
 `line_error`: when the line is lost, the last error is intentionally retained
 for a future recovery policy and must not be treated as a current observation.
@@ -184,6 +185,31 @@ without arming the motors. The CLI actions are `LineStatus` and `LineCal`, and
 the latest parsed state is written to `latest_line_status.json`. At idle the
 LCD footer shows the eight active bits, signed error, and `LINE`, `MISS`,
 `CAL`, or `ERR`.
+
+## Reusable line-tracking API
+
+`control/wheel_line_tracking_control.h` owns the supervised line-tracking
+outer loop and submits left/right targets only through the validated speed
+controller:
+
+```c
+WheelLineTrackingControl_SetConfig(&config);
+WheelLineTrackingControl_Start(base_speed_pps, line_error, active_count,
+    line_seen, observation_ms, now_ms);
+WheelLineTrackingControl_SetCommand(base_speed_pps, line_error, active_count,
+    line_seen, observation_ms, now_ms);
+WheelLineTrackingControl_Task(now_ms);
+WheelLineTrackingControl_Stop(reason);
+WheelLineTrackingControl_GetSnapshot(&snapshot);
+```
+
+The promoted defaults are `Kp=30`, `Ki=0`, `Kd=0`, a `900 pps` correction
+limit, and a `2`-unit deadband. The bring-up profile uses a `1400 pps` base,
+`750 permille` output limit, and `30000 ms` minimum duration. A 100 ms command
+lease, 60 ms observation-age limit, non-corner line-loss stop, direction-locked
+acute-corner recovery, and board-button stop remain active. A test reports
+`DONE` only after the line is stably centered; expiry of its three-second finish
+grace reports `ABORT` and returns to high impedance.
 
 ## Reusable ICM20948 API
 
@@ -250,19 +276,25 @@ The GUI also has a Yaw-loop tab for all outer-loop parameters, live angle,
 Yaw rate, wheel targets/speeds, output, result, and high-impedance state. It
 forwards the seven-channel `yaw` FireWater group to VOFA+ and records the
 latest Yaw wave, status, and telemetry under the same runtime directory.
+The line tab exposes the promoted controller and route-profile parameters.
+Line status JSON/CSV includes target Yaw rate, measured Yaw rate, correction
+boost, and IMU-valid state without changing the seven-channel VOFA+ format.
 
 ## Build and flash
 
-From the repository root:
+The normal development path is the resident JDY-31 updater on `COM6`. From the
+repository root:
 
 ```powershell
 cmake --preset gcc-debug
 cmake --build build-gcc --target car_control -j
-& "$env:USERPROFILE\SEGGER\JLink\JLink.exe" -NoGui 1 `
-  -CommandFile CAR_CONTROL\tools\flash_gcc.jlink
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File CAR_CONTROL\tools\FirmwareUpdater.ps1 `
+  -Port COM6 -Image build-gcc\CAR_CONTROL\car_control.bin
 ```
 
-In VS Code, run `Terminal -> Run Task -> Build + Flash (J-Link)`.
+In VS Code, use the wireless build/update task. The tuner must first report
+`HIGH-Z` and release COM6; restart it after the updater completes.
 
 The resident wireless updater uses this protected Flash layout:
 
@@ -272,10 +304,10 @@ The resident wireless updater uses this protected Flash layout:
 0x0001FC00..0x0001FFFF  update state, image size, and CRC32
 ```
 
-`Install Bootloader + App (J-Link, One Time)` performs the only full-chip
+`Install Bootloader + App (J-Link, One Time)` performs the one-time full-chip
 installation. After that, close any program that owns COM6 and run `Build +
-Wireless Update (COM6)` from the VS Code task list. The tested 81,664-byte GCC
-image transfers through the JDY-31 at 115200 baud in 16.7 seconds. `fw update`
+Wireless Update (COM6)` from the VS Code task list. The current approximately
+109 KiB GCC image transfers through the JDY-31 at 115200 baud. `fw update`
 is accepted only while all motor outputs are high impedance. Each 1024-byte
 frame and the completed image have independent CRC32 checks; an interrupted
 update leaves the Bootloader resident and ready for the same task to be run
@@ -382,3 +414,18 @@ g_car_encoder_speed_difference_pps
 See `HARDWARE_MAP.md` before enabling any additional peripheral and
 `ARCHITECTURE.md` for the staged integration order. Bench observations and the
 remaining manual checks are recorded in `BRINGUP_LOG.md`.
+
+## Host regression tests
+
+Pure application policies that do not require MCU hardware are built and run
+separately with the Windows host compiler:
+
+```powershell
+cmake -S CAR_CONTROL/tests -B build-host-tests `
+  -G "Visual Studio 17 2022" -A x64
+cmake --build build-host-tests --config Debug
+ctest --test-dir build-host-tests -C Debug --output-on-failure
+```
+
+The current suite verifies strict line-test completion, center-stability reset,
+grace timeout failure, and 32-bit millisecond-counter wraparound.

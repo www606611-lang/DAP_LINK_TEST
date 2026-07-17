@@ -949,3 +949,32 @@ ms` for the main loop, and `18 ms` for an LCD slice. The operator accepted the
 result as usable but noted that overall corner-to-straight flow is not yet
 fully smooth. This is therefore the accepted `1400 pps` route baseline, not a
 claim that line-tracking dynamics are final.
+
+### Cold-start promotion and strict finish result
+
+The accepted route configuration is now compiled into both the reusable line
+controller and the bring-up profile:
+
+```text
+Kp / Ki / Kd:        30.0 / 0.0 / 0.0
+requested base:       1400 pps
+maximum correction:    900 pps
+PWM limit:              750 permille
+deadband:                 2 line-error units
+minimum duration:     30000 ms
+```
+
+After a wireless update and MCU restart, a bare `line get` returned these
+values without a host parameter write. A subsequent `line run` issued no
+`line set`, completed the full route, and stopped at `count=1 / error=-5` with
+result zero, zero I2C errors, zeroed wheel/base targets, and high impedance.
+Measured maxima were `26 ms` for line control and `20 ms` for the main loop.
+
+The timed bring-up workflow now reports `DONE` only after a centered line is
+stable for `250 ms`. Failure to reach that condition during the three-second
+finish grace reports `ABORT / COMMAND_TIMEOUT / HIGH-Z` instead of a false
+success. The finish policy has host regression coverage for stable completion,
+center-loss reset, grace timeout, and 32-bit millisecond wraparound. The
+operator judged the promoted cold-start behavior materially unchanged and
+usable, while still somewhat slow, and chose to end line-speed tuning at this
+baseline.

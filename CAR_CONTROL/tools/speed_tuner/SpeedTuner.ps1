@@ -1501,7 +1501,7 @@ $yawTab.Controls.Add($yawStopButton)
 
 $lineColumns = @(12, 190, 368, 546)
 $lineLabelsTop = @('Kp', 'Ki', 'Kd', 'Base speed (pps)')
-$lineDefaultsTop = @('12.0000', '0.0000', '0.0000', '700')
+$lineDefaultsTop = @('30.0000', '0.0000', '0.0000', '1400')
 $lineTopBoxes = @()
 for ($index = 0; $index -lt $lineColumns.Count; $index++) {
     $lineTab.Controls.Add((New-Label $lineLabelsTop[$index] $lineColumns[$index] 2 160))
@@ -1516,7 +1516,7 @@ $lineBaseBox = $lineTopBoxes[3]
 
 $lineLabelsBottom = @(
     'Max correction (pps)', 'PWM limit', 'Deadband', 'Duration (ms)')
-$lineDefaultsBottom = @('400', '500', '2.0000', '4000')
+$lineDefaultsBottom = @('900', '750', '2.0000', '30000')
 $lineBottomBoxes = @()
 for ($index = 0; $index -lt $lineColumns.Count; $index++) {
     $lineTab.Controls.Add((New-Label $lineLabelsBottom[$index] $lineColumns[$index] 47 160))

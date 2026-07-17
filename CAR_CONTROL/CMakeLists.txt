@@ -93,6 +93,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/firmware_update.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/heading_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/line_sensor_bringup.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/line_tracking_finish_policy.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/line_tracking_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/position_bringup_test.c"

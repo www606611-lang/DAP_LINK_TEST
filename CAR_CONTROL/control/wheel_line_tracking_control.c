@@ -5,10 +5,10 @@
 
 #include <stddef.h>
 
-#define WHEEL_LINE_TRACKING_DEFAULT_KP                  12.0f
+#define WHEEL_LINE_TRACKING_DEFAULT_KP                  30.0f
 #define WHEEL_LINE_TRACKING_DEFAULT_KI                   0.0f
 #define WHEEL_LINE_TRACKING_DEFAULT_KD                   0.0f
-#define WHEEL_LINE_TRACKING_DEFAULT_MAX_CORRECTION_PPS 400.0f
+#define WHEEL_LINE_TRACKING_DEFAULT_MAX_CORRECTION_PPS 900.0f
 #define WHEEL_LINE_TRACKING_DEFAULT_DEADBAND              2.0f
 #define WHEEL_LINE_TRACKING_KP_MAX                      100.0f
 #define WHEEL_LINE_TRACKING_KI_MAX                      100.0f
@@ -663,6 +663,7 @@ void WheelLineTrackingControl_Stop(car_control_block_reason_t reason)
     }
     g_snapshot.running = false;
     g_snapshot.active_count = 0U;
+    g_snapshot.base_speed_target_pps = 0.0f;
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
@@ -724,6 +725,7 @@ static void wheel_line_tracking_fault(
 {
     WheelSpeedControl_Stop(reason);
     g_snapshot.running = false;
+    g_snapshot.base_speed_target_pps = 0.0f;
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;

@@ -8,9 +8,14 @@ app/main
   -> app/firmware_update -> SRAM boot mailbox
   -> app/position_bringup_test
   -> app/speed_bringup_test
+  -> app/yaw_bringup_test + app/heading_bringup_test
+  -> app/line_tracking_bringup_test
   -> app/speed_tuning_console -> drivers/mcu/bluetooth_uart
   -> control/control_supervisor
   -> control/wheel_position_control -> control/wheel_speed_control
+  -> control/wheel_yaw_control -> control/wheel_speed_control
+  -> control/wheel_heading_control -> control/wheel_speed_control
+  -> control/wheel_line_tracking_control -> control/wheel_speed_control
   -> control/wheel_speed_control -> bsp/board_wheel_drive
   -> diagnostics/reset_diagnostics
   -> bsp/board_button
@@ -19,6 +24,7 @@ app/main
   -> drivers/mcu/encoder_input
   -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
      -> drivers/utility/imu_attitude_estimator
+  -> drivers/device/line_sensor -> drivers/mcu/i2c1_polling
   -> bsp/board_wheel_drive -> drivers/device/at8236
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
@@ -27,6 +33,7 @@ control cascade
   -> speed loop -> board wheel drive
   -> position loop -> speed loop
   -> yaw loop -> speed loop
+  -> heading loop -> speed loop
   -> line loop -> speed loop
   -> board wheel drive -> motor device driver -> MCU PWM driver
      -> SysConfig/platform
@@ -42,11 +49,12 @@ control cascade
   software reset.
 - `drivers/device`: external devices such as ST7789, ICM20948, and the current
   AT8236 dual-channel command layer. The ICM20948 owns register-bank selection,
-  sensor setup, calibration, units, and attitude estimates. Line sensors remain
-  future work.
+  sensor setup, calibration, units, and attitude estimates. The line-sensor
+  device driver owns the external eight-channel protocol and weighted error.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
   motor PWM output, UART3 interrupt-RX/nonblocking-TX transport, and the polling
-  I2C0 transaction layer used by the IMU. CAN remains future work.
+  I2C0/I2C1 transaction layers used by the IMU and line sensor. CAN remains
+  future work.
 - `drivers/utility`: hardware-independent helpers and algorithms. The IMU
   attitude estimator owns quaternion integration, gravity-vector correction,
   Euler conversion, and relative-yaw tracking; it has no I2C or board access.
@@ -85,16 +93,21 @@ control cascade
    reporting, and stationary zero drift are verified. With the full diagnostic
    TFT page active, the measured physical update rate is about 90 Hz.
    Dynamic hand turns and post-turn stationary locking are verified. The
-   operator-labeled clockwise sign remains the gate before motorized yaw-loop
-   work.
+   the vehicle Yaw sign convention are verified.
 10. Yaw loop: the 100 Hz relative-angle controller, Yaw-owner speed slew,
     low-speed stiction recovery, Bluetooth tuning, `+/-2..135 degree` matrix,
     and ten-run alternating ground stress test are verified.
-11. Line tracking: line sensor validation, then steering correction into the
-   speed loop.
+11. Line tracking: the eight-channel sensor, 100 Hz supervised outer loop,
+    acute-corner recovery, optional IMU Yaw-rate assist, and the fixed
+    five-corner route are validated at a requested `1400 pps`. Overall
+    corner-to-straight flow remains an optimization target.
 12. Mode arbitration: only one outer loop may own speed targets at a time. The
     owner must refresh its target command within 100 ms; the speed loop then
     refreshes the independent 200 ms hardware lease.
+
+Host tests under `CAR_CONTROL/tests` cover pure application policies without
+linking MCU drivers. Hardware-dependent control and safety paths still require
+the supervised bench and ground procedures recorded in `BRINGUP_LOG.md`.
 
 Product code must submit wheel commands through `BoardWheelDrive_SetCommands`.
 Direct `AT8236_MotorSetCommand` and `MotorPwm_SetDuty` calls are internal to the
