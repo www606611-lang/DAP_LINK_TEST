@@ -9,6 +9,8 @@ reference sources only; they are not copied wholesale into this target.
 ```text
 app/main.c + app/car_app.*   top-level scheduler and interaction policy
 app/bringup/                 supervised validation workflows
+app/diagnostics/             application/debugger state mirror
+app/display/                 sliced ST7789 application dashboard
 app/services/                application services such as firmware update
 app/tuning/                  Bluetooth command and telemetry protocol
 control/                     reusable control algorithms and cascaded loops

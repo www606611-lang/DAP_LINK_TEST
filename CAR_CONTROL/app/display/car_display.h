@@ -1,0 +1,19 @@
+#ifndef APP_DISPLAY_CAR_DISPLAY_H
+#define APP_DISPLAY_CAR_DISPLAY_H
+
+#include <stdint.h>
+
+#define CAR_DISPLAY_SLICE_INTERVAL_MS 50U
+
+typedef enum {
+    CAR_DISPLAY_PHASE_HEADER = 0,
+    CAR_DISPLAY_PHASE_ANGLE,
+    CAR_DISPLAY_PHASE_TARGET,
+    CAR_DISPLAY_PHASE_FOOTER,
+    CAR_DISPLAY_PHASE_COUNT
+} car_display_phase_t;
+
+void CarDisplay_Init(void);
+void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase);
+
+#endif

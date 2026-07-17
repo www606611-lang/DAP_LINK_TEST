@@ -6,6 +6,7 @@ bootloader/main -> bootloader/boot_uart + bootloader/boot_flash
 
 app/main
   -> app/car_app interaction policy
+  -> app/display/car_display -> drivers/device/st7789
   -> app/services/firmware_update -> SRAM boot mailbox
      -> drivers/mcu/system_watchdog
   -> app/bringup/position_bringup_test
@@ -13,6 +14,7 @@ app/main
   -> app/bringup/yaw_bringup_test + app/bringup/heading_bringup_test
   -> app/bringup/line_tracking_bringup_test
   -> app/tuning/speed_tuning_console -> drivers/mcu/bluetooth_uart
+  -> app/diagnostics/debug_snapshot
   -> control/control_supervisor
   -> control/wheel_position_control -> control/wheel_speed_control
   -> control/wheel_yaw_control -> control/wheel_speed_control
@@ -48,8 +50,8 @@ control cascade
   left/right wheel-drive API. It owns A/B mapping and board polarity.
 - `control`: reusable PID and mutually exclusive motion modes.
   `wheel_speed_control` owns the verified-unit left/right inner loops.
-- `diagnostics`: reset and first-fault evidence without initiating a second
-  software reset.
+- `diagnostics`: reset, timing, and first-fault evidence without initiating a
+  second software reset.
 - `drivers/device`: external devices such as ST7789, ICM20948, and the current
   AT8236 dual-channel command layer. The ICM20948 owns register-bank selection,
   sensor setup, calibration, units, and attitude estimates. The line-sensor
@@ -66,8 +68,11 @@ control cascade
 - `app`: scheduling, display, commands, and mode transitions. `car_app` is the
   hardware-independent top-level interaction policy; `main` adapts its actions
   to the temporary bring-up workflows without embedding button priority or
-  stop-before-start rules in the scheduler. Runtime bring-up workflows,
-  services, and tuning protocol code are grouped in dedicated subdirectories.
+  stop-before-start rules in the scheduler. LCD rendering, runtime bring-up
+  workflows, services, and tuning protocol code are grouped in dedicated
+  subdirectories. Application diagnostics own the debugger-facing `g_car_*`
+  mirror and the compact display snapshot assembled from live workflow and
+  control state.
 - `experiments`: code retained for historical or learning value but excluded
   from production targets. The superseded open-loop motor bring-up workflow is
   archived here instead of remaining in the active application directory.

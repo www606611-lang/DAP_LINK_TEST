@@ -98,6 +98,8 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/position_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/speed_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/yaw_bringup_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/display/car_display.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/services/firmware_update.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
@@ -151,6 +153,8 @@ target_compile_features(${BOOTLOADER_NAME} PRIVATE c_std_99)
 target_include_directories(${APP_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/app"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/display"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/services"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp"
