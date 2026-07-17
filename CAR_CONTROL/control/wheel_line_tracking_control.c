@@ -20,10 +20,12 @@
 #define WHEEL_LINE_TRACKING_DERIVATIVE_TAU_S              0.04f
 #define WHEEL_LINE_TRACKING_WIDE_LINE_COUNT                4U
 #define WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS        250.0f
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX           3U
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX           5.0f
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS         600U
 #define WHEEL_LINE_TRACKING_CORNER_MIN_CORRECTION_PPS    350.0f
-#define WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS 500.0f
-#define WHEEL_LINE_TRACKING_CORNER_REACQUIRE_MS          1200U
+#define WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS 600.0f
+#define WHEEL_LINE_TRACKING_CORNER_REACQUIRE_MS          1800U
 #define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S         600.0f
 #define WHEEL_LINE_TRACKING_SLOWDOWN_FRACTION               0.65f
 
@@ -312,9 +314,10 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
             g_corner_turn_sign = (line_error < 0) ? 1 : -1;
             g_corner_centered_since_ms = 0U;
         }
-        if (g_corner_active && (active_count <= 2U) &&
+        if (g_corner_active &&
+            (active_count <= WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX) &&
             (wheel_line_tracking_abs((float) line_error) <=
-                g_config.deadband)) {
+                WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX)) {
             if (g_corner_centered_since_ms == 0U) {
                 g_corner_centered_since_ms = now_ms;
             } else if (wheel_line_tracking_deadline_reached(
@@ -453,8 +456,9 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
     }
     g_previous_error = control_error;
 
-    desired_base_speed_pps = wheel_line_tracking_effective_base_speed(
-        g_requested_base_speed_pps, correction_pps);
+    desired_base_speed_pps = g_snapshot.line_seen ?
+        wheel_line_tracking_effective_base_speed(
+            g_requested_base_speed_pps, correction_pps) : 0.0f;
     if (desired_base_speed_pps <= g_effective_base_speed_pps) {
         g_effective_base_speed_pps = desired_base_speed_pps;
     } else {

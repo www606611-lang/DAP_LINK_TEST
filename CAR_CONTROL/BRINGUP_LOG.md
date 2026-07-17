@@ -860,19 +860,30 @@ direction, reduces base speed to `250 pps`, and applies at least `350 pps` of
 differential correction. This prevents the earlier failure in which the car
 continued almost straight across the corner. If the line temporarily leaves
 the array during an already confirmed and direction-locked corner, the
-controller continues the same turn with `500 pps` correction for at most
-`1200 ms`. Reacquisition ends that blind search immediately; expiration still
-stops in high impedance. This exception does not apply to ordinary line loss
-or to a wide pattern with no known turn direction.
+controller removes the forward base-speed component and searches with a
+`+600/-600 pps` in-place pivot for at most `1800 ms`. Reacquisition ends that
+blind search immediately; expiration still stops in high impedance. This
+exception does not apply to ordinary line loss or to a wide pattern with no
+known turn direction. Corner lock exits after the line remains within
+`count<=3` and `|error|<=5` for `600 ms`; these limits match the quantization
+of the eight digital channels without overlapping the `count>=4` wide-line
+entry condition.
 
 The first locked-turn run stopped between the corner and its following straight
 because immediate line-loss handling removed motor torque. A `700 ms / 350
 pps` reacquisition attempt then turned farther but still stopped short. In the
-accepted run, the final search command was `+750/-250 pps`; the outgoing line
-was reacquired after approximately one second at the opposite edge of the
-array. Error then converged through `+35, +30, +20, +10, +5, 0`, the car
-continued along the following straight, and the timed run ended with result
-zero and high impedance. The operator physically confirmed that the vehicle
-completed the acute turn and entered the straight section. This validates that
-corner transition at `300 pps`; other corner geometries and a complete lap
+next `+750/-250 pps`, `1200 ms` version passed once but failed a later stress
+run at the same halfway location. Its nonzero forward component and weak
+right-wheel reversal did not produce enough rotation consistently.
+
+The promoted search instead uses the in-place pivot above. On its first ground
+run the outgoing line was reacquired after approximately `350 ms` at the
+opposite edge of the array. Error then converged through `+35, +30, +25, +20,
++15, +10, +5, 0`, the car continued along the following straight, and the
+operator physically confirmed the completed corner transition. Five subsequent
+`10 s` runs all ended with result zero and high impedance. Together they
+covered five wide-line episodes and two complete line-loss/reacquisition
+episodes. No I2C errors occurred; measured maxima were `27 ms` for line-control
+updates, `19 ms` for the main loop, and `17 ms` for an LCD slice. This validates
+the tested route at `300 pps`; higher speeds and additional line geometries
 remain separate ground-test coverage.
