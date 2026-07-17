@@ -13,7 +13,9 @@ app/main
   -> app/bringup/speed_bringup_test
   -> app/bringup/yaw_bringup_test + app/bringup/heading_bringup_test
   -> app/bringup/line_tracking_bringup_test
-  -> app/tuning/speed_tuning_console -> drivers/mcu/bluetooth_uart
+  -> app/tuning/speed_tuning_console
+     -> tuning_codec + tuning_status + tuning_wave + tuning_wire
+     -> drivers/mcu/bluetooth_uart
   -> app/diagnostics/debug_snapshot
   -> control/control_supervisor
   -> control/wheel_position_control -> control/wheel_speed_control
@@ -72,7 +74,9 @@ control cascade
   workflows, services, and tuning protocol code are grouped in dedicated
   subdirectories. Application diagnostics own the debugger-facing `g_car_*`
   mirror and the compact display snapshot assembled from live workflow and
-  control state.
+  control state. The tuning console owns command routing only; parsing, status
+  serialization, waveform selection, and numeric wire encoding are separate
+  modules with unchanged external protocol text.
 - `experiments`: code retained for historical or learning value but excluded
   from production targets. The superseded open-loop motor bring-up workflow is
   archived here instead of remaining in the active application directory.
@@ -130,9 +134,10 @@ control cascade
     stops the active workflow before another command can start; service and
     suspicious-reset states reject new physical motion requests.
 
-Host tests under `CAR_CONTROL/tests` cover pure application policies without
-linking MCU drivers. Hardware-dependent control and safety paths still require
-the supervised bench and ground procedures recorded in `BRINGUP_LOG.md`.
+Host tests under `CAR_CONTROL/tests` cover pure application policies and the
+tuning text codec without linking MCU drivers. Hardware-dependent control and
+safety paths still require the supervised bench and ground procedures recorded
+in `BRINGUP_LOG.md`.
 
 Product code must submit wheel commands through `BoardWheelDrive_SetCommands`.
 Direct `AT8236_MotorSetCommand` and `MotorPwm_SetDuty` calls are internal to the

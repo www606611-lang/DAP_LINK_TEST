@@ -26,3 +26,16 @@ target_include_directories(car_app_test PRIVATE
 )
 
 add_test(NAME car_app COMMAND car_app_test)
+
+add_executable(tuning_codec_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/tuning_codec_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/tuning/tuning_codec.c"
+)
+target_compile_features(tuning_codec_test PRIVATE c_std_99)
+target_include_directories(tuning_codec_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/tuning"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/bringup"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control"
+)
+
+add_test(NAME tuning_codec COMMAND tuning_codec_test)

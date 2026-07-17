@@ -12,7 +12,7 @@ app/bringup/                 supervised validation workflows
 app/diagnostics/             application/debugger state mirror
 app/display/                 sliced ST7789 application dashboard
 app/services/                application services such as firmware update
-app/tuning/                  Bluetooth command and telemetry protocol
+app/tuning/                  Bluetooth routing, codec, status, and wave protocol
 control/                     reusable control algorithms and cascaded loops
 bsp/                         board wiring, wheel mapping, and safe resources
 drivers/device/              external-device protocols
@@ -488,4 +488,5 @@ ctest --test-dir build-host-tests -C Debug --output-on-failure
 The current suite verifies strict line-test completion, center-stability reset,
 grace timeout failure, 32-bit millisecond-counter wraparound, application-state
 transitions, service/reset lockout, deterministic workflow priority, physical
-button Yaw mapping, and stop-before-start behavior.
+button Yaw mapping, stop-before-start behavior, tuning tokenization, numeric
+limits, and every supported bring-up profile keyword.
