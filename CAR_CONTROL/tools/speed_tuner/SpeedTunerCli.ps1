@@ -475,6 +475,10 @@ function Save-LineStatus([hashtable]$values, [string]$csvPath = "") {
         bus_result = [uint32]$values['busRes']
         base_speed_pps = [int]$values['base']
         correction_pps = [int]$values['corr']
+        target_yaw_rate_mdps = [int]$values['yawT']
+        measured_yaw_rate_mdps = [int]$values['yawR']
+        yaw_rate_boost_pps = [int]$values['yawBoost']
+        imu_feedback_valid = ($values['imu'] -eq '1')
         left_target_pps = [int]$values['tL']
         right_target_pps = [int]$values['tR']
         left_speed_pps = [int]$values['vL']
@@ -496,8 +500,10 @@ function Save-LineStatus([hashtable]$values, [string]$csvPath = "") {
     if ($csvPath -ne "") {
         $row = @(
             $timestamp, $values['state'], $values['raw'], $values['mask'],
-            $values['count'], $values['error'], $values['seen'],
-            $values['base'], $values['corr'], $values['tL'],
+             $values['count'], $values['error'], $values['seen'],
+             $values['base'], $values['corr'], $values['yawT'],
+             $values['yawR'], $values['yawBoost'], $values['imu'],
+             $values['tL'],
             $values['tR'], $values['vL'], $values['vR'],
             $values['outL'], $values['outR'], $values['res'],
             $values['hz'], $values['age'], $values['lineDt'],
@@ -834,7 +840,7 @@ try {
         $stamp = [DateTime]::Now.ToString("yyyyMMdd_HHmmss")
         $csvPath = Join-Path $runtimeDir "line_run_$stamp.csv"
         $latestCsvPath = Join-Path $runtimeDir "latest_line_telemetry.csv"
-        $header = "timestamp,state,raw,mask,count,line_error,line_seen,base_speed_pps,correction_pps,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z,sample_age_ms,line_interval_ms,line_max_interval_ms,loop_max_interval_ms,lcd_max_duration_ms`r`n"
+        $header = "timestamp,state,raw,mask,count,line_error,line_seen,base_speed_pps,correction_pps,target_yaw_rate_mdps,measured_yaw_rate_mdps,yaw_rate_boost_pps,imu_feedback_valid,left_target_pps,right_target_pps,left_speed_pps,right_speed_pps,left_output_permille,right_output_permille,result,high_z,sample_age_ms,line_interval_ms,line_max_interval_ms,loop_max_interval_ms,lcd_max_duration_ms`r`n"
         [System.IO.File]::WriteAllText($csvPath, $header, $utf8NoBom)
         if ($transport -ne "tcp_bridge") {
             [System.IO.File]::WriteAllText(

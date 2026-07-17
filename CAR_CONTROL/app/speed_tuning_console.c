@@ -1158,6 +1158,18 @@ static void speed_tuning_send_line_status(uint32_t now_ms)
     BluetoothUart_WriteText(" corr=");
     speed_tuning_write_i32(speed_tuning_round_float(
         line_tracking.correction_target_pps));
+    BluetoothUart_WriteText(" yawT=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.target_yaw_rate_dps * 1000.0f));
+    BluetoothUart_WriteText(" yawR=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.measured_yaw_rate_dps * 1000.0f));
+    BluetoothUart_WriteText(" yawBoost=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        line_tracking.yaw_rate_boost_pps));
+    BluetoothUart_WriteText(" imu=");
+    speed_tuning_write_u32(
+        line_tracking.imu_feedback_valid ? 1U : 0U);
     BluetoothUart_WriteText(" tL=");
     speed_tuning_write_i32(speed_tuning_round_float(
         line_tracking.left_speed_target_pps));

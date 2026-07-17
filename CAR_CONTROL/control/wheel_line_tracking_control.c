@@ -1,5 +1,6 @@
 #include "wheel_line_tracking_control.h"
 
+#include "icm20948.h"
 #include "wheel_speed_control.h"
 
 #include <stddef.h>
@@ -19,18 +20,27 @@
 #define WHEEL_LINE_TRACKING_INTEGRAL_LIMIT              100.0f
 #define WHEEL_LINE_TRACKING_DERIVATIVE_TAU_S              0.04f
 #define WHEEL_LINE_TRACKING_WIDE_LINE_COUNT                4U
-#define WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS        300.0f
-#define WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS   500.0f
+#define WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS        420.0f
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS   800.0f
+#define WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_BASE_PPS   1050.0f
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX           3U
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX           5.0f
 #define WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS         350U
-#define WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS    150.0f
+#define WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_STABLE_MS    200U
+#define WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS    220.0f
+#define WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_CORRECTION   240.0f
 #define WHEEL_LINE_TRACKING_CORNER_MIN_CORRECTION_PPS    350.0f
 #define WHEEL_LINE_TRACKING_CORNER_SEARCH_CORRECTION_PPS 600.0f
 #define WHEEL_LINE_TRACKING_CORNER_SEARCH_RAMP_MS          200U
 #define WHEEL_LINE_TRACKING_CORNER_REACQUIRE_MS          1800U
-#define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S        1200.0f
+#define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S        3000.0f
+#define WHEEL_LINE_TRACKING_RECOVERY_ACCEL_PPS_PER_S    9000.0f
 #define WHEEL_LINE_TRACKING_SLOWDOWN_FRACTION               0.65f
+#define WHEEL_LINE_TRACKING_IMU_MAX_AGE_MS                   50U
+#define WHEEL_LINE_TRACKING_YAW_RATE_PER_CORRECTION_PPS       0.075f
+#define WHEEL_LINE_TRACKING_YAW_RATE_FILTER_TAU_S             0.04f
+#define WHEEL_LINE_TRACKING_YAW_RATE_BOOST_KP                 5.0f
+#define WHEEL_LINE_TRACKING_YAW_RATE_BOOST_MAX_PPS          180.0f
 
 static wheel_line_tracking_config_t g_config;
 static wheel_line_tracking_snapshot_t g_snapshot;
@@ -45,12 +55,15 @@ static float g_effective_base_speed_pps;
 static float g_integral;
 static float g_previous_error;
 static float g_filtered_derivative;
+static float g_filtered_yaw_rate_dps;
 static int8_t g_corner_turn_sign;
 static int8_t g_last_turn_sign;
 static bool g_corner_active;
 static bool g_corner_recovery_active;
 static bool g_corner_line_search_active;
 static bool g_corner_turn_committed;
+static bool g_corner_had_line_loss;
+static bool g_yaw_rate_filter_initialized;
 
 static bool wheel_line_tracking_speed_is_valid(float speed_pps);
 static bool wheel_line_tracking_observation_is_valid(
@@ -81,6 +94,9 @@ void WheelLineTrackingControl_Init(uint32_t now_ms)
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.target_yaw_rate_dps = 0.0f;
+    g_snapshot.measured_yaw_rate_dps = 0.0f;
+    g_snapshot.yaw_rate_boost_pps = 0.0f;
     g_snapshot.update_count = 0U;
     g_snapshot.elapsed_ms = 0U;
     g_snapshot.command_age_ms = 0U;
@@ -88,6 +104,7 @@ void WheelLineTrackingControl_Init(uint32_t now_ms)
     g_snapshot.last_interval_ms = 0U;
     g_snapshot.max_interval_ms = 0U;
     g_snapshot.last_result = WHEEL_LINE_TRACKING_OK;
+    g_snapshot.imu_feedback_valid = false;
     g_snapshot.line_seen = false;
     g_snapshot.running = false;
 
@@ -102,12 +119,15 @@ void WheelLineTrackingControl_Init(uint32_t now_ms)
     g_integral = 0.0f;
     g_previous_error = 0.0f;
     g_filtered_derivative = 0.0f;
+    g_filtered_yaw_rate_dps = 0.0f;
     g_corner_turn_sign = 0;
     g_last_turn_sign = 0;
     g_corner_active = false;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
     g_corner_turn_committed = false;
+    g_corner_had_line_loss = false;
+    g_yaw_rate_filter_initialized = false;
 }
 
 bool WheelLineTrackingControl_ConfigIsValid(
@@ -207,6 +227,9 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.target_yaw_rate_dps = 0.0f;
+    g_snapshot.measured_yaw_rate_dps = 0.0f;
+    g_snapshot.yaw_rate_boost_pps = 0.0f;
     g_snapshot.update_count = 0U;
     g_snapshot.elapsed_ms = 0U;
     g_snapshot.command_age_ms = 0U;
@@ -214,6 +237,7 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     g_snapshot.last_interval_ms = 0U;
     g_snapshot.max_interval_ms = 0U;
     g_snapshot.last_result = WHEEL_LINE_TRACKING_OK;
+    g_snapshot.imu_feedback_valid = false;
     g_snapshot.line_seen = true;
     g_snapshot.running = true;
     g_started_ms = now_ms;
@@ -226,15 +250,18 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     g_integral = 0.0f;
     g_previous_error = -(float) line_error;
     g_filtered_derivative = 0.0f;
+    g_filtered_yaw_rate_dps = 0.0f;
     g_last_turn_sign = start_turn_sign;
     g_corner_active =
         active_count >= WHEEL_LINE_TRACKING_WIDE_LINE_COUNT;
     g_corner_turn_sign = g_corner_active ? g_last_turn_sign : 0;
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
+    g_corner_had_line_loss = false;
     g_corner_turn_committed = g_corner_active &&
         (wheel_line_tracking_abs((float) line_error) >
             WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX);
+    g_yaw_rate_filter_initialized = false;
     g_effective_base_speed_pps =
         (g_corner_active &&
             (base_speed_pps > WHEEL_LINE_TRACKING_CORNER_BASE_SPEED_PPS)) ?
@@ -280,6 +307,7 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
                 CAR_CONTROL_BLOCK_EMERGENCY_STOP);
             return WHEEL_LINE_TRACKING_LINE_LOST;
         }
+        g_corner_had_line_loss = true;
         g_corner_turn_committed = true;
         g_snapshot.active_count = 0U;
         g_snapshot.command_age_ms = 0U;
@@ -352,7 +380,9 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
                 g_corner_centered_since_ms = now_ms;
             } else if (wheel_line_tracking_deadline_reached(
                     now_ms, g_corner_centered_since_ms +
-                        WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS)) {
+                        (g_corner_had_line_loss ?
+                            WHEEL_LINE_TRACKING_CORNER_EXIT_STABLE_MS :
+                            WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_STABLE_MS))) {
                 g_corner_active = false;
                 g_corner_recovery_active = true;
                 g_corner_centered_since_ms = 0U;
@@ -367,6 +397,7 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
 
 void WheelLineTrackingControl_Task(uint32_t now_ms)
 {
+    icm20948_snapshot_t imu;
     wheel_speed_control_snapshot_t speed;
     uint32_t elapsed_ms;
     float dt_s;
@@ -379,7 +410,11 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
     float headroom_pps;
     float desired_base_speed_pps;
     float maximum_base_increase_pps;
+    float yaw_rate_filter_alpha;
+    float yaw_rate_error_dps;
+    float yaw_rate_boost_pps;
     bool corner_exit_candidate;
+    bool imu_feedback_valid;
 
     if (!g_snapshot.running) {
         return;
@@ -512,7 +547,9 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
     } else if (corner_exit_candidate &&
         (g_corner_turn_sign != 0)) {
         float exit_correction =
-            WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS;
+            g_corner_had_line_loss ?
+                WHEEL_LINE_TRACKING_CORNER_EXIT_CORRECTION_PPS :
+                WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_CORRECTION;
 
         if (exit_correction > correction_limit) {
             exit_correction = correction_limit;
@@ -520,6 +557,41 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         correction_pps = (g_corner_turn_sign > 0) ?
             exit_correction : -exit_correction;
     }
+    g_snapshot.target_yaw_rate_dps = correction_pps *
+        WHEEL_LINE_TRACKING_YAW_RATE_PER_CORRECTION_PPS;
+    yaw_rate_boost_pps = 0.0f;
+    imu_feedback_valid = ICM20948_GetSnapshot(&imu) && imu.ready &&
+        imu.attitude_valid &&
+        ((uint32_t) (now_ms - imu.last_sample_ms) <=
+            WHEEL_LINE_TRACKING_IMU_MAX_AGE_MS);
+    if (imu_feedback_valid) {
+        if (!g_yaw_rate_filter_initialized) {
+            g_filtered_yaw_rate_dps = imu.yaw_rate_dps;
+            g_yaw_rate_filter_initialized = true;
+        } else {
+            yaw_rate_filter_alpha = dt_s /
+                (WHEEL_LINE_TRACKING_YAW_RATE_FILTER_TAU_S + dt_s);
+            g_filtered_yaw_rate_dps += yaw_rate_filter_alpha *
+                (imu.yaw_rate_dps - g_filtered_yaw_rate_dps);
+        }
+        g_snapshot.measured_yaw_rate_dps = g_filtered_yaw_rate_dps;
+        yaw_rate_error_dps = g_snapshot.target_yaw_rate_dps -
+            g_filtered_yaw_rate_dps;
+        if (g_snapshot.line_seen &&
+            ((yaw_rate_error_dps * correction_pps) > 0.0f)) {
+            yaw_rate_boost_pps = wheel_line_tracking_clamp(
+                WHEEL_LINE_TRACKING_YAW_RATE_BOOST_KP * yaw_rate_error_dps,
+                -WHEEL_LINE_TRACKING_YAW_RATE_BOOST_MAX_PPS,
+                WHEEL_LINE_TRACKING_YAW_RATE_BOOST_MAX_PPS);
+            correction_pps = wheel_line_tracking_clamp(
+                correction_pps + yaw_rate_boost_pps,
+                -correction_limit, correction_limit);
+        }
+    } else {
+        g_snapshot.measured_yaw_rate_dps = 0.0f;
+    }
+    g_snapshot.yaw_rate_boost_pps = yaw_rate_boost_pps;
+    g_snapshot.imu_feedback_valid = imu_feedback_valid;
     g_previous_error = control_error;
 
     desired_base_speed_pps = g_snapshot.line_seen ?
@@ -527,9 +599,12 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
             g_requested_base_speed_pps, correction_pps) : 0.0f;
     if (corner_exit_candidate &&
         (desired_base_speed_pps <
-            WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS)) {
-        desired_base_speed_pps =
-            WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS;
+            (g_corner_had_line_loss ?
+                WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS :
+                WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_BASE_PPS))) {
+        desired_base_speed_pps = g_corner_had_line_loss ?
+            WHEEL_LINE_TRACKING_CORNER_EXIT_BASE_SPEED_PPS :
+            WHEEL_LINE_TRACKING_CORNER_FAST_EXIT_BASE_PPS;
         if (desired_base_speed_pps > g_requested_base_speed_pps) {
             desired_base_speed_pps = g_requested_base_speed_pps;
         }
@@ -538,7 +613,9 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         g_effective_base_speed_pps = desired_base_speed_pps;
     } else {
         maximum_base_increase_pps =
-            WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S * dt_s;
+            (g_corner_recovery_active ?
+                WHEEL_LINE_TRACKING_RECOVERY_ACCEL_PPS_PER_S :
+                WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S) * dt_s;
         g_effective_base_speed_pps += maximum_base_increase_pps;
         if (g_effective_base_speed_pps > desired_base_speed_pps) {
             g_effective_base_speed_pps = desired_base_speed_pps;
@@ -549,10 +626,12 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
         (g_snapshot.active_count <=
             WHEEL_LINE_TRACKING_CORNER_EXIT_COUNT_MAX) &&
         (wheel_line_tracking_abs((float) g_snapshot.line_error) <=
-            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX)) {
+            WHEEL_LINE_TRACKING_CORNER_EXIT_ERROR_MAX) &&
+        (g_effective_base_speed_pps >= desired_base_speed_pps)) {
         g_corner_recovery_active = false;
         g_corner_turn_sign = 0;
         g_corner_turn_committed = false;
+        g_corner_had_line_loss = false;
     }
     g_snapshot.correction_target_pps = correction_pps;
     g_snapshot.left_speed_target_pps =
@@ -587,11 +666,16 @@ void WheelLineTrackingControl_Stop(car_control_block_reason_t reason)
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.target_yaw_rate_dps = 0.0f;
+    g_snapshot.measured_yaw_rate_dps = 0.0f;
+    g_snapshot.yaw_rate_boost_pps = 0.0f;
+    g_snapshot.imu_feedback_valid = false;
     g_snapshot.last_result = (reason == CAR_CONTROL_BLOCK_TEST_COMPLETE) ?
         WHEEL_LINE_TRACKING_OK : WHEEL_LINE_TRACKING_STOPPED;
     g_integral = 0.0f;
     g_previous_error = 0.0f;
     g_filtered_derivative = 0.0f;
+    g_filtered_yaw_rate_dps = 0.0f;
     g_corner_centered_since_ms = 0U;
     g_corner_line_lost_since_ms = 0U;
     g_requested_base_speed_pps = 0.0f;
@@ -602,6 +686,8 @@ void WheelLineTrackingControl_Stop(car_control_block_reason_t reason)
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
     g_corner_turn_committed = false;
+    g_corner_had_line_loss = false;
+    g_yaw_rate_filter_initialized = false;
 }
 
 bool WheelLineTrackingControl_GetSnapshot(
@@ -641,10 +727,15 @@ static void wheel_line_tracking_fault(
     g_snapshot.correction_target_pps = 0.0f;
     g_snapshot.left_speed_target_pps = 0.0f;
     g_snapshot.right_speed_target_pps = 0.0f;
+    g_snapshot.target_yaw_rate_dps = 0.0f;
+    g_snapshot.measured_yaw_rate_dps = 0.0f;
+    g_snapshot.yaw_rate_boost_pps = 0.0f;
+    g_snapshot.imu_feedback_valid = false;
     g_snapshot.last_result = result;
     g_integral = 0.0f;
     g_previous_error = 0.0f;
     g_filtered_derivative = 0.0f;
+    g_filtered_yaw_rate_dps = 0.0f;
     g_corner_centered_since_ms = 0U;
     g_corner_line_lost_since_ms = 0U;
     g_requested_base_speed_pps = 0.0f;
@@ -655,6 +746,8 @@ static void wheel_line_tracking_fault(
     g_corner_recovery_active = false;
     g_corner_line_search_active = false;
     g_corner_turn_committed = false;
+    g_corner_had_line_loss = false;
+    g_yaw_rate_filter_initialized = false;
 }
 
 static float wheel_line_tracking_abs(float value)

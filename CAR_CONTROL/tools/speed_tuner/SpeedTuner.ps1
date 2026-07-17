@@ -751,6 +751,10 @@ function Save-LineStatus([hashtable]$values) {
         sample_age_ms = [uint32]$values['age']
         base_speed_pps = [int]$values['base']
         correction_pps = [int]$values['corr']
+        target_yaw_rate_mdps = [int]$values['yawT']
+        measured_yaw_rate_mdps = [int]$values['yawR']
+        yaw_rate_boost_pps = [int]$values['yawBoost']
+        imu_feedback_valid = ($values['imu'] -eq '1')
         left_target_pps = [int]$values['tL']
         right_target_pps = [int]$values['tR']
         left_speed_pps = [int]$values['vL']
@@ -773,8 +777,9 @@ function Update-LineStatusFromLine([string]$line) {
     if (-not $line.StartsWith('LSTAT ')) { return $false }
     $values = Parse-KeyValueLine $line
     foreach ($key in @(
-        'state', 'sensor', 'raw', 'mask', 'count', 'error', 'seen',
-        'age', 'base', 'corr', 'tL', 'tR', 'vL', 'vR', 'outL',
+         'state', 'sensor', 'raw', 'mask', 'count', 'error', 'seen',
+         'age', 'base', 'corr', 'yawT', 'yawR', 'yawBoost', 'imu',
+         'tL', 'tR', 'vL', 'vR', 'outL',
         'outR', 'res', 'hz', 'lineDt', 'lineMax')) {
         if (-not $values.ContainsKey($key)) { return $false }
     }

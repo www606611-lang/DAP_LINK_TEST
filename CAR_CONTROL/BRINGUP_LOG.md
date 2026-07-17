@@ -919,3 +919,33 @@ degradation. I2C errors remained zero, the maximum line-control interval was
 `27 ms`, and the run stopped on `count=2 / error=0` with motor outputs in high
 impedance. This establishes `1200 pps` as the accepted route baseline; higher
 requested speeds remain experimental.
+
+### 1400 pps route baseline and corner-exit recovery
+
+The same five-corner route was subsequently accepted at a requested `1400
+pps` with the existing `Kp=30`, `Ki=0`, `Kd=0`, `900 pps` correction limit,
+`750 permille` output limit, and `2`-unit deadband. Fixed increases in
+differential correction were rejected because they caused repeated spinning
+at the acute corner. The promoted controller instead uses IMU Yaw-rate
+feedback only while the line remains visible: it maps the original correction
+to a `0.075 dps/pps` target, adds at most `180 pps` when measured rotation is
+too slow, and falls back to the validated line-only behavior whenever the IMU
+is invalid or stale. The seven-channel VOFA+ line waveform remains unchanged;
+the target rate, measured rate, boost, and IMU-valid state are exposed through
+`LSTAT` and tuner JSON/CSV telemetry.
+
+Visible wide-line corners now retain a `420 pps` forward base. A corner that
+actually lost the line keeps the validated `600 pps` blind pivot, then exits
+at `800 pps` base with `220 pps` residual correction for the existing `350 ms`
+stability window. Corners without line loss use a `1050 pps` base, `240 pps`
+residual correction, and a `200 ms` window. After direction lock releases, a
+separate `9000 pps/s` recovery ramp returns to normal route speed in roughly
+`70 ms`; ordinary startup retains the gentler `3000 pps/s` ramp.
+
+Two consecutive `30 s` runs of the promoted version completed with result
+zero and high impedance, including acute-corner line-loss recovery. I2C errors
+remained zero; measured maxima were `28 ms` for the line-control interval, `20
+ms` for the main loop, and `18 ms` for an LCD slice. The operator accepted the
+result as usable but noted that overall corner-to-straight flow is not yet
+fully smooth. This is therefore the accepted `1400 pps` route baseline, not a
+claim that line-tracking dynamics are final.
