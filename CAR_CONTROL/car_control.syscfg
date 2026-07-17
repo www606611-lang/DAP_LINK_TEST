@@ -21,6 +21,8 @@ const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
 const BLUETOOTH_UART = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
 const SYSTICK       = scripting.addModule("/ti/driverlib/SYSTICK");
+const WWDT          = scripting.addModule("/ti/driverlib/WWDT", {}, false);
+const APP_WWDT      = WWDT.addInstance();
 const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
 
 const divider9       = system.clockTree["UDIV"];
@@ -213,6 +215,16 @@ SYSTICK.periodEnable    = true;
 SYSTICK.interruptEnable = true;
 SYSTICK.systickEnable   = true;
 SYSTICK.period          = 80000;
+
+APP_WWDT.$name               = "APP_WWDT";
+APP_WWDT.clockDivider        = "2";
+APP_WWDT.wwdtMode            = "WATCHDOG";
+APP_WWDT.periodCount         = "15";
+APP_WWDT.activeWindow        = "0";
+APP_WWDT.window0ClosedPeriod = "0";
+APP_WWDT.window1ClosedPeriod = "0";
+APP_WWDT.sleepMode           = true;
+APP_WWDT.peripheral.$assign  = "WWDT0";
 
 ProjectConfig.genLibCMSIS = false;
 

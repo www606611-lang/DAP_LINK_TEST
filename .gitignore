@@ -1,6 +1,7 @@
 # Build outputs
 /build-gcc/
 /build-ticlang/
+/build-host-tests/
 
 # SysConfig / CCS generated outputs
 /DAP_LINK_TEST/Debug/

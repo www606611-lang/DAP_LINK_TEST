@@ -8,7 +8,8 @@ param(
         "ImuStatus", "ImuZero", "YawGet", "YawSet", "YawRun",
         "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
         "HeadingRun", "HeadingStop", "HeadingStatus", "LineGet",
-        "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal")]
+        "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
+        "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -676,6 +677,12 @@ try {
         }
         "LineCal" {
             [void](Invoke-Protocol "line cal" @("OK LINE CAL", "ERR "))
+        }
+        "WatchdogStatus" {
+            [void](Invoke-Protocol "wdt stat" @("WSTAT ", "ERR "))
+        }
+        "WatchdogTest" {
+            [void](Invoke-Protocol "wdt test" @("OK WDT TEST", "ERR "))
         }
         "Run" {
             $runCommand = "spd run"

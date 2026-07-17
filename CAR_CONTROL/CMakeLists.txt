@@ -118,6 +118,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/mcu/i2c0_polling.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/mcu/i2c1_polling.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/mcu/motor_pwm.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/drivers/mcu/system_watchdog.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/device/at8236/at8236_motor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/device/icm20948/icm20948.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/drivers/device/jdy31/jdy31_config.c"

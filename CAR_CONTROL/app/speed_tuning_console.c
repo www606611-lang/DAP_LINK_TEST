@@ -12,6 +12,7 @@
 #include "position_bringup_test.h"
 #include "runtime_metrics.h"
 #include "speed_bringup_test.h"
+#include "system_watchdog.h"
 #include "wheel_position_control.h"
 #include "wheel_heading_control.h"
 #include "wheel_line_tracking_control.h"
@@ -95,6 +96,32 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
             BluetoothUart_WriteText("OK FW UPDATE\r\n");
         } else {
             BluetoothUart_WriteText("ERR motor_active\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "wdt") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        BluetoothUart_WriteText("WSTAT active=");
+        speed_tuning_write_u32(
+            SystemWatchdog_IsKickEnabled() ? 1U : 0U);
+        BluetoothUart_WriteText(" kicks=");
+        speed_tuning_write_u32(SystemWatchdog_GetKickCount());
+        BluetoothUart_WriteText(" hz=");
+        speed_tuning_write_u32(
+            BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+        BluetoothUart_WriteText("\r\n");
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "wdt") == 0) &&
+        (strcmp(tokens[1], "test") == 0)) {
+        if (!BoardMotorSafe_IsHighImpedance()) {
+            BluetoothUart_WriteText("ERR motor_active\r\n");
+        } else if (!SystemWatchdog_StopKicksForTest()) {
+            BluetoothUart_WriteText("ERR wdt_state\r\n");
+        } else {
+            BluetoothUart_WriteText("OK WDT TEST\r\n");
         }
         return;
     }

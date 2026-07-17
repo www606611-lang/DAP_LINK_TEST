@@ -978,3 +978,40 @@ center-loss reset, grace timeout, and 32-bit millisecond wraparound. The
 operator judged the promoted cold-start behavior materially unchanged and
 usable, while still somewhat slow, and chose to end line-speed tuning at this
 baseline.
+
+## 2026-07-17: hardware watchdog and wireless-update compatibility
+
+WWDT0 now runs from LFCLK with divider 2, a 15-bit period, and no closed
+window, producing a 2.00 second timeout. It continues through sleep, pauses
+while the CPU is halted by a debugger, and is refreshed only at the end of a
+complete main-loop scheduling pass immediately before `WFI`. The tuner exposes
+read-only status as `wdt stat`; the deliberate `wdt test` fault injection is
+rejected unless every motor output is already high impedance.
+
+The supervised fault-injection test started from:
+
+```text
+WSTAT active=1 kicks=108969 hz=1
+```
+
+After `wdt test`, refreshes stopped and WWDT0 reset the MCU approximately two
+seconds later. The application restarted with `LineStatus=LOCKED`, motor
+outputs in high impedance, and a growing watchdog refresh count. This verifies
+both watchdog reset behavior and the existing suspicious-reset motion lockout.
+
+The first watchdog-enabled wireless update exposed an MSPM0 reset-domain
+interaction: WWDT0 remained active across the software reset and reset the
+resident Bootloader during Flash erase/program, which returned Bootloader
+status 4 (`BOOT_STATUS_BAD_STATE`) and left the application region erased.
+The resident Bootloader itself remained intact and forced the motor pins to
+high impedance.
+
+`FirmwareUpdate_Task` now waits for UART TX idle, then resets and powers down
+WWDT0 before writing the update mailbox and requesting the software reset. A
+direct Bootloader recovery successfully programmed the 110000-byte image with
+CRC32 `0x21A9E0ED` in 28.9 seconds. A subsequent normal application-initiated
+wireless update of the same image completed in 29.2 seconds with no Bootloader
+error. After restart, the firmware reported `READY`, zero motor targets and
+outputs, high impedance, and `WSTAT active=1`, with the refresh count increasing
+normally. This validates both fault recovery and the normal JDY-31 update path
+while the hardware watchdog feature is enabled.

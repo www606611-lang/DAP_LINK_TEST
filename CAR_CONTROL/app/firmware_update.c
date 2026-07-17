@@ -3,6 +3,7 @@
 #include "bluetooth_uart.h"
 #include "board_motor_safe.h"
 #include "firmware_layout.h"
+#include "system_watchdog.h"
 #include "ti_msp_dl_config.h"
 
 static bool g_bootloader_pending;
@@ -38,6 +39,7 @@ void FirmwareUpdate_Task(void)
     if (!g_bootloader_pending || !BluetoothUart_IsTxIdle()) {
         return;
     }
+    SystemWatchdog_PrepareForBootloader();
     mailbox = (volatile firmware_mailbox_t *) FIRMWARE_MAILBOX_ADDRESS;
     mailbox->magic = FIRMWARE_MAILBOX_MAGIC;
     mailbox->magic_inverse = FIRMWARE_MAILBOX_MAGIC_INVERSE;

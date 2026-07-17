@@ -19,6 +19,7 @@
 #include "speed_bringup_test.h"
 #include "speed_tuning_console.h"
 #include "st7789.h"
+#include "system_watchdog.h"
 #include "ti_msp_dl_config.h"
 #include "wheel_position_control.h"
 #include "wheel_heading_control.h"
@@ -190,6 +191,7 @@ int main(void)
 
     FirmwareUpdate_AppInit();
     SYSCFG_DL_init();
+    SystemWatchdog_Init();
     ResetDiagnostics_Init();
     BoardMotorSafe_Init();
     BoardWheelDrive_Init();
@@ -351,6 +353,7 @@ int main(void)
             display_dirty = false;
         }
 
+        SystemWatchdog_Kick();
         __WFI();
     }
 }

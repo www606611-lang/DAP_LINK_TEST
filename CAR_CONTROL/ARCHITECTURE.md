@@ -6,6 +6,7 @@ bootloader/main -> bootloader/boot_uart + bootloader/boot_flash
 
 app/main
   -> app/firmware_update -> SRAM boot mailbox
+     -> drivers/mcu/system_watchdog
   -> app/position_bringup_test
   -> app/speed_bringup_test
   -> app/yaw_bringup_test + app/heading_bringup_test
@@ -22,6 +23,7 @@ app/main
   -> bsp/board_motor_safe
   -> bsp/board_wheel_drive
   -> drivers/mcu/encoder_input
+  -> drivers/mcu/system_watchdog
   -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
      -> drivers/utility/imu_attitude_estimator
   -> drivers/device/line_sensor -> drivers/mcu/i2c1_polling
@@ -53,8 +55,10 @@ control cascade
   device driver owns the external eight-channel protocol and weighted error.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
   motor PWM output, UART3 interrupt-RX/nonblocking-TX transport, and the polling
-  I2C0/I2C1 transaction layers used by the IMU and line sensor. CAN remains
-  future work.
+  I2C0/I2C1 transaction layers used by the IMU and line sensor. It also owns
+  WWDT0 initialization, refresh, fault injection, and the required handoff that
+  disables the running application watchdog before entering the resident
+  Bootloader. CAN remains future work.
 - `drivers/utility`: hardware-independent helpers and algorithms. The IMU
   attitude estimator owns quaternion integration, gravity-vector correction,
   Euler conversion, and relative-yaw tracking; it has no I2C or board access.
@@ -104,6 +108,10 @@ control cascade
 12. Mode arbitration: only one outer loop may own speed targets at a time. The
     owner must refresh its target command within 100 ms; the speed loop then
     refreshes the independent 200 ms hardware lease.
+13. Hardware watchdog: WWDT0 expires after 2 seconds without a completed main
+    loop pass. A watchdog reset enters suspicious-reset lockout, and the normal
+    wireless updater explicitly powers down WWDT0 before its software-reset
+    handoff so Bootloader erase/program operations cannot be interrupted.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies without
 linking MCU drivers. Hardware-dependent control and safety paths still require

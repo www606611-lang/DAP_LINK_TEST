@@ -48,6 +48,10 @@ reference sources only; they are not copied wholesale into this target.
   calibration established 1060 quadrature counts per wheel revolution.
 - Reset cause, control mode, block reason, and motor-safe state are visible on
   the LCD and as debugger globals.
+- WWDT0 provides a 2 second hardware watchdog. The main loop refreshes it only
+  after completing one full scheduling pass and immediately before sleeping.
+  A watchdog reset is classified as suspicious and boots with motion locked;
+  debugger halt pauses the watchdog.
 - UART3 provides detached speed-loop tuning at 115200 baud: PA26 is MCU TX and
   PA25 is MCU RX. Applying parameters does not start either motor.
 
@@ -279,6 +283,12 @@ latest Yaw wave, status, and telemetry under the same runtime directory.
 The line tab exposes the promoted controller and route-profile parameters.
 Line status JSON/CSV includes target Yaw rate, measured Yaw rate, correction
 boost, and IMU-valid state without changing the seven-channel VOFA+ format.
+The TCP bridge also accepts `wdt stat` while the application is idle. It
+reports whether refreshes are active, the refresh count, and motor high-Z
+state. `wdt test` is a deliberate reset-injection command and is accepted only
+while the motors are already high impedance; after about 2 seconds the board
+must reboot into suspicious-reset lockout. The CLI actions are
+`WatchdogStatus` and `WatchdogTest`.
 
 ## Build and flash
 
@@ -312,6 +322,12 @@ is accepted only while all motor outputs are high impedance. Each 1024-byte
 frame and the completed image have independent CRC32 checks; an interrupted
 update leaves the Bootloader resident and ready for the same task to be run
 again.
+
+Before writing the SRAM update mailbox and requesting the software reset, the
+application resets and powers down WWDT0. This is required because an MSPM0
+watchdog can otherwise remain active across the software reset and interrupt
+the resident Bootloader during Flash erase or programming. WWDT0 is configured
+again when the new application starts.
 
 `flash_gcc.jlink` is now application-only: it erases `0x3000..0x1FFFF` and
 cannot erase the resident Bootloader. Do not replace it with a full-chip erase

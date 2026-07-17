@@ -177,7 +177,8 @@ function Test-ControlCommand([string]$line) {
         $line -match '^heading (get|run|stop|stat)$' -or
         $line -match '^line (get|run|stop|stat|cal)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
-        $line -match '^imu (stat|zero)$') {
+        $line -match '^imu (stat|zero)$' -or
+        $line -match '^wdt (stat|test)$') {
         return $true
     }
     if ($line -match '^spd set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
