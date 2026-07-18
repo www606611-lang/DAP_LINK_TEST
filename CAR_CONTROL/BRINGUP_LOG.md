@@ -1155,3 +1155,21 @@ regression evidence for the unchanged stop path.
 This accepts Stage 2 of `OPTIMIZATION_PLAN.md`. Stage 3 is the next bounded
 change: isolate tuning and diagnostics without changing command text, VOFA+
 channels, or validated control-loop behavior.
+
+## 2026-07-18: tuning command routing isolation
+
+The UART tuning console now contains only line reception, overflow handling,
+the ready banner, and waveform scheduling. Existing command parsing and
+workflow dispatch moved to `app/tuning/tuning_command_router.c` with a small
+public entry point. No command grammar, parameter range, response prefix, or
+VOFA+ channel changed.
+
+GCC and TIClang debug/product targets and all five host tests passed. The
+updated GCC image was wirelessly programmed through JDY-31 and restarted in
+`READY / HIGH-Z`. Read-only regression through the TCP bridge returned normal
+speed, position, IMU, Yaw, Heading, line, mission, motion, and watchdog
+responses; the operator confirmed the tuner panel and waveform display had no
+visible anomaly.
+
+This sub-step is accepted. Stage 3 remains in progress; the next bounded
+change is splitting status emission by domain while preserving response text.

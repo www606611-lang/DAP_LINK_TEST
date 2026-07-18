@@ -117,7 +117,13 @@ Acceptance evidence:
 
 ### Stage 3 - Tuning And Diagnostics Isolation
 
-Status: next.
+Status: in progress.
+
+Progress: command routing isolation accepted. The UART console is now a thin
+transport/waveform adapter and `app/tuning/tuning_command_router.c` owns the
+existing command grammar and workflow dispatch. Status output and waveform
+format are unchanged; the remaining Stage 3 work is to split status emission
+by domain.
 
 Split the large tuning command/status implementation by domain while keeping
 the external command text and VOFA+ channel groups unchanged. Make detailed

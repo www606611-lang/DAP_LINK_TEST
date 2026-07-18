@@ -118,6 +118,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/runtime/car_runtime.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/services/firmware_update.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_command_router.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_codec.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_status.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_wave.c"
@@ -168,6 +169,7 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     "${CMAKE_CURRENT_SOURCE_DIR}/app/motion/motion_supervisor.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_odometry.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_command_router.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_status.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
