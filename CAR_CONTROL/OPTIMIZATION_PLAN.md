@@ -117,14 +117,15 @@ Acceptance evidence:
 
 ### Stage 3 - Tuning And Diagnostics Isolation
 
-Status: in progress.
+Status: accepted by operator.
 
 Progress: command routing and status-domain isolation accepted. The UART
 console is now a thin transport/waveform adapter and
 `app/tuning/tuning_command_router.c` owns the existing command grammar and
 workflow dispatch. Status emission is split into control, sensor, and mission
 modules while the public header and waveform format remain unchanged. The
-remaining Stage 3 work is to verify product-profile dependency boundaries.
+product-profile dependency audit is also complete: temporary workflow
+implementations are replaced by disabled stubs in the product image.
 
 Split the large tuning command/status implementation by domain while keeping
 the external command text and VOFA+ channel groups unchanged. Make detailed
@@ -141,7 +142,7 @@ Acceptance:
 
 ### Stage 4 - Minimal Mission Composition
 
-Status: pending Stage 3 acceptance.
+Status: next.
 
 Only after a concrete competition route requires composition, add the smallest
 possible mission API. It may sequence existing owners, but it must not duplicate
@@ -217,6 +218,6 @@ validated baseline.
 
 ## Current Action
 
-Stage 2 is accepted. Implement Stage 3 only. Do not change the validated inner
-loops or the current `1400 pps` line parameters while splitting tuning and
-diagnostics ownership.
+Stage 3 is accepted. Implement Stage 4 only when a concrete route or motion
+task needs composition. Do not change the validated inner loops or the current
+`1400 pps` line parameters while adding that smallest product workflow.

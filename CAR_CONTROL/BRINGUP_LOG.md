@@ -1190,3 +1190,17 @@ operator confirmed no tuner-panel anomaly.
 
 This sub-step is accepted. Stage 3 remains in progress for the final
 product-profile dependency audit.
+
+## 2026-07-18: tuning and diagnostics isolation complete
+
+The product-profile dependency audit confirms that temporary speed, position,
+Heading, and timed-line implementations are not linked into the product image;
+`bringup_disabled.c` supplies only the required safe API stubs. Symbol-size
+comparison shows the product task stubs are 16-22 bytes, while the debug
+workflow tasks are 452-644 bytes. The product GCC image is approximately
+104240 bytes versus 115544 bytes for the debug image.
+
+This completes Stage 3 of `OPTIMIZATION_PLAN.md`. The next stage is deliberately
+conditional: add only a concrete competition route or motion composition, and
+keep the existing Line mission, Motion owner, stop paths, and standalone loops
+as the exclusive owners of their behavior.
