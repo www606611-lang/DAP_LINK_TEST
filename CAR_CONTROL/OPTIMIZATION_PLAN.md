@@ -61,7 +61,7 @@ rollback point for every later stage.
 
 ### Stage 1 - Architecture Cleanup And Build Boundary
 
-Status: next.
+Status: accepted by operator.
 
 First separate code by responsibility without changing motion behavior. The
 production image must not compile every temporary `app/bringup` workflow by
@@ -89,7 +89,7 @@ and no reference-project edits.
 
 ### Stage 2 - Scheduler Boundary Reduction
 
-Status: pending Stage 1 acceptance.
+Status: in progress.
 
 Move the long initialization and periodic-call list out of `app/main.c` into a
 small application runtime adapter. `main.c` should retain startup, the main
@@ -197,7 +197,6 @@ validated baseline.
 
 ## Current Action
 
-The oversized `mission_controller` experiment is removed. Obtain operator
-acceptance of this cleanup, then implement Stage 1 only. Do not change the
-validated inner loops or the current `1400 pps` line parameters while
-separating build profiles.
+Stage 1 is accepted. Implement Stage 2 only. Do not change the validated inner
+loops or the current `1400 pps` line parameters while extracting the runtime
+scheduler.

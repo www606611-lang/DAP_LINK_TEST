@@ -12,6 +12,8 @@ set(BOOTLOADER_NAME car_bootloader)
 set(PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/platform/mspm0g3507")
 option(CAR_JDY31_CONFIGURE_ON_BOOT
   "Build a one-shot JDY-31 9600-to-115200 configurator" OFF)
+option(CAR_ENABLE_BRINGUP
+  "Include temporary speed, position, Heading, and line test workflows" ON)
 set(SYSCFG_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/car_control.syscfg")
 set(SYSCFG_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/syscfg")
 set(SYSCFG_PRODUCT "${MSPM0_SDK_DIR}/.metadata/product.json")
@@ -89,14 +91,24 @@ add_custom_target(car_bootloader_syscfg
           "${BOOT_SYSCFG_LINKER}" "${BOOT_SYSCFG_GENLIBS}"
 )
 
+if(CAR_ENABLE_BRINGUP)
+  set(CAR_BRINGUP_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/heading_bringup_test.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_tracking_finish_policy.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_tracking_bringup_test.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/position_bringup_test.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/speed_bringup_test.c"
+  )
+else()
+  set(CAR_BRINGUP_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/bringup_disabled.c"
+  )
+endif()
+
 add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/car_app.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/heading_bringup_test.c"
+  ${CAR_BRINGUP_SOURCES}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_sensor_bringup.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_tracking_finish_policy.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_tracking_bringup_test.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/position_bringup_test.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/speed_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/yaw_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/display/car_display.c"
@@ -210,6 +222,13 @@ if(CAR_JDY31_CONFIGURE_ON_BOOT)
 else()
   target_compile_definitions(${APP_NAME} PRIVATE
     CAR_JDY31_CONFIGURE_ON_BOOT=0)
+endif()
+if(CAR_ENABLE_BRINGUP)
+  target_compile_definitions(${APP_NAME} PRIVATE
+    CAR_ENABLE_BRINGUP=1)
+else()
+  target_compile_definitions(${APP_NAME} PRIVATE
+    CAR_ENABLE_BRINGUP=0)
 endif()
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")

@@ -1118,3 +1118,21 @@ The operator confirmed the vehicle showed no obvious deflection and remained
 straight during the long, low-speed run. This promotes the composite owner as
 the reusable interface for future distance, route, and competition tasks;
 those tasks still need their own behavior-level tests.
+
+## 2026-07-18: production and bring-up build profiles
+
+The firmware now has explicit debug and product profiles controlled by
+`CAR_ENABLE_BRINGUP`. The debug profile retains the validated speed, position,
+Heading, and timed line workflows. The product profile replaces those temporary
+state machines with disabled entry points while retaining the physical-button
+Yaw workflow, line-sensor service, formal line mission, Motion owner, safety,
+diagnostics, and wireless update paths.
+
+Both GCC and TIClang debug/product targets built successfully, and all five
+host tests passed. The product GCC image is 99776 bytes compared with 110872
+bytes for the debug image. The product image was wirelessly programmed with
+CRC32 `0x7FF003B7`; `ASTAT READY`, `MSTAT READY`, and `OSTAT READY` all
+reported `hz=1`. Product `pos run` was rejected without arming the motors.
+
+This accepts Stage 1 of `OPTIMIZATION_PLAN.md`. Stage 2 now moves scheduler
+ordering out of `app/main.c` without changing task order or control behavior.

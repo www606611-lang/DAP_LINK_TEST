@@ -33,6 +33,24 @@
         "MSPM0_SDK_DIR": "C:/TI/mspm0_sdk_2_10_00_04",
         "SYSCONFIG_CLI": "C:/TI/sysconfig_1.26.2/sysconfig_cli.bat"
       }
+    },
+    {
+      "name": "gcc-product",
+      "displayName": "GNU Arm Embedded Product",
+      "inherits": "gcc-debug",
+      "binaryDir": "${sourceDir}/build-product-gcc",
+      "cacheVariables": {
+        "CAR_ENABLE_BRINGUP": "OFF"
+      }
+    },
+    {
+      "name": "ticlang-product",
+      "displayName": "TI Arm Clang Product",
+      "inherits": "ticlang-debug",
+      "binaryDir": "${sourceDir}/build-product-ticlang",
+      "cacheVariables": {
+        "CAR_ENABLE_BRINGUP": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -43,6 +61,14 @@
     {
       "name": "ticlang-debug",
       "configurePreset": "ticlang-debug"
+    },
+    {
+      "name": "gcc-product",
+      "configurePreset": "gcc-product"
+    },
+    {
+      "name": "ticlang-product",
+      "configurePreset": "ticlang-product"
     }
   ]
 }

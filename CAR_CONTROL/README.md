@@ -371,6 +371,25 @@ must reboot into suspicious-reset lockout. The CLI actions are
 
 ## Build and flash
 
+Two build profiles share the same validated control and driver sources:
+
+```powershell
+# Development and tuning profile. Temporary bring-up workflows are enabled.
+cmake --preset gcc-debug
+cmake --build build-gcc --target car_control -j
+
+# Competition product profile. Temporary speed, position, Heading, and timed
+# line-test workflows are replaced by disabled entry points.
+cmake --preset gcc-product
+cmake --build build-product-gcc --target car_control -j
+```
+
+The matching TIClang presets are `ticlang-debug` and `ticlang-product`.
+`yaw_bringup_test` remains in both profiles because it currently owns the
+validated physical-button Yaw workflow. `line_sensor_bringup` also remains in
+both profiles because it is the active line-sensor service, despite its legacy
+name. Product builds reject the excluded test commands without arming motors.
+
 The normal development path is the resident JDY-31 updater on `COM6`. From the
 repository root:
 
