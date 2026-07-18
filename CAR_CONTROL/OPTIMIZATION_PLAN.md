@@ -119,11 +119,12 @@ Acceptance evidence:
 
 Status: in progress.
 
-Progress: command routing isolation accepted. The UART console is now a thin
-transport/waveform adapter and `app/tuning/tuning_command_router.c` owns the
-existing command grammar and workflow dispatch. Status output and waveform
-format are unchanged; the remaining Stage 3 work is to split status emission
-by domain.
+Progress: command routing and status-domain isolation accepted. The UART
+console is now a thin transport/waveform adapter and
+`app/tuning/tuning_command_router.c` owns the existing command grammar and
+workflow dispatch. Status emission is split into control, sensor, and mission
+modules while the public header and waveform format remain unchanged. The
+remaining Stage 3 work is to verify product-profile dependency boundaries.
 
 Split the large tuning command/status implementation by domain while keeping
 the external command text and VOFA+ channel groups unchanged. Make detailed

@@ -1173,3 +1173,20 @@ visible anomaly.
 
 This sub-step is accepted. Stage 3 remains in progress; the next bounded
 change is splitting status emission by domain while preserving response text.
+
+## 2026-07-18: tuning status-domain isolation
+
+The status implementation was split by ownership into
+`tuning_control_status.c`, `tuning_sensor_status.c`, and
+`tuning_mission_status.c`. The existing `tuning_status.h` declarations remain
+the stable facade used by the command router, so status prefixes, fields, and
+VOFA+ waveform channels are unchanged.
+
+GCC and TIClang debug/product targets and all five host tests passed. The
+updated GCC image was wirelessly programmed through JDY-31 and restarted in
+`READY / HIGH-Z`. Sequential TCP-bridge reads of speed, position, IMU, Yaw,
+Heading, line, mission, motion, and watchdog status all returned normally; the
+operator confirmed no tuner-panel anomaly.
+
+This sub-step is accepted. Stage 3 remains in progress for the final
+product-profile dependency audit.

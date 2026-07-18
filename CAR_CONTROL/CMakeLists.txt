@@ -120,7 +120,9 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_command_router.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_codec.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_control_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_sensor_status.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_mission_status.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_wave.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_wire.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_button.c"
@@ -170,7 +172,9 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_odometry.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_command_router.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_status.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_control_status.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_sensor_status.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_mission_status.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
     PROPERTIES COMPILE_OPTIONS "-Os")
 endif()
