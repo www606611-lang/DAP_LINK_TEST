@@ -9,7 +9,8 @@ operator accepts the current stage on the vehicle.
 
 - Branch: `checkpoint/position-cascade-20260519`
 - Baseline commit: `14a109b2a73a57114ff7fbcdfda60c2533c71ce9`
-- GCC image last flashed: 110872 bytes, CRC32 `0x15638787`
+- Validated rollback GCC image: 110872 bytes, CRC32 `0x15638787`
+- Planning-document commit: `8b382a5a2b1691d384c612c029d1a1fd89a23f5d`
 - Wireless update: JDY-31 on `COM6`
 - Tuner owns `COM6`; CLI and VOFA+ use the tuner TCP bridge
 - Stable line mission: five-corner route at requested `1400 pps`
@@ -20,6 +21,10 @@ operator accepts the current stage on the vehicle.
 The validated speed, position, Yaw, Heading, and line inner/outer loops are
 not retuned or rewritten as part of structural work. A line corner change is
 experimental until the operator accepts a full five-corner run.
+
+The oversized mission-controller experiment was removed before commit. The
+validated `MotionSupervisor` remains the only distance plus Heading composite
+owner until a concrete product route justifies a smaller mission workflow.
 
 ## Rules For Every Stage
 
@@ -54,74 +59,86 @@ Confirm the baseline image, branch hash, wireless updater, tuner bridge,
 `HIGH-Z` state, five host tests, and both toolchain builds. This is the
 rollback point for every later stage.
 
-### Stage 1 - Unified Mission Controller
+### Stage 1 - Architecture Cleanup And Build Boundary
 
 Status: next.
 
-Add a product-level mission scheduler under `app/mission/`. It should sequence
-safe actions such as:
+First separate code by responsibility without changing motion behavior. The
+production image must not compile every temporary `app/bringup` workflow by
+default. Add a CMake option such as `CAR_ENABLE_BRINGUP`:
 
-- relative distance with Heading hold;
-- relative Yaw pivot;
-- line-follow mission;
-- stop, timeout, and fault termination.
+- product profile: product missions, safety, required diagnostics, and the
+  wireless command service;
+- bring-up profile: the existing speed, position, Yaw, Heading, line, and
+  sensor test workflows.
 
-The scheduler submits commands to existing owners. It must never call motor
-PWM or start two outer loops concurrently. `MotionSupervisor` remains the
-distance plus Heading implementation; the new layer owns sequencing and
-mission state only.
-
-Acceptance:
-
-- host tests cover idle, one action, sequential actions, conflict rejection,
-  timeout, operator stop, and fault stop;
-- the current standalone speed, position, Yaw, Heading, and line commands
-  behave exactly as before;
-- a short supervised vehicle test completes one distance-plus-Heading action,
-  ends in `DONE / HIGH-Z`, and is stopped by a board button during a second
-  action.
-
-Non-goals: no PID changes, no line-speed changes, no new route tuning.
-
-### Stage 2 - Production Versus Bring-Up Build Profiles
-
-Status: pending Stage 1 acceptance.
-
-Add a CMake option such as `CAR_ENABLE_BRINGUP` and separate the product
-mission build from the temporary `app/bringup` workflows. Keep bring-up code
-available in the debug/tuning profile, but keep the competition image focused
-on product missions, safety, diagnostics, and the required command protocol.
+The currently uncommitted `mission_controller` experiment is not a reason to
+add more abstraction. Before this stage is accepted, either remove it or
+reduce it to a small adapter around an actually required product task.
 
 Acceptance:
 
 - both profiles build with GCC and TIClang;
 - the product profile cannot start a bring-up test accidentally;
-- the tuning profile retains all currently validated test commands;
-- both profiles preserve startup `HIGH-Z` and suspicious-reset lockout.
+- the bring-up profile retains all currently validated test commands;
+- startup `HIGH-Z`, suspicious-reset lockout, and wireless update are unchanged;
+- no validated control-loop source is moved or rewritten.
 
-Non-goals: do not delete `experiments/legacy_motor_bringup` or alter reference
-projects.
+Non-goals: no new mission scheduler, no PID changes, no line-speed changes,
+and no reference-project edits.
 
-### Stage 3 - Mission and Tuning Tool Closure
+### Stage 2 - Scheduler Boundary Reduction
 
-Status: pending Stage 2 acceptance.
+Status: pending Stage 1 acceptance.
 
-Add a Motion/Mission view to the tuner for distance, Heading, Yaw, segment
-selection, state, progress, timeout, result, and `HIGH-Z`. Keep the existing
-seven-channel VOFA+ groups unchanged. The CLI remains the automation path and
-the GUI remains the single `COM6` owner.
+Move the long initialization and periodic-call list out of `app/main.c` into a
+small application runtime adapter. `main.c` should retain startup, the main
+loop, watchdog handoff, and sleep; the runtime adapter owns task ordering.
 
 Acceptance:
 
-- every mission command available through CLI is visible in the GUI or has a
-  documented CLI-only reason;
-- latest mission state and telemetry are written to JSON/CSV;
-- no foreground mouse automation is required;
-- the existing speed, position, Yaw, Heading, and line panels regress-free.
+- task order and measured loop/display timing are unchanged;
+- all six host tests and both firmware targets pass;
+- button stop, command leases, and high impedance behavior are unchanged;
+- `main.c` no longer includes every workflow header directly.
 
-### Stage 4 - Safety and Fault Regression
+### Stage 3 - Tuning And Diagnostics Isolation
+
+Status: pending Stage 2 acceptance.
+
+Split the large tuning command/status implementation by domain while keeping
+the external command text and VOFA+ channel groups unchanged. Make detailed
+debug mirrors optional in the bring-up profile. The GUI remains the sole
+`COM6` owner and the TCP bridge remains the automation path.
+
+Acceptance:
+
+- speed, position, Yaw, Heading, line, IMU, watchdog, and update commands all
+  regress-free;
+- latest JSON/CSV files and the seven-channel VOFA+ format are unchanged;
+- product builds do not depend on test-only workflow headers;
+- no foreground mouse automation is introduced.
+
+### Stage 4 - Minimal Mission Composition
 
 Status: pending Stage 3 acceptance.
+
+Only after a concrete competition route requires composition, add the smallest
+possible mission API. It may sequence existing owners, but it must not duplicate
+their validation, safety, or control state machines. Do not add a generic
+multi-action framework in advance of a real route requirement.
+
+Acceptance:
+
+- one documented route or motion task has a clear owner and stop path;
+- host tests cover conflict rejection, completion, timeout, and operator stop;
+- the standalone loops remain unchanged;
+- the implementation stays small enough to understand as one application
+  workflow.
+
+### Stage 5 - Safety And Fault Regression
+
+Status: pending Stage 4 acceptance.
 
 Expand host and supervised hardware coverage for sensor-stale, command-lease
 expiry, output failure, ownership loss, watchdog reset, wireless-update entry,
@@ -130,14 +147,14 @@ motor pins are high impedance.
 
 Acceptance:
 
-- all five host tests pass;
+- all applicable host tests pass;
 - each injected fault reports a stable result and cannot restart motion;
 - watchdog test boots into suspicious-reset lockout;
 - wireless update still completes from idle without a J-Link.
 
-### Stage 5 - Product Configuration and Calibration
+### Stage 6 - Product Configuration And Calibration
 
-Status: pending Stage 4 acceptance.
+Status: pending Stage 5 acceptance.
 
 Centralize board/product defaults in a configuration header or module: wheel
 mapping, counts per revolution, speed limits, output limits, IMU scale and
@@ -152,7 +169,7 @@ Acceptance:
   safety behavior;
 - the configuration change has no control-loop behavior change by itself.
 
-### Stage 6 - Optional Line-Tracking Optimization
+### Stage 7 - Optional Line-Tracking Optimization
 
 Status: optional and last among control changes.
 
@@ -172,13 +189,15 @@ Acceptance:
 
 ## Completion Definition
 
-The project is considered competition-ready when Stages 1 through 5 are
+The project is considered competition-ready when Stages 1 through 6 are
 accepted, the product profile is the image used for the competition, every
 mission has a tested stop/fault path, and the final branch and remote hashes
-match. Stage 6 is an optimization opportunity, not a reason to destabilize the
+match. Stage 7 is an optimization opportunity, not a reason to destabilize the
 validated baseline.
 
 ## Current Action
 
-Implement Stage 1 only. Do not change the validated inner loops or the current
-`1400 pps` line parameters while building the mission scheduler.
+The oversized `mission_controller` experiment is removed. Obtain operator
+acceptance of this cleanup, then implement Stage 1 only. Do not change the
+validated inner loops or the current `1400 pps` line parameters while
+separating build profiles.
