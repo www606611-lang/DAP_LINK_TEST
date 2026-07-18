@@ -1136,3 +1136,22 @@ reported `hz=1`. Product `pos run` was rejected without arming the motors.
 
 This accepts Stage 1 of `OPTIMIZATION_PLAN.md`. Stage 2 now moves scheduler
 ordering out of `app/main.c` without changing task order or control behavior.
+
+## 2026-07-18: scheduler boundary reduction
+
+The application scheduler was moved from `app/main.c` into
+`app/runtime/car_runtime.c`. The startup wrapper now contains only runtime
+initialization and the perpetual step call; task ordering, button action
+routing, display slicing, watchdog service, and low-power sleep are unchanged.
+
+Both GCC and TIClang debug/product targets and all five host tests passed. The
+updated GCC image was wirelessly programmed through JDY-31 and restarted in
+`READY / HIGH-Z`. The operator accepted a supervised `+530`-count,
+Heading-hold motion at `700 pps`; it completed normally (`runs=3`, final
+position error `23` counts, result `0`) and the final status reported
+`hz=1`. Previously validated active-workflow button-stop coverage remains the
+regression evidence for the unchanged stop path.
+
+This accepts Stage 2 of `OPTIMIZATION_PLAN.md`. Stage 3 is the next bounded
+change: isolate tuning and diagnostics without changing command text, VOFA+
+channels, or validated control-loop behavior.

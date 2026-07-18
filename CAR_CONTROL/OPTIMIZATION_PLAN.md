@@ -89,7 +89,7 @@ and no reference-project edits.
 
 ### Stage 2 - Scheduler Boundary Reduction
 
-Status: in progress.
+Status: accepted by operator.
 
 Move the long initialization and periodic-call list out of `app/main.c` into a
 small application runtime adapter. `main.c` should retain startup, the main
@@ -102,9 +102,22 @@ Acceptance:
 - button stop, command leases, and high impedance behavior are unchanged;
 - `main.c` no longer includes every workflow header directly.
 
+Acceptance evidence:
+
+- `main.c` is now an eight-line startup/loop wrapper; initialization,
+  scheduler ordering, button routing, display slicing, watchdog handoff, and
+  sleep live in `app/runtime/car_runtime.c`.
+- GCC and TIClang debug/product targets and all five host tests passed.
+- The wireless GCC image was updated through JDY-31 and restarted in
+  `READY / HIGH-Z`.
+- The operator accepted the supervised `+530`-count, Heading-hold smoke run
+  at `700 pps`; it completed normally and returned to `HIGH-Z`.
+- Existing button-stop coverage remains valid: an active workflow is stopped
+  before any new button action can be queued.
+
 ### Stage 3 - Tuning And Diagnostics Isolation
 
-Status: pending Stage 2 acceptance.
+Status: next.
 
 Split the large tuning command/status implementation by domain while keeping
 the external command text and VOFA+ channel groups unchanged. Make detailed
@@ -197,6 +210,6 @@ validated baseline.
 
 ## Current Action
 
-Stage 1 is accepted. Implement Stage 2 only. Do not change the validated inner
-loops or the current `1400 pps` line parameters while extracting the runtime
-scheduler.
+Stage 2 is accepted. Implement Stage 3 only. Do not change the validated inner
+loops or the current `1400 pps` line parameters while splitting tuning and
+diagnostics ownership.
