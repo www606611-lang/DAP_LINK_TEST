@@ -513,6 +513,8 @@ g_car_app_transition_count
 See `HARDWARE_MAP.md` before enabling any additional peripheral and
 `ARCHITECTURE.md` for the staged integration order. Bench observations and the
 remaining manual checks are recorded in `BRINGUP_LOG.md`.
+The ordered productization and acceptance workflow is in
+`OPTIMIZATION_PLAN.md`.
 
 ## Host regression tests
 
