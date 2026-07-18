@@ -43,9 +43,23 @@
 static uint32_t g_displayed_period = UINT32_MAX;
 static car_display_phase_t g_display_phase = CAR_DISPLAY_PHASE_HEADER;
 static bool g_display_dirty = true;
+static uint8_t g_display_priority_slot;
+static uint8_t g_display_slow_index;
+
+static const car_display_phase_t g_display_slow_phases[] = {
+    CAR_DISPLAY_PHASE_HEADER,
+    CAR_DISPLAY_PHASE_SPEED,
+    CAR_DISPLAY_PHASE_ENCODER,
+    CAR_DISPLAY_PHASE_LINE,
+    CAR_DISPLAY_PHASE_CONTROL,
+    CAR_DISPLAY_PHASE_HEALTH,
+    CAR_DISPLAY_PHASE_FOOTER
+};
 
 static void car_runtime_process_action(
     const car_app_snapshot_t *snapshot);
+static car_display_phase_t car_runtime_next_display_phase(
+    car_app_workflow_t workflow);
 
 void CarRuntime_Init(void)
 {
@@ -110,6 +124,7 @@ void CarRuntime_Step(void)
     bool any_release_event;
     car_app_inputs_t car_app_inputs = {0};
     car_app_snapshot_t car_app_snapshot;
+    car_app_workflow_t active_workflow = CAR_APP_WORKFLOW_NONE;
 
     AppRuntimeMetrics_RecordLoop(now_ms);
     BoardButton_Task(now_ms);
@@ -153,6 +168,7 @@ void CarRuntime_Step(void)
     car_app_inputs.pb5_press_event = pb5_press_event;
     CarApp_Step(&car_app_inputs);
     if (CarApp_GetSnapshot(&car_app_snapshot)) {
+        active_workflow = car_app_snapshot.active_workflow;
         car_runtime_process_action(&car_app_snapshot);
     }
 
@@ -200,14 +216,41 @@ void CarRuntime_Step(void)
         CarDisplay_Update(now_ms, g_display_phase);
         AppRuntimeMetrics_RecordDisplay(
             delay_get_ms() - display_started_ms);
-        g_display_phase = (car_display_phase_t) (
-            ((uint32_t) g_display_phase + 1U) %
-            (uint32_t) CAR_DISPLAY_PHASE_COUNT);
+        g_display_phase = JDY31_ConfigIsExclusive() ?
+            CAR_DISPLAY_PHASE_HEADER :
+            car_runtime_next_display_phase(active_workflow);
         g_display_dirty = false;
     }
 
     SystemWatchdog_Kick();
     __WFI();
+}
+
+static car_display_phase_t car_runtime_next_display_phase(
+    car_app_workflow_t workflow)
+{
+    car_display_phase_t phase;
+
+    if (g_display_priority_slot == 0U) {
+        phase = CAR_DISPLAY_PHASE_ATTITUDE;
+    } else if (g_display_priority_slot == 1U) {
+        phase = ((workflow == CAR_APP_WORKFLOW_LINE_TEST) ||
+            (workflow == CAR_APP_WORKFLOW_LINE_MISSION)) ?
+            CAR_DISPLAY_PHASE_LINE : CAR_DISPLAY_PHASE_SPEED;
+    } else {
+        phase = g_display_slow_phases[g_display_slow_index];
+        g_display_slow_index++;
+        if (g_display_slow_index >=
+            (sizeof(g_display_slow_phases) /
+                sizeof(g_display_slow_phases[0]))) {
+            g_display_slow_index = 0U;
+        }
+    }
+    g_display_priority_slot++;
+    if (g_display_priority_slot >= 3U) {
+        g_display_priority_slot = 0U;
+    }
+    return phase;
 }
 
 static void car_runtime_process_action(

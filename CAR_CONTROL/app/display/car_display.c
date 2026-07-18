@@ -1,25 +1,47 @@
 #include "car_display.h"
 
+#include "car_app.h"
+#include "control_supervisor.h"
 #include "debug_snapshot.h"
-#include "heading_bringup_test.h"
 #include "jdy31_config.h"
-#include "line_follow_mission.h"
 #include "line_sensor.h"
-#include "line_tracking_bringup_test.h"
-#include "motion_supervisor.h"
 #include "st7789.h"
-#include "yaw_bringup_test.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+
+#define CAR_DISPLAY_ROW_CHARS 40U
+#define CAR_DISPLAY_ROW_COUNT 8U
+#define CAR_DISPLAY_ROW_INVALID CAR_DISPLAY_ROW_COUNT
+
+static char g_display_row_cache[CAR_DISPLAY_ROW_COUNT]
+    [CAR_DISPLAY_ROW_CHARS + 1U];
+static uint16_t g_display_row_color[CAR_DISPLAY_ROW_COUNT];
+static uint16_t g_display_row_background[CAR_DISPLAY_ROW_COUNT];
+static bool g_display_row_valid[CAR_DISPLAY_ROW_COUNT];
 
 static void car_display_format_signed_tenths(
     char *buffer, size_t buffer_size, int32_t value_milli);
+static void car_display_show_row(uint16_t y, uint16_t color,
+    uint16_t background, const char *format, ...);
+static void car_display_reset_row_cache(void);
+static uint8_t car_display_row_index(uint16_t y);
+static const char *car_display_app_state_text(uint32_t state);
+static const char *car_display_workflow_text(uint32_t workflow);
+static const char *car_display_control_mode_text(uint32_t mode);
+static const char *car_display_block_reason_text(uint32_t reason);
+static const char *car_display_key_text(
+    const car_debug_display_snapshot_t *debug);
+static int32_t car_display_clamp_i32(
+    int32_t value, int32_t minimum, int32_t maximum);
 
 void CarDisplay_Init(void)
 {
+    car_display_reset_row_cache();
     ST7789_Fill(ST7789_COLOR_BLACK);
     if (JDY31_ConfigIsExclusive()) {
         ST7789_FillRect(0U, 0U, ST7789_WIDTH, 26U,
@@ -28,80 +50,34 @@ void CarDisplay_Init(void)
             ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
         return;
     }
-    ST7789_FillRect(0U, 0U, ST7789_WIDTH, 28U, ST7789_COLOR_BLUE);
-    ST7789_ShowAsciiStringFast(8U, 6U, "YAW CONTROL",
-        ST7789_8X16, ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
-    ST7789_DrawLine(16U, 88U, 304U, 88U,
+
+    ST7789_FillRect(0U, 0U, ST7789_WIDTH, 24U, ST7789_COLOR_BLUE);
+    ST7789_DrawLine(0U, 24U, (uint16_t) (ST7789_WIDTH - 1U), 24U,
         ST7789_RGB565(48U, 52U, 60U));
-    ST7789_ShowAsciiStringFast(16U, 50U, "NOW", ST7789_8X16,
-        ST7789_COLOR_CYAN, ST7789_COLOR_BLACK);
-    ST7789_ShowAsciiStringFast(240U, 62U, "deg", ST7789_8X16,
-        ST7789_COLOR_WHITE, ST7789_COLOR_BLACK);
-    ST7789_ShowAsciiStringFast(16U, 94U, "TARGET", ST7789_8X16,
-        ST7789_COLOR_CYAN, ST7789_COLOR_BLACK);
-    ST7789_ShowAsciiStringFast(176U, 94U, "ERROR", ST7789_8X16,
-        ST7789_COLOR_CYAN, ST7789_COLOR_BLACK);
+    car_display_show_row(5U, ST7789_COLOR_WHITE, ST7789_COLOR_BLUE,
+        "CAR DASHBOARD");
 }
 
 void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
 {
     car_debug_display_snapshot_t debug;
-    char angle_text[16];
-    char state_text[8];
-    char command_text[16];
+    char yaw_text[16];
+    char yaw_error_text[16];
+    char yaw_rate_text[16];
     char target_text[16];
-    char error_text[16];
-    char rate_text[16];
-    char timer_text[12];
-    char line_text[24];
-    char line_state_text[9];
+    char heading_error_text[16];
     char line_bits[9];
-    const char *key_text = "KEY ----";
-    uint16_t key_color = ST7789_COLOR_WHITE;
-    int32_t angle_mdeg;
-    int32_t command_mdeg;
-    int32_t command_magnitude;
-    char command_sign = '+';
-    int32_t target_mdeg;
-    int32_t error_mdeg;
-    uint32_t display_elapsed_ms;
-    bool heading_active = HeadingBringupTest_IsActive();
-    bool yaw_active = YawBringupTest_IsActive();
-    bool motion_active = MotionSupervisor_IsActive();
-    bool line_mission_active = LineFollowMission_IsActive();
-    bool line_tracking_active = line_mission_active ||
-        LineTrackingBringupTest_IsActive();
-    bool angle_motion_active = heading_active || yaw_active ||
-        motion_active;
-    const char *control_state = motion_active ?
-        MotionSupervisor_GetStateText() :
-        (line_mission_active ?
-        LineFollowMission_GetStateText() :
-        (line_tracking_active ?
-            LineTrackingBringupTest_GetStateText() :
-        (heading_active ? HeadingBringupTest_GetStateText() :
-            YawBringupTest_GetStateText())));
-    uint16_t angle_color;
-    uint16_t state_color = ST7789_COLOR_WHITE;
-    uint16_t line_color = ST7789_COLOR_RED;
+    const char *line_state_text;
+    const char *key_text;
+    uint16_t line_color;
+    uint16_t health_color;
+    uint16_t key_color;
     uint8_t line_index;
-    int32_t line_error_magnitude;
-    char line_error_sign = '+';
-
-    (void) now_ms;
+    uint32_t uptime_s;
 
     if (!CarDebugSnapshot_GetDisplay(&debug)) {
         return;
     }
-    angle_mdeg = debug.imu_yaw_mdeg;
-    command_mdeg = debug.last_button_yaw_mdeg;
-    command_magnitude = command_mdeg;
-    target_mdeg = debug.yaw_target_mdeg;
-    error_mdeg = debug.yaw_error_mdeg;
-    display_elapsed_ms = debug.yaw_elapsed_ms;
-    angle_color = (debug.imu_ready && debug.imu_attitude_valid) ?
-        ST7789_COLOR_YELLOW : ST7789_COLOR_RED;
-    line_error_magnitude = debug.line_sensor_error;
 
     if (JDY31_ConfigIsExclusive()) {
         jdy31_config_snapshot_t jdy31;
@@ -129,53 +105,17 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
         return;
     }
 
-    if ((YawBringupTest_GetState() == YAW_BRINGUP_TEST_ARMING) &&
-        (command_mdeg != 0)) {
-        target_mdeg = command_mdeg;
-        error_mdeg = command_mdeg;
-    }
     car_display_format_signed_tenths(
-        angle_text, sizeof(angle_text), angle_mdeg);
+        yaw_text, sizeof(yaw_text), debug.imu_yaw_mdeg);
     car_display_format_signed_tenths(
-        target_text, sizeof(target_text), target_mdeg);
+        yaw_error_text, sizeof(yaw_error_text), debug.yaw_error_mdeg);
     car_display_format_signed_tenths(
-        error_text, sizeof(error_text), error_mdeg);
+        yaw_rate_text, sizeof(yaw_rate_text), debug.imu_yaw_rate_mdps);
     car_display_format_signed_tenths(
-        rate_text, sizeof(rate_text), debug.imu_yaw_rate_mdps);
-
-    if (command_magnitude < 0) {
-        command_sign = '-';
-        command_magnitude = -command_magnitude;
-    }
-    if (heading_active) {
-        (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
-            (long) debug.heading_base_target_pps);
-    } else if (line_tracking_active) {
-        (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
-            (long) debug.line_tracking_base_target_pps);
-    } else if (motion_active) {
-        (void) snprintf(command_text, sizeof(command_text), "M:%4ld",
-            (long) debug.motion_base_target_pps);
-    } else if (command_mdeg == 0) {
-        (void) snprintf(command_text, sizeof(command_text), "CMD: ---");
-    } else {
-        (void) snprintf(command_text, sizeof(command_text), "CMD:%c%03ld",
-            command_sign, (long) (command_magnitude / 1000));
-    }
-    (void) snprintf(state_text, sizeof(state_text), "%-6.6s",
-        control_state);
-    if (line_tracking_active) {
-        display_elapsed_ms = debug.line_tracking_elapsed_ms;
-    }
-    if (motion_active) {
-        display_elapsed_ms = debug.motion_elapsed_ms;
-    }
-    if (display_elapsed_ms > 99990U) {
-        display_elapsed_ms = 99990U;
-    }
-    (void) snprintf(timer_text, sizeof(timer_text), "T%2lu.%02lus",
-        (unsigned long) (display_elapsed_ms / 1000U),
-        (unsigned long) ((display_elapsed_ms % 1000U) / 10U));
+        target_text, sizeof(target_text), debug.yaw_target_mdeg);
+    car_display_format_signed_tenths(
+        heading_error_text, sizeof(heading_error_text),
+        debug.motion_heading_error_mdeg);
 
     for (line_index = 0U; line_index < 8U; line_index++) {
         uint8_t bit = (uint8_t) (0x80U >> line_index);
@@ -184,18 +124,9 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
             ((debug.line_sensor_active_mask & bit) != 0U) ? '1' : '0';
     }
     line_bits[8] = '\0';
-    if (line_error_magnitude < 0) {
-        line_error_sign = '-';
-        line_error_magnitude = -line_error_magnitude;
-    }
-    if (line_error_magnitude > 99) {
-        line_error_magnitude = 99;
-    }
-    (void) snprintf(line_text, sizeof(line_text), "L%s E%c%02ld",
-        line_bits, line_error_sign, (long) line_error_magnitude);
+
     if (debug.line_sensor_ready) {
-        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
-            debug.line_sensor_seen ? "LINE" : "MISS");
+        line_state_text = debug.line_sensor_seen ? "SEEN" : "MISS";
         line_color = debug.line_sensor_seen ?
             ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW;
     } else if ((debug.line_sensor_state ==
@@ -204,106 +135,209 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
             (uint32_t) LINE_SENSOR_STATE_CALIBRATION_ON) ||
         (debug.line_sensor_state ==
             (uint32_t) LINE_SENSOR_STATE_CALIBRATION_OFF_WAIT)) {
-        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
-            "CAL");
+        line_state_text = "CAL";
         line_color = ST7789_COLOR_YELLOW;
     } else {
-        (void) snprintf(line_state_text, sizeof(line_state_text), "%-8s",
-            "ERR");
+        line_state_text = "ERR";
+        line_color = ST7789_COLOR_RED;
     }
 
-    if (debug.pb21_pressed) {
-        key_text = "KEY PB21";
-        key_color = ST7789_COLOR_GREEN;
-    } else if (debug.pb4_pressed) {
-        key_text = "KEY PB4 ";
-        key_color = ST7789_COLOR_GREEN;
-    } else if (debug.pb5_pressed) {
-        key_text = "KEY PB5 ";
-        key_color = ST7789_COLOR_GREEN;
-    } else {
-        switch (debug.last_button_id) {
-            case CAR_DEBUG_BUTTON_PB21:
-                key_text = "KEY PB21";
-                break;
-            case CAR_DEBUG_BUTTON_PB4:
-                key_text = "KEY PB4 ";
-                break;
-            case CAR_DEBUG_BUTTON_PB5:
-                key_text = "KEY PB5 ";
-                break;
-            default:
-                break;
-        }
-    }
-
-    if (line_tracking_active) {
-        state_color = ST7789_COLOR_CYAN;
-    } else if (heading_active) {
-        state_color = (HeadingBringupTest_GetState() ==
-            HEADING_BRINGUP_TEST_ARMING) ?
-            ST7789_COLOR_YELLOW : ST7789_COLOR_CYAN;
-    } else {
-        switch (YawBringupTest_GetState()) {
-            case YAW_BRINGUP_TEST_ARMING:
-                state_color = ST7789_COLOR_YELLOW;
-                break;
-            case YAW_BRINGUP_TEST_RUNNING:
-                state_color = ST7789_COLOR_CYAN;
-                break;
-            case YAW_BRINGUP_TEST_COMPLETE:
-                state_color = ST7789_COLOR_GREEN;
-                break;
-            case YAW_BRINGUP_TEST_ABORTED:
-            case YAW_BRINGUP_TEST_LOCKED:
-                state_color = ST7789_COLOR_RED;
-                break;
-            default:
-                break;
-        }
+    key_text = car_display_key_text(&debug);
+    key_color = (debug.pb21_pressed || debug.pb4_pressed ||
+        debug.pb5_pressed) ? ST7789_COLOR_GREEN : ST7789_COLOR_WHITE;
+    health_color = (debug.imu_ready && debug.imu_attitude_valid &&
+        debug.line_sensor_ready) ? ST7789_COLOR_GREEN :
+        ST7789_COLOR_YELLOW;
+    uptime_s = now_ms / 1000U;
+    if (uptime_s > 9999U) {
+        uptime_s = 9999U;
     }
 
     switch (phase) {
-        case CAR_DISPLAY_PHASE_ANGLE:
-            ST7789_ShowAsciiStringScaled(80U, 32U, angle_text, 3U,
-                angle_color, ST7789_COLOR_BLACK);
+        case CAR_DISPLAY_PHASE_SPEED:
+            car_display_show_row(28U, ST7789_COLOR_CYAN,
+                ST7789_COLOR_BLACK,
+                "SPD L%+5ld R%+5ld T%+5ld/%+5ld",
+                (long) car_display_clamp_i32(
+                    debug.encoder_0_speed_pps, -9999, 9999),
+                (long) car_display_clamp_i32(
+                    debug.encoder_1_speed_pps, -9999, 9999),
+                (long) car_display_clamp_i32(
+                    debug.speed_left_target_pps, -9999, 9999),
+                (long) car_display_clamp_i32(
+                    debug.speed_right_target_pps, -9999, 9999));
             break;
 
-        case CAR_DISPLAY_PHASE_TARGET:
-            ST7789_ShowAsciiStringScaled(16U, 110U, target_text, 2U,
-                ST7789_COLOR_WHITE, ST7789_COLOR_BLACK);
-            ST7789_ShowAsciiStringScaled(176U, 110U, error_text, 2U,
-                ST7789_COLOR_YELLOW, ST7789_COLOR_BLACK);
+        case CAR_DISPLAY_PHASE_ENCODER:
+            car_display_show_row(48U, ST7789_COLOR_WHITE,
+                ST7789_COLOR_BLACK,
+                "ENC L%+7ld R%+7ld D%+7ld",
+                (long) car_display_clamp_i32(
+                    debug.encoder_0_count, -999999, 999999),
+                (long) car_display_clamp_i32(
+                    debug.encoder_1_count, -999999, 999999),
+                (long) car_display_clamp_i32(
+                    debug.encoder_count_difference, -999999, 999999));
+            break;
+
+        case CAR_DISPLAY_PHASE_ATTITUDE:
+            car_display_show_row(68U,
+                (debug.imu_ready && debug.imu_attitude_valid) ?
+                    ST7789_COLOR_YELLOW : ST7789_COLOR_RED,
+                ST7789_COLOR_BLACK,
+                "YAW %s E%s R%s", yaw_text, yaw_error_text,
+                yaw_rate_text);
+            break;
+
+        case CAR_DISPLAY_PHASE_LINE:
+            car_display_show_row(88U, line_color,
+                ST7789_COLOR_BLACK,
+                "LINE %s E%+3ld N%lu %-4s", line_bits,
+                (long) car_display_clamp_i32(
+                    debug.line_sensor_error, -99, 99),
+                (unsigned long) debug.line_sensor_active_count,
+                line_state_text);
+            break;
+
+        case CAR_DISPLAY_PHASE_CONTROL:
+            switch (debug.active_workflow) {
+                case CAR_APP_WORKFLOW_POSITION_TEST:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "POS E%+6ld/%+6ld SY%+5ld",
+                        (long) car_display_clamp_i32(
+                            debug.position_left_error_count,
+                            -99999, 99999),
+                        (long) car_display_clamp_i32(
+                            debug.position_right_error_count,
+                            -99999, 99999),
+                        (long) car_display_clamp_i32(
+                            debug.position_sync_correction_pps,
+                            -9999, 9999));
+                    break;
+
+                case CAR_APP_WORKFLOW_LINE_TEST:
+                case CAR_APP_WORKFLOW_LINE_MISSION:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "TURN C%+5ld TG%+5ld/%+5ld",
+                        (long) car_display_clamp_i32(
+                            debug.line_tracking_correction_pps,
+                            -9999, 9999),
+                        (long) car_display_clamp_i32(
+                            debug.line_tracking_left_target_pps,
+                            -9999, 9999),
+                        (long) car_display_clamp_i32(
+                            debug.line_tracking_right_target_pps,
+                            -9999, 9999));
+                    break;
+
+                case CAR_APP_WORKFLOW_HEADING_TEST:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "HEAD E%s C%+5ld V%+5ld",
+                        yaw_error_text,
+                        (long) car_display_clamp_i32(
+                            debug.heading_correction_pps,
+                            -9999, 9999),
+                        (long) car_display_clamp_i32(
+                            debug.heading_base_target_pps,
+                            -9999, 9999));
+                    break;
+
+                case CAR_APP_WORKFLOW_MOTION:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "MOT E%+7ld H%s V%+5ld",
+                        (long) car_display_clamp_i32(
+                            debug.motion_error_count,
+                            -999999, 999999),
+                        heading_error_text,
+                        (long) car_display_clamp_i32(
+                            debug.motion_base_target_pps,
+                            -9999, 9999));
+                    break;
+
+                case CAR_APP_WORKFLOW_YAW_TEST:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "CTRL T%s E%s V%+5ld", target_text,
+                        yaw_error_text,
+                        (long) car_display_clamp_i32(
+                            debug.yaw_turn_target_pps,
+                            -9999, 9999));
+                    break;
+
+                case CAR_APP_WORKFLOW_SPEED_TEST:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "PWM L%+4ld R%+4ld MODE %-6s",
+                        (long) car_display_clamp_i32(
+                            debug.speed_left_output_permille,
+                            -999, 999),
+                        (long) car_display_clamp_i32(
+                            debug.speed_right_output_permille,
+                            -999, 999),
+                        car_display_control_mode_text(
+                            debug.control_mode));
+                    break;
+
+                default:
+                    car_display_show_row(108U, ST7789_COLOR_CYAN,
+                        ST7789_COLOR_BLACK,
+                        "PWM L%+4ld R%+4ld MODE %-6s",
+                        (long) car_display_clamp_i32(
+                            debug.speed_left_output_permille,
+                            -999, 999),
+                        (long) car_display_clamp_i32(
+                            debug.speed_right_output_permille,
+                            -999, 999),
+                        car_display_control_mode_text(
+                            debug.control_mode));
+                    break;
+            }
+
+            break;
+
+        case CAR_DISPLAY_PHASE_HEALTH:
+            car_display_show_row(128U, health_color,
+                ST7789_COLOR_BLACK,
+                "IMU %-3s A%3lu E%lu LINE %-4s E%lu",
+                (debug.imu_ready && debug.imu_attitude_valid) ?
+                    "OK" : "BAD",
+                (unsigned long) car_display_clamp_i32(
+                    (int32_t) debug.imu_sample_age_ms, 0, 999),
+                (unsigned long) car_display_clamp_i32(
+                    (int32_t) debug.imu_read_error_count, 0, 999),
+                debug.line_sensor_ready ? "OK" : "BAD",
+                (unsigned long) car_display_clamp_i32(
+                    (int32_t) debug.line_sensor_read_error_count,
+                    0, 999));
             break;
 
         case CAR_DISPLAY_PHASE_FOOTER:
-            if (angle_motion_active) {
-                ST7789_PrintfFast(8U, 151U, ST7789_8X16,
-                    ST7789_COLOR_WHITE, ST7789_COLOR_BLACK,
-                    "RATE %s", rate_text);
-                ST7789_ShowAsciiStringFast(120U, 151U, key_text,
-                    ST7789_8X16, key_color, ST7789_COLOR_BLACK);
-                ST7789_ShowAsciiStringFast(224U, 151U, command_text,
-                    ST7789_8X16, ST7789_COLOR_WHITE,
-                    ST7789_COLOR_BLACK);
-            } else {
-                ST7789_ShowAsciiStringFast(8U, 151U, line_text,
-                    ST7789_8X16, line_color, ST7789_COLOR_BLACK);
-                ST7789_ShowAsciiStringFast(120U, 151U, key_text,
-                    ST7789_8X16, key_color, ST7789_COLOR_BLACK);
-                ST7789_ShowAsciiStringFast(224U, 151U,
-                    line_state_text, ST7789_8X16, line_color,
-                    ST7789_COLOR_BLACK);
-            }
+            car_display_show_row(150U, key_color,
+                ST7789_COLOR_BLACK,
+                "KEY %-4s %-6s %-7s P%+4ld/%+4ld",
+                key_text,
+                car_display_control_mode_text(debug.control_mode),
+                car_display_block_reason_text(
+                    debug.control_block_reason),
+                (long) car_display_clamp_i32(
+                    debug.speed_left_output_permille, -999, 999),
+                (long) car_display_clamp_i32(
+                    debug.speed_right_output_permille, -999, 999));
             break;
 
         case CAR_DISPLAY_PHASE_HEADER:
         default:
-            ST7789_ShowAsciiStringFast(112U, 6U, state_text,
-                ST7789_8X16, state_color, ST7789_COLOR_BLUE);
-            ST7789_ShowAsciiStringFast(176U, 6U, timer_text,
-                ST7789_8X16, ST7789_COLOR_WHITE, ST7789_COLOR_BLUE);
-            ST7789_ShowAsciiStringFast(264U, 6U,
+            car_display_show_row(5U, ST7789_COLOR_WHITE,
+                ST7789_COLOR_BLUE,
+                "CAR %-7s %-8s U%4lus",
+                car_display_app_state_text(debug.app_state),
+                car_display_workflow_text(debug.active_workflow),
+                (unsigned long) uptime_s);
+            ST7789_ShowAsciiStringFast(264U, 5U,
                 debug.motor_high_impedance ? "HIGH-Z" : "ARMED ",
                 ST7789_8X16,
                 debug.motor_high_impedance ?
@@ -311,6 +345,211 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
                 ST7789_COLOR_BLUE);
             break;
     }
+}
+
+static void car_display_show_row(uint16_t y, uint16_t color,
+    uint16_t background, const char *format, ...)
+{
+    char content[CAR_DISPLAY_ROW_CHARS + 1U];
+    char row[CAR_DISPLAY_ROW_CHARS + 1U];
+    char changed[CAR_DISPLAY_ROW_CHARS + 1U];
+    uint8_t row_index;
+    uint8_t start;
+    uint8_t end;
+    va_list args;
+
+    if (format == NULL) {
+        return;
+    }
+    va_start(args, format);
+    (void) vsnprintf(content, sizeof(content), format, args);
+    va_end(args);
+    (void) snprintf(row, sizeof(row), "%-40.40s", content);
+    row_index = car_display_row_index(y);
+    if ((row_index == CAR_DISPLAY_ROW_INVALID) ||
+        !g_display_row_valid[row_index] ||
+        (g_display_row_color[row_index] != color) ||
+        (g_display_row_background[row_index] != background)) {
+        ST7789_ShowAsciiStringFast(
+            0U, y, row, ST7789_8X16, color, background);
+    } else {
+        start = 0U;
+        while (start < CAR_DISPLAY_ROW_CHARS) {
+            while ((start < CAR_DISPLAY_ROW_CHARS) &&
+                (row[start] == g_display_row_cache[row_index][start])) {
+                start++;
+            }
+            if (start >= CAR_DISPLAY_ROW_CHARS) {
+                break;
+            }
+            end = (uint8_t) (start + 1U);
+            while ((end < CAR_DISPLAY_ROW_CHARS) &&
+                (row[end] != g_display_row_cache[row_index][end])) {
+                end++;
+            }
+            (void) memcpy(changed, &row[start], end - start);
+            changed[end - start] = '\0';
+            ST7789_ShowAsciiStringFast((uint16_t) start * 8U, y,
+                changed, ST7789_8X16, color, background);
+            start = end;
+        }
+    }
+
+    if (row_index != CAR_DISPLAY_ROW_INVALID) {
+        (void) memcpy(g_display_row_cache[row_index], row, sizeof(row));
+        g_display_row_color[row_index] = color;
+        g_display_row_background[row_index] = background;
+        g_display_row_valid[row_index] = true;
+    }
+}
+
+static void car_display_reset_row_cache(void)
+{
+    (void) memset(g_display_row_cache, 0, sizeof(g_display_row_cache));
+    (void) memset(g_display_row_valid, 0, sizeof(g_display_row_valid));
+}
+
+static uint8_t car_display_row_index(uint16_t y)
+{
+    switch (y) {
+        case 5U:
+            return 0U;
+        case 28U:
+            return 1U;
+        case 48U:
+            return 2U;
+        case 68U:
+            return 3U;
+        case 88U:
+            return 4U;
+        case 108U:
+            return 5U;
+        case 128U:
+            return 6U;
+        case 150U:
+            return 7U;
+        default:
+            return CAR_DISPLAY_ROW_INVALID;
+    }
+}
+
+static const char *car_display_app_state_text(uint32_t state)
+{
+    switch ((car_app_state_t) state) {
+        case CAR_APP_STATE_LOCKED:
+            return "LOCKED";
+        case CAR_APP_STATE_READY:
+            return "READY";
+        case CAR_APP_STATE_SERVICE:
+            return "SERVICE";
+        case CAR_APP_STATE_MOTION_ACTIVE:
+            return "ACTIVE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *car_display_workflow_text(uint32_t workflow)
+{
+    switch ((car_app_workflow_t) workflow) {
+        case CAR_APP_WORKFLOW_SPEED_TEST:
+            return "SPEED";
+        case CAR_APP_WORKFLOW_POSITION_TEST:
+            return "POSITION";
+        case CAR_APP_WORKFLOW_HEADING_TEST:
+            return "HEADING";
+        case CAR_APP_WORKFLOW_LINE_TEST:
+            return "LINE-TST";
+        case CAR_APP_WORKFLOW_LINE_MISSION:
+            return "LINE";
+        case CAR_APP_WORKFLOW_MOTION:
+            return "MOTION";
+        case CAR_APP_WORKFLOW_YAW_TEST:
+            return "YAW";
+        default:
+            return "IDLE";
+    }
+}
+
+static const char *car_display_control_mode_text(uint32_t mode)
+{
+    switch ((car_control_mode_t) mode) {
+        case CAR_CONTROL_MODE_SAFE_IDLE:
+            return "SAFE";
+        case CAR_CONTROL_MODE_OPEN_LOOP:
+            return "OPEN";
+        case CAR_CONTROL_MODE_SPEED:
+            return "SPEED";
+        case CAR_CONTROL_MODE_POSITION:
+            return "POS";
+        case CAR_CONTROL_MODE_YAW:
+            return "YAW";
+        case CAR_CONTROL_MODE_HEADING:
+            return "HEAD";
+        case CAR_CONTROL_MODE_LINE_TRACKING:
+            return "LINE";
+        case CAR_CONTROL_MODE_MOTION:
+            return "MOTION";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *car_display_block_reason_text(uint32_t reason)
+{
+    switch ((car_control_block_reason_t) reason) {
+        case CAR_CONTROL_BLOCK_NONE:
+            return "OK";
+        case CAR_CONTROL_BLOCK_STARTUP:
+            return "START";
+        case CAR_CONTROL_BLOCK_HARDWARE_UNVERIFIED:
+            return "HW";
+        case CAR_CONTROL_BLOCK_SUSPICIOUS_RESET:
+            return "RESET";
+        case CAR_CONTROL_BLOCK_EMERGENCY_STOP:
+            return "ESTOP";
+        case CAR_CONTROL_BLOCK_TEST_COMPLETE:
+            return "DONE";
+        case CAR_CONTROL_BLOCK_OPERATOR_STOP:
+            return "STOP";
+        case CAR_CONTROL_BLOCK_COMMAND_TIMEOUT:
+            return "TIMEOUT";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *car_display_key_text(
+    const car_debug_display_snapshot_t *debug)
+{
+    if (debug == NULL) {
+        return "----";
+    }
+    if (debug->pb21_pressed ||
+        (debug->last_button_id == CAR_DEBUG_BUTTON_PB21)) {
+        return "PB21";
+    }
+    if (debug->pb4_pressed ||
+        (debug->last_button_id == CAR_DEBUG_BUTTON_PB4)) {
+        return "PB4";
+    }
+    if (debug->pb5_pressed ||
+        (debug->last_button_id == CAR_DEBUG_BUTTON_PB5)) {
+        return "PB5";
+    }
+    return "----";
+}
+
+static int32_t car_display_clamp_i32(
+    int32_t value, int32_t minimum, int32_t maximum)
+{
+    if (value < minimum) {
+        return minimum;
+    }
+    if (value > maximum) {
+        return maximum;
+    }
+    return value;
 }
 
 static void car_display_format_signed_tenths(

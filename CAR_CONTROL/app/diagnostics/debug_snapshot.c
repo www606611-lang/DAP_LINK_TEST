@@ -482,6 +482,10 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
         return false;
     }
 
+    snapshot->app_state = g_car_app_state;
+    snapshot->active_workflow = g_car_app_active_workflow;
+    snapshot->control_mode = g_car_control_mode;
+    snapshot->control_block_reason = g_car_control_block_reason;
     snapshot->pb21_pressed = g_car_pb21_pressed;
     snapshot->pb4_pressed = g_car_pb4_pressed;
     snapshot->pb5_pressed = g_car_pb5_pressed;
@@ -491,19 +495,53 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->motor_high_impedance = g_car_motor_high_impedance;
     snapshot->imu_ready = g_car_imu_ready;
     snapshot->imu_attitude_valid = g_car_imu_attitude_valid;
+    snapshot->imu_sample_age_ms = g_car_imu_sample_age_ms;
+    snapshot->imu_read_error_count = g_car_imu_read_error_count;
     snapshot->imu_yaw_mdeg = g_car_imu_yaw_mdeg;
     snapshot->imu_yaw_rate_mdps = g_car_imu_yaw_rate_mdps;
+    snapshot->encoder_0_count = g_car_encoder_0_count;
+    snapshot->encoder_1_count = g_car_encoder_1_count;
+    snapshot->encoder_count_difference = g_car_encoder_count_difference;
+    snapshot->encoder_0_speed_pps = g_car_encoder_0_speed_pps;
+    snapshot->encoder_1_speed_pps = g_car_encoder_1_speed_pps;
+    snapshot->speed_left_target_pps = g_car_speed_left_target_pps;
+    snapshot->speed_right_target_pps = g_car_speed_right_target_pps;
+    snapshot->speed_left_output_permille =
+        g_car_speed_left_output_permille;
+    snapshot->speed_right_output_permille =
+        g_car_speed_right_output_permille;
+    snapshot->position_left_error_count =
+        g_car_position_left_error_count;
+    snapshot->position_right_error_count =
+        g_car_position_right_error_count;
+    snapshot->position_sync_correction_pps =
+        g_car_position_sync_correction_pps;
     snapshot->yaw_target_mdeg = g_car_yaw_target_mdeg;
     snapshot->yaw_error_mdeg = g_car_yaw_error_mdeg;
+    snapshot->yaw_turn_target_pps = g_car_yaw_turn_target_pps;
     snapshot->yaw_elapsed_ms = g_car_yaw_elapsed_ms;
     snapshot->heading_base_target_pps = g_car_heading_base_target_pps;
+    snapshot->heading_error_mdeg = g_car_heading_error_mdeg;
+    snapshot->heading_correction_pps = g_car_heading_correction_pps;
     snapshot->line_tracking_base_target_pps =
         g_car_line_tracking_base_target_pps;
+    snapshot->line_tracking_correction_pps =
+        g_car_line_tracking_correction_pps;
+    snapshot->line_tracking_left_target_pps =
+        g_car_line_tracking_left_target_pps;
+    snapshot->line_tracking_right_target_pps =
+        g_car_line_tracking_right_target_pps;
     snapshot->line_tracking_elapsed_ms = g_car_line_tracking_elapsed_ms;
     snapshot->motion_base_target_pps = g_car_motion_base_target_pps;
+    snapshot->motion_error_count = g_car_motion_error_count;
+    snapshot->motion_heading_error_mdeg =
+        g_car_motion_heading_error_mdeg;
     snapshot->motion_elapsed_ms = g_car_motion_elapsed_ms;
     snapshot->line_sensor_state = g_car_line_sensor_state;
     snapshot->line_sensor_active_mask = g_car_line_sensor_active_mask;
+    snapshot->line_sensor_active_count = g_car_line_sensor_active_count;
+    snapshot->line_sensor_read_error_count =
+        g_car_line_sensor_read_error_count;
     snapshot->line_sensor_error = g_car_line_sensor_error;
     snapshot->line_sensor_seen = g_car_line_sensor_seen;
     snapshot->line_sensor_ready = g_car_line_sensor_ready;
