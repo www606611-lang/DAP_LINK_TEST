@@ -1204,3 +1204,19 @@ This completes Stage 3 of `OPTIMIZATION_PLAN.md`. The next stage is deliberately
 conditional: add only a concrete competition route or motion composition, and
 keep the existing Line mission, Motion owner, stop paths, and standalone loops
 as the exclusive owners of their behavior.
+
+## 2026-07-18: chassis control baseline accepted
+
+The operator completed acceptance of the reusable chassis layer. The validated
+baseline includes the wheel speed loop, wheel position loop with encoder
+synchronization, relative Yaw control, continuous Heading hold, the PA16/PA17
+eight-channel line-sensor path, and the supervised five-corner line mission at
+the accepted `1400 pps` command speed. Wireless tuning through JDY-31, command
+leases, button-priority stops, automatic timeout handling, and motor `HIGH-Z`
+return are part of the accepted interface.
+
+The standalone control APIs and product Mission owners are now considered the
+stable chassis boundary for competition work. Future competition firmware
+should add only the problem-specific upper workflow and its tests; it should call
+these owners rather than retune or duplicate their inner loops. Higher line
+speeds remain experimental and are not part of this acceptance.

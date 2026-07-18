@@ -17,6 +17,9 @@ operator accepts the current stage on the vehicle.
 - Conservative line baseline: five-corner route at `1200 pps`
 - Motor safety: every motion path has a lease, supervised stop, and `HIGH-Z`
   stop state
+- Chassis control baseline: accepted by the operator; speed, position, Yaw,
+  Heading, encoder synchronization, line tracking, wireless tuning, and
+  supervised stop behavior are the reusable competition interfaces
 
 The validated speed, position, Yaw, Heading, and line inner/outer loops are
 not retuned or rewritten as part of structural work. A line corner change is
