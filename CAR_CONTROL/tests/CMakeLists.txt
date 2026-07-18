@@ -27,6 +27,21 @@ target_include_directories(car_app_test PRIVATE
 
 add_test(NAME car_app COMMAND car_app_test)
 
+add_executable(line_follow_mission_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/line_follow_mission_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/line_follow_mission.c"
+)
+target_compile_features(line_follow_mission_test PRIVATE c_std_99)
+target_include_directories(line_follow_mission_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../bsp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../diagnostics"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/line_sensor"
+)
+
+add_test(NAME line_follow_mission COMMAND line_follow_mission_test)
+
 add_executable(tuning_codec_test
   "${CMAKE_CURRENT_SOURCE_DIR}/tuning_codec_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../app/tuning/tuning_codec.c"

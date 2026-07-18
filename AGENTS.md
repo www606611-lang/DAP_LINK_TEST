@@ -111,8 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 - The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
   left, right, and no-line states with zero I2C errors.
 - The supervised line-tracking outer loop is ground validated on the fixed
-  five-corner route at a commanded 1200 pps base speed. The current work in
-  progress is finding its higher-speed operating envelope. Preserve the
-  accepted 1200 pps behavior and the validated standalone speed, position,
-  Yaw, and Heading loops; do not commit higher-speed changes until their
-  ground test is accepted.
+  five-corner route at a commanded 1400 pps base speed. Preserve the accepted
+  1400 pps behavior and the validated standalone speed, position, Yaw, and
+  Heading loops. Treat speeds above 1400 pps as experimental and do not commit
+  them until their ground test is accepted.

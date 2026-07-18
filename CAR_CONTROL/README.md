@@ -253,6 +253,25 @@ acute-corner recovery, and board-button stop remain active. A test reports
 `DONE` only after the line is stably centered; expiry of its three-second finish
 grace reports `ABORT` and returns to high impedance.
 
+## Formal continuous line-following mission
+
+`app/mission/line_follow_mission.h` is the product workflow above the reusable
+line controller. Unlike the 30-second bring-up profile, it has no normal time
+limit and continues until an operator stop or a supervised fault. Every start
+restores the accepted `1400 pps`, `Kp=30`, `Ki=0`, `Kd=0`, `900 pps` maximum
+correction, `750 permille` output limit, and `2`-unit deadband baseline. It
+never starts automatically after boot or a wireless update.
+
+```text
+mission start
+mission stop
+mission stat
+```
+
+`mission stat` returns an `MSTAT` record. The existing `LSTAT` bring-up status
+and seven-channel `linewave` VOFA+ format remain unchanged. Any board button
+stops an active mission before another button command can start.
+
 ## Reusable ICM20948 API
 
 `drivers/device/icm20948/icm20948.h` owns the external IMU protocol and uses

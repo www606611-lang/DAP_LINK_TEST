@@ -9,6 +9,7 @@ param(
         "YawStop", "YawStatus", "HeadingGet", "HeadingSet",
         "HeadingRun", "HeadingStop", "HeadingStatus", "LineGet",
         "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
+        "MissionStart", "MissionStop", "MissionStatus",
         "AppStatus", "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
@@ -677,6 +678,15 @@ try {
         }
         "LineCal" {
             [void](Invoke-Protocol "line cal" @("OK LINE CAL", "ERR "))
+        }
+        "MissionStart" {
+            [void](Invoke-Protocol "mission start" @("OK MISSION START", "ERR "))
+        }
+        "MissionStop" {
+            [void](Invoke-Protocol "mission stop" @("OK MISSION STOP", "ERR "))
+        }
+        "MissionStatus" {
+            [void](Invoke-Protocol "mission stat" @("MSTAT ", "ERR "))
         }
         "AppStatus" {
             [void](Invoke-Protocol "app stat" @("ASTAT ", "ERR "))

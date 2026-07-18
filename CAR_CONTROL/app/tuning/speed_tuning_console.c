@@ -6,6 +6,7 @@
 #include "firmware_update.h"
 #include "heading_bringup_test.h"
 #include "icm20948.h"
+#include "line_follow_mission.h"
 #include "line_sensor_bringup.h"
 #include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
@@ -122,6 +123,30 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
         return;
     }
     if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mission") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        speed_tuning_send_mission_status(now_ms);
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mission") == 0) &&
+        (strcmp(tokens[1], "start") == 0)) {
+        if (!LineTrackingBringupTest_IsActive() &&
+            LineFollowMission_RequestStart()) {
+            BluetoothUart_WriteText("OK MISSION START\r\n");
+        } else {
+            BluetoothUart_WriteText("ERR run_state\r\n");
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mission") == 0) &&
+        (strcmp(tokens[1], "stop") == 0)) {
+        LineFollowMission_RequestStop();
+        BluetoothUart_WriteText("OK MISSION STOP\r\n");
+        return;
+    }
+    if ((token_count == 2U) &&
         (strcmp(tokens[0], "line") == 0) &&
         (strcmp(tokens[1], "get") == 0)) {
         speed_tuning_send_line_config();
@@ -148,7 +173,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "line") == 0) &&
         (strcmp(tokens[1], "run") == 0)) {
-        if (LineTrackingBringupTest_RequestStart()) {
+        if (!LineFollowMission_IsActive() &&
+            LineTrackingBringupTest_RequestStart()) {
             BluetoothUart_WriteText("OK LINE RUN\r\n");
         } else {
             BluetoothUart_WriteText("ERR run_state\r\n");
@@ -169,6 +195,10 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
         line_tracking_bringup_config_result_t result;
         uint16_t duration_ms;
 
+        if (LineFollowMission_IsActive()) {
+            BluetoothUart_WriteText("ERR busy\r\n");
+            return;
+        }
         if (!LineTrackingBringupTest_GetConfig(&config) ||
             !speed_tuning_parse_float(tokens[2], &config.control.kp) ||
             !speed_tuning_parse_float(tokens[3], &config.control.ki) ||
@@ -217,7 +247,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
             BluetoothUart_WriteText("ERR profile\r\n");
             return;
         }
-        if (SpeedBringupTest_RequestProfile(profile)) {
+        if (!LineFollowMission_IsActive() &&
+            SpeedBringupTest_RequestProfile(profile)) {
             BluetoothUart_WriteText("OK RUN ");
             BluetoothUart_WriteText(SpeedBringupTest_GetProfileText());
             BluetoothUart_WriteText("\r\n");
@@ -293,7 +324,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "heading") == 0) &&
         (strcmp(tokens[1], "run") == 0)) {
-        if (!YawBringupTest_IsActive() &&
+        if (!LineFollowMission_IsActive() &&
+            !YawBringupTest_IsActive() &&
             HeadingBringupTest_RequestStart()) {
             BluetoothUart_WriteText("OK HEADING RUN\r\n");
         } else {
@@ -350,7 +382,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "yaw") == 0) &&
         (strcmp(tokens[1], "run") == 0)) {
-        if (!HeadingBringupTest_IsActive() &&
+        if (!LineFollowMission_IsActive() &&
+            !HeadingBringupTest_IsActive() &&
             YawBringupTest_RequestStart()) {
             BluetoothUart_WriteText("OK YAW RUN\r\n");
         } else {
@@ -449,7 +482,8 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
             BluetoothUart_WriteText("ERR profile\r\n");
             return;
         }
-        if (PositionBringupTest_RequestProfile(profile)) {
+        if (!LineFollowMission_IsActive() &&
+            PositionBringupTest_RequestProfile(profile)) {
             BluetoothUart_WriteText("OK POS RUN ");
             BluetoothUart_WriteText(
                 (profile == POSITION_BRINGUP_PROFILE_STRESS) ?
@@ -503,5 +537,5 @@ static void speed_tuning_process_line(char *line, uint32_t now_ms)
     }
 
     BluetoothUart_WriteText(
-        "ERR use spd|pos|yaw|heading|line|imu or fw update\r\n");
+        "ERR use spd|pos|yaw|heading|line|mission|imu or fw update\r\n");
 }

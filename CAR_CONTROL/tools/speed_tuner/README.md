@@ -136,6 +136,10 @@ yaw set KP KI KD TARGET_DEG MAX_SPEED_PPS OUTPUT_LIMIT_PERMILLE TOLERANCE_DEG SE
 yaw run
 yaw stop
 yaw stat
+
+mission start
+mission stop
+mission stat
 ```
 
 The normal ramp uses the configured target. `step` switches between 50%,

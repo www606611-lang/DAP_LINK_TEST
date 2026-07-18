@@ -3,6 +3,7 @@
 #include "debug_snapshot.h"
 #include "heading_bringup_test.h"
 #include "jdy31_config.h"
+#include "line_follow_mission.h"
 #include "line_sensor.h"
 #include "line_tracking_bringup_test.h"
 #include "st7789.h"
@@ -65,12 +66,16 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     uint32_t display_elapsed_ms;
     bool heading_active = HeadingBringupTest_IsActive();
     bool yaw_active = YawBringupTest_IsActive();
-    bool line_tracking_active = LineTrackingBringupTest_IsActive();
+    bool line_mission_active = LineFollowMission_IsActive();
+    bool line_tracking_active = line_mission_active ||
+        LineTrackingBringupTest_IsActive();
     bool angle_motion_active = heading_active || yaw_active;
-    const char *control_state = line_tracking_active ?
-        LineTrackingBringupTest_GetStateText() :
+    const char *control_state = line_mission_active ?
+        LineFollowMission_GetStateText() :
+        (line_tracking_active ?
+            LineTrackingBringupTest_GetStateText() :
         (heading_active ? HeadingBringupTest_GetStateText() :
-            YawBringupTest_GetStateText());
+            YawBringupTest_GetStateText()));
     uint16_t angle_color;
     uint16_t state_color = ST7789_COLOR_WHITE;
     uint16_t line_color = ST7789_COLOR_RED;

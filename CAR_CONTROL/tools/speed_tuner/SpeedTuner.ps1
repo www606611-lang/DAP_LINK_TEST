@@ -45,7 +45,9 @@ $script:latestYawStatusPath = Join-Path $script:runtimeDir "latest_yaw_status.js
 $script:latestYawTelemetryPath = Join-Path $script:runtimeDir "latest_yaw_telemetry.csv"
 $script:latestLineWavePath = Join-Path $script:runtimeDir "latest_line_wave.json"
 $script:latestLineStatusPath = Join-Path $script:runtimeDir "latest_line_status.json"
+$script:latestMissionStatusPath = Join-Path $script:runtimeDir "latest_mission_status.json"
 $script:latestLineTelemetryPath = Join-Path $script:runtimeDir "latest_line_telemetry.csv"
+$script:lineStatusSource = 'mission'
 $script:lastPortPath = Join-Path $script:runtimeDir "last_port.txt"
 $script:sessionLogPath = Join-Path $script:runtimeDir (
     "session_{0}.log" -f [DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
@@ -176,6 +178,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^pos run(?: stress)?$' -or
         $line -match '^heading (get|run|stop|stat)$' -or
         $line -match '^line (get|run|stop|stat|cal)$' -or
+        $line -match '^mission (start|stop|stat)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$' -or
         $line -match '^app stat$' -or
@@ -785,10 +788,15 @@ function Update-LineStatusFromLine([string]$line) {
         'outR', 'res', 'hz', 'lineDt', 'lineMax')) {
         if (-not $values.ContainsKey($key)) { return $false }
     }
+    if ($values['state'] -eq 'RUN') {
+        $script:lineStatusSource = 'test'
+    }
 
-    $lineStateValue.Text = $values['state']
+    if ($script:lineStatusSource -eq 'test') {
+        $lineStateValue.Text = $values['state']
+        $lineResultValue.Text = $values['res']
+    }
     $lineSensorStateValue.Text = $values['sensor']
-    $lineResultValue.Text = $values['res']
     $lineRawValue.Text = '0x{0:X2}' -f [int]$values['raw']
     $lineBitsValue.Text = ([Convert]::ToString(
         [int]$values['mask'], 2)).PadLeft(8, '0') +
@@ -802,14 +810,63 @@ function Update-LineStatusFromLine([string]$line) {
     $lineOutputValue.Text = $values['outL'] + ' / ' +
         $values['outR']
     $lineAgeValue.Text = $values['age'] + ' ms'
-    if ($values['hz'] -eq '1') {
-        $lineHighZValue.Text = 'HIGH-Z'
-        $lineHighZValue.ForeColor = [System.Drawing.Color]::ForestGreen
-    } else {
-        $lineHighZValue.Text = 'ARMED'
-        $lineHighZValue.ForeColor = [System.Drawing.Color]::DarkOrange
+    if ($script:lineStatusSource -eq 'test') {
+        if ($values['hz'] -eq '1') {
+            $lineHighZValue.Text = 'HIGH-Z'
+            $lineHighZValue.ForeColor = [System.Drawing.Color]::ForestGreen
+        } else {
+            $lineHighZValue.Text = 'ARMED'
+            $lineHighZValue.ForeColor = [System.Drawing.Color]::DarkOrange
+        }
     }
     Save-LineStatus $values
+    return $true
+}
+
+function Update-MissionStatusFromLine([string]$line) {
+    if (-not $line.StartsWith('MSTAT ')) { return $false }
+    $values = Parse-KeyValueLine $line
+    foreach ($key in @(
+        'state', 'runs', 'base', 'limit', 'elapsed', 'error',
+        'count', 'seen', 'age', 'res', 'control', 'hz')) {
+        if (-not $values.ContainsKey($key)) { return $false }
+    }
+    if ($values['state'] -eq 'RUN') {
+        $script:lineStatusSource = 'mission'
+    }
+
+    if ($script:lineStatusSource -eq 'mission') {
+        $lineStateValue.Text = $values['state']
+        $lineResultValue.Text = $values['res']
+        if ($values['hz'] -eq '1') {
+            $lineHighZValue.Text = 'HIGH-Z'
+            $lineHighZValue.ForeColor = [System.Drawing.Color]::ForestGreen
+        } else {
+            $lineHighZValue.Text = 'ARMED'
+            $lineHighZValue.ForeColor = [System.Drawing.Color]::DarkOrange
+        }
+    }
+
+    $status = [ordered]@{
+        timestamp = [DateTime]::Now.ToString('o')
+        state = $values['state']
+        run_count = [uint32]$values['runs']
+        base_speed_pps = [int]$values['base']
+        output_limit_permille = [uint16]$values['limit']
+        elapsed_ms = [uint32]$values['elapsed']
+        line_error = [int]$values['error']
+        active_count = [uint16]$values['count']
+        line_seen = ($values['seen'] -eq '1')
+        sample_age_ms = [uint32]$values['age']
+        result = [uint32]$values['res']
+        controller_running = ($values['control'] -eq '1')
+        high_impedance = ($values['hz'] -eq '1')
+    }
+    try {
+        [System.IO.File]::WriteAllText(
+            $script:latestMissionStatusPath,
+            ($status | ConvertTo-Json), $script:utf8NoBom)
+    } catch {}
     return $true
 }
 
@@ -1064,6 +1121,14 @@ function Process-Line([string]$line) {
             Broadcast-ControlLine $line
         } else {
             Add-Log "RX dropped malformed line status." ([System.Drawing.Color]::DarkOrange)
+        }
+        return
+    }
+    if ($line.StartsWith('MSTAT ')) {
+        if (Update-MissionStatusFromLine $line) {
+            Broadcast-ControlLine $line
+        } else {
+            Add-Log "RX dropped malformed mission status." ([System.Drawing.Color]::DarkOrange)
         }
         return
     }
@@ -1533,35 +1598,49 @@ $lineDurationBox = $lineBottomBoxes[3]
 
 $lineReadButton = New-Object System.Windows.Forms.Button
 $lineReadButton.Text = 'Read'
-$lineReadButton.Location = New-Object System.Drawing.Point(15, 96)
+$lineReadButton.Location = New-Object System.Drawing.Point(8, 96)
 $lineReadButton.Size = New-Object System.Drawing.Size(92, 27)
 $lineTab.Controls.Add($lineReadButton)
 
 $lineApplyButton = New-Object System.Windows.Forms.Button
 $lineApplyButton.Text = 'Apply'
-$lineApplyButton.Location = New-Object System.Drawing.Point(117, 96)
+$lineApplyButton.Location = New-Object System.Drawing.Point(110, 96)
 $lineApplyButton.Size = New-Object System.Drawing.Size(92, 27)
 $lineTab.Controls.Add($lineApplyButton)
 
 $lineCalButton = New-Object System.Windows.Forms.Button
 $lineCalButton.Text = 'Calibrate'
-$lineCalButton.Location = New-Object System.Drawing.Point(219, 96)
+$lineCalButton.Location = New-Object System.Drawing.Point(212, 96)
 $lineCalButton.Size = New-Object System.Drawing.Size(92, 27)
 $lineTab.Controls.Add($lineCalButton)
 
 $lineRunButton = New-Object System.Windows.Forms.Button
-$lineRunButton.Text = 'Run'
-$lineRunButton.Location = New-Object System.Drawing.Point(515, 96)
-$lineRunButton.Size = New-Object System.Drawing.Size(98, 27)
+$lineRunButton.Text = '30s Test'
+$lineRunButton.Location = New-Object System.Drawing.Point(314, 96)
+$lineRunButton.Size = New-Object System.Drawing.Size(92, 27)
 $lineRunButton.BackColor = [System.Drawing.Color]::Honeydew
 $lineTab.Controls.Add($lineRunButton)
 
 $lineStopButton = New-Object System.Windows.Forms.Button
-$lineStopButton.Text = 'Stop'
-$lineStopButton.Location = New-Object System.Drawing.Point(623, 96)
-$lineStopButton.Size = New-Object System.Drawing.Size(98, 27)
+$lineStopButton.Text = 'Test Stop'
+$lineStopButton.Location = New-Object System.Drawing.Point(416, 96)
+$lineStopButton.Size = New-Object System.Drawing.Size(92, 27)
 $lineStopButton.BackColor = [System.Drawing.Color]::MistyRose
 $lineTab.Controls.Add($lineStopButton)
+
+$missionStartButton = New-Object System.Windows.Forms.Button
+$missionStartButton.Text = 'Mission'
+$missionStartButton.Location = New-Object System.Drawing.Point(518, 96)
+$missionStartButton.Size = New-Object System.Drawing.Size(92, 27)
+$missionStartButton.BackColor = [System.Drawing.Color]::Honeydew
+$lineTab.Controls.Add($missionStartButton)
+
+$missionStopButton = New-Object System.Windows.Forms.Button
+$missionStopButton.Text = 'Mission Stop'
+$missionStopButton.Location = New-Object System.Drawing.Point(620, 96)
+$missionStopButton.Size = New-Object System.Drawing.Size(98, 27)
+$missionStopButton.BackColor = [System.Drawing.Color]::MistyRose
+$lineTab.Controls.Add($missionStopButton)
 
 $statusGroup = New-Object System.Windows.Forms.GroupBox
 $statusGroup.Text = "Live status"
@@ -1864,8 +1943,22 @@ $lineApplyButton.Add_Click({
     }
 })
 $lineCalButton.Add_Click({ [void](Send-Command 'line cal') })
-$lineRunButton.Add_Click({ [void](Send-Command 'line run') })
-$lineStopButton.Add_Click({ [void](Send-Command 'line stop') })
+$lineRunButton.Add_Click({
+    $script:lineStatusSource = 'test'
+    [void](Send-Command 'line run')
+})
+$lineStopButton.Add_Click({
+    $script:lineStatusSource = 'test'
+    [void](Send-Command 'line stop')
+})
+$missionStartButton.Add_Click({
+    $script:lineStatusSource = 'mission'
+    [void](Send-Command 'mission start')
+})
+$missionStopButton.Add_Click({
+    $script:lineStatusSource = 'mission'
+    [void](Send-Command 'mission stop')
+})
 
 $parameterTabs.Add_SelectedIndexChanged({
     $isPosition = ($parameterTabs.SelectedTab -eq $positionTab)
@@ -1896,6 +1989,7 @@ $parameterTabs.Add_SelectedIndexChanged({
         } elseif ($isLine) {
             [void](Send-Command 'line get')
             [void](Send-Command 'line stat' $true)
+            [void](Send-Command 'mission stat' $true)
         } else {
             [void](Send-Command "spd get")
             [void](Send-Command "spd stat" $true)
@@ -1962,6 +2056,7 @@ $timer.Add_Tick({
                 [void](Send-Command 'yaw stat' $true)
             } elseif ($script:activeMode -eq 'line') {
                 [void](Send-Command 'line stat' $true)
+                [void](Send-Command 'mission stat' $true)
             } else {
                 [void](Send-Command "spd stat" $true)
             }

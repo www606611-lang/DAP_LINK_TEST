@@ -133,6 +133,11 @@ control cascade
     `MOTION_ACTIVE` interaction states are host-tested. Any physical button
     stops the active workflow before another command can start; service and
     suspicious-reset states reject new physical motion requests.
+15. Formal line mission: `app/mission/line_follow_mission` owns continuous
+    product operation separately from the timed bring-up profile. It restores
+    the accepted `1400 pps` route configuration on every start, refreshes the
+    line-controller command lease, and runs until an explicit stop or safety
+    fault returns the drive to high impedance.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies and the
 tuning text codec without linking MCU drivers. Hardware-dependent control and

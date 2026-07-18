@@ -6,6 +6,7 @@
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "i2c1_polling.h"
+#include "line_follow_mission.h"
 #include "line_sensor_bringup.h"
 #include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
@@ -574,5 +575,48 @@ void speed_tuning_send_line_status(uint32_t now_ms)
     speed_tuning_write_u32(runtime.loop_max_interval_ms);
     BluetoothUart_WriteText(" lcdMax=");
     speed_tuning_write_u32(runtime.display_max_duration_ms);
+    BluetoothUart_WriteText("\r\n");
+}
+
+void speed_tuning_send_mission_status(uint32_t now_ms)
+{
+    line_follow_mission_snapshot_t mission;
+    line_sensor_snapshot_t sensor;
+    wheel_line_tracking_snapshot_t control;
+    uint32_t sample_age_ms;
+
+    if (!LineFollowMission_GetSnapshot(&mission) ||
+        !LineSensorBringup_GetSnapshot(&sensor) ||
+        !WheelLineTrackingControl_GetSnapshot(&control)) {
+        BluetoothUart_WriteText("ERR status\r\n");
+        return;
+    }
+    sample_age_ms = now_ms - sensor.last_sample_ms;
+    BluetoothUart_WriteText("MSTAT state=");
+    BluetoothUart_WriteText(LineFollowMission_GetStateText());
+    BluetoothUart_WriteText(" runs=");
+    speed_tuning_write_u32(mission.run_count);
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        mission.base_speed_pps));
+    BluetoothUart_WriteText(" limit=");
+    speed_tuning_write_u32(mission.output_limit_permille);
+    BluetoothUart_WriteText(" elapsed=");
+    speed_tuning_write_u32(mission.elapsed_ms);
+    BluetoothUart_WriteText(" error=");
+    speed_tuning_write_i32(sensor.line_error);
+    BluetoothUart_WriteText(" count=");
+    speed_tuning_write_u32(sensor.active_count);
+    BluetoothUart_WriteText(" seen=");
+    speed_tuning_write_u32(sensor.line_seen ? 1U : 0U);
+    BluetoothUart_WriteText(" age=");
+    speed_tuning_write_u32(sample_age_ms);
+    BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) mission.last_result);
+    BluetoothUart_WriteText(" control=");
+    speed_tuning_write_u32(control.running ? 1U : 0U);
+    BluetoothUart_WriteText(" hz=");
+    speed_tuning_write_u32(
+        BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
     BluetoothUart_WriteText("\r\n");
 }

@@ -10,6 +10,7 @@
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "line_sensor_bringup.h"
+#include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
@@ -138,6 +139,8 @@ volatile bool g_car_line_sensor_seen;
 volatile bool g_car_line_sensor_ready;
 volatile uint32_t g_car_line_tracking_test_state;
 volatile uint32_t g_car_line_tracking_run_count;
+volatile uint32_t g_car_line_mission_state;
+volatile uint32_t g_car_line_mission_run_count;
 volatile int32_t g_car_line_tracking_error;
 volatile int32_t g_car_line_tracking_base_target_pps;
 volatile int32_t g_car_line_tracking_correction_pps;
@@ -327,6 +330,14 @@ void CarDebugSnapshot_Update(void)
         (uint32_t) LineTrackingBringupTest_GetState();
     g_car_line_tracking_run_count =
         LineTrackingBringupTest_GetRunCount();
+    {
+        line_follow_mission_snapshot_t mission;
+
+        if (LineFollowMission_GetSnapshot(&mission)) {
+            g_car_line_mission_state = (uint32_t) mission.state;
+            g_car_line_mission_run_count = mission.run_count;
+        }
+    }
     if (WheelLineTrackingControl_GetSnapshot(&line_tracking)) {
         g_car_line_tracking_error = line_tracking.line_error;
         g_car_line_tracking_base_target_pps = car_debug_round_float(

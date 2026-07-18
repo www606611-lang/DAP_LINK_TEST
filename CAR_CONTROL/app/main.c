@@ -15,6 +15,7 @@
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "line_sensor_bringup.h"
+#include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
@@ -70,6 +71,7 @@ int main(void)
     HeadingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     LineSensorBringup_Init(delay_get_ms());
     LineTrackingBringupTest_Init(ResetDiagnostics_IsSuspicious());
+    LineFollowMission_Init(ResetDiagnostics_IsSuspicious());
     CarApp_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
@@ -137,6 +139,8 @@ int main(void)
             HeadingBringupTest_IsActive();
         car_app_inputs.line_test_active =
             LineTrackingBringupTest_IsActive();
+        car_app_inputs.line_mission_active =
+            LineFollowMission_IsActive();
         car_app_inputs.yaw_test_active = YawBringupTest_IsActive();
         car_app_inputs.pb21_press_event = pb21_press_event;
         car_app_inputs.pb4_press_event = pb4_press_event;
@@ -151,6 +155,7 @@ int main(void)
         YawBringupTest_Task(now_ms);
         HeadingBringupTest_Task(now_ms);
         LineTrackingBringupTest_Task(now_ms);
+        LineFollowMission_Task(now_ms);
         WheelPositionControl_Task(now_ms);
         WheelYawControl_Task(now_ms);
         WheelHeadingControl_Task(now_ms);
@@ -220,6 +225,9 @@ static void app_process_car_action(
                 break;
             case CAR_APP_WORKFLOW_LINE_TEST:
                 LineTrackingBringupTest_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_LINE_MISSION:
+                LineFollowMission_RequestStop();
                 break;
             case CAR_APP_WORKFLOW_YAW_TEST:
                 YawBringupTest_RequestStop();

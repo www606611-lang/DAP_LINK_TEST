@@ -1050,3 +1050,38 @@ reported result 9 (`WHEEL_YAW_CONTROL_STOPPED`) with zero targets, zero PWM
 outputs, and high impedance. No `-60 degree` target followed any PB4 stop, so
 the second button press stopped the active workflow without queuing a new
 turn. The operator confirmed that the physical stop was immediate and normal.
+
+## 2026-07-18: formal continuous line-following mission
+
+The accepted `1400 pps` line-tracking baseline is now exposed through a
+separate product mission instead of reusing the timed bring-up workflow.
+`mission start` restores the accepted `Kp=30`, `Ki=0`, `Kd=0`, `900 pps`
+maximum correction, `750 permille` output limit, and `2`-unit deadband before
+starting. The mission continuously refreshes the existing 100 ms line-command
+lease and has no normal time limit. `mission stop`, any application-level
+button stop, sensor or command expiry, and controller faults all return the
+drive to high impedance. The original `line run`, `LSTAT`, and seven-channel
+`linewave` bring-up interfaces remain separate and unchanged.
+
+Both MCU toolchains built successfully and all four host tests passed,
+including the new mission lifecycle and application button-stop routing
+coverage. The 114072-byte GCC image with CRC32 `0xE032F4F9` was wirelessly
+programmed in 21.4 seconds. Cold-start status was:
+
+```text
+ASTAT state=READY workflow=0 action=0 yaw=0 transitions=0 hz=1
+MSTAT state=READY runs=0 base=1400 limit=750 elapsed=0 ... control=0 hz=1
+LSTAT state=READY sensor=READY ... errors=0 busRec=0 hz=1
+WSTAT active=1 ... hz=1
+```
+
+The formal mission then ran forward on the fixed five-corner closed route for
+49.27 seconds and produced 982 telemetry samples. The operator confirmed the
+ground behavior was normal. Telemetry contained 14 wide-line entries and nine
+temporary line-loss events; all were reacquired without a mission fault, with
+the longest continuous loss approximately 1.05 seconds. The maximum observed
+line-control interval was 27 ms, the main-loop maximum was 21 ms, the LCD slice
+maximum was 18 ms, and I2C read/recovery errors remained zero. The run ended
+through explicit operator stop with `MSTAT state=STOP`, result 9, controller
+inactive, and motor outputs in high impedance. This promotes `1400 pps` as the
+formal mission baseline; higher requested speeds remain experimental.
