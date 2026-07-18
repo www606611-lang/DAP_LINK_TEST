@@ -28,6 +28,8 @@ typedef struct {
     int32_t heading_base_target_pps;
     int32_t line_tracking_base_target_pps;
     uint32_t line_tracking_elapsed_ms;
+    int32_t motion_base_target_pps;
+    uint32_t motion_elapsed_ms;
     uint32_t line_sensor_state;
     uint32_t line_sensor_active_mask;
     int32_t line_sensor_error;

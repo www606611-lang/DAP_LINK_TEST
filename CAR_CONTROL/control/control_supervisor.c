@@ -107,7 +107,8 @@ bool ControlSupervisor_ModeCanOwnSpeedControl(car_control_mode_t mode)
         (mode == CAR_CONTROL_MODE_POSITION) ||
         (mode == CAR_CONTROL_MODE_YAW) ||
         (mode == CAR_CONTROL_MODE_HEADING) ||
-        (mode == CAR_CONTROL_MODE_LINE_TRACKING);
+        (mode == CAR_CONTROL_MODE_LINE_TRACKING) ||
+        (mode == CAR_CONTROL_MODE_MOTION);
 }
 
 car_control_request_result_t ControlSupervisor_BeginClosedLoop(
@@ -185,6 +186,8 @@ const char *ControlSupervisor_GetModeText(void)
             return "HEADING";
         case CAR_CONTROL_MODE_LINE_TRACKING:
             return "LINE";
+        case CAR_CONTROL_MODE_MOTION:
+            return "MOTION";
         default:
             return "UNKNOWN";
     }

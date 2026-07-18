@@ -138,6 +138,10 @@ control cascade
     the accepted `1400 pps` route configuration on every start, refreshes the
     line-controller command lease, and runs until an explicit stop or safety
     fault returns the drive to high impedance.
+16. Composite motion: `app/motion/motion_supervisor` owns the dedicated
+    `MOTION` speed owner for relative-distance plus Heading commands. It is the
+    composition point for future route sequencing; standalone outer loops must
+    not be started concurrently to create a cascade by accident.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies and the
 tuning text codec without linking MCU drivers. Hardware-dependent control and

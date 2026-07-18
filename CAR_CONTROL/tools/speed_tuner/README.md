@@ -140,6 +140,11 @@ yaw stat
 mission start
 mission stop
 mission stat
+
+motion start DELTA_COUNTS HEADING_DEG MAX_SPEED_PPS TIMEOUT_MS
+motion start DELTA_COUNTS hold MAX_SPEED_PPS TIMEOUT_MS
+motion stop
+motion stat
 ```
 
 The normal ramp uses the configured target. `step` switches between 50%,

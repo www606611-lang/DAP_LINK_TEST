@@ -110,6 +110,10 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   recorded in `CAR_CONTROL/BRINGUP_LOG.md`.
 - The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
   left, right, and no-line states with zero I2C errors.
+- The composite `MOTION` owner and wheel odometry are ground validated for
+  relative forward/reverse distance with startup-heading hold. Preserve the
+  exclusive-owner rule; do not start standalone Position, Heading, Yaw, or
+  line owners concurrently with a motion command.
 - The supervised line-tracking outer loop is ground validated on the fixed
   five-corner route at a commanded 1400 pps base speed. Preserve the accepted
   1400 pps behavior and the validated standalone speed, position, Yaw, and

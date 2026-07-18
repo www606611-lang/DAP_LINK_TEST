@@ -9,6 +9,7 @@
 #include "line_follow_mission.h"
 #include "line_sensor_bringup.h"
 #include "line_tracking_bringup_test.h"
+#include "motion_supervisor.h"
 #include "position_bringup_test.h"
 #include "runtime_metrics.h"
 #include "speed_bringup_test.h"
@@ -615,6 +616,57 @@ void speed_tuning_send_mission_status(uint32_t now_ms)
     speed_tuning_write_u32((uint32_t) mission.last_result);
     BluetoothUart_WriteText(" control=");
     speed_tuning_write_u32(control.running ? 1U : 0U);
+    BluetoothUart_WriteText(" hz=");
+    speed_tuning_write_u32(
+        BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
+    BluetoothUart_WriteText("\r\n");
+}
+
+void speed_tuning_send_motion_status(uint32_t now_ms)
+{
+    motion_supervisor_snapshot_t motion;
+    wheel_speed_control_snapshot_t speed;
+    (void) now_ms;
+    if (!MotionSupervisor_GetSnapshot(&motion) ||
+        !WheelSpeedControl_GetSnapshot(&speed)) {
+        BluetoothUart_WriteText("ERR status\r\n");
+        return;
+    }
+    BluetoothUart_WriteText("OSTAT state=");
+    BluetoothUart_WriteText(MotionSupervisor_GetStateText());
+    BluetoothUart_WriteText(" runs=");
+    speed_tuning_write_u32(motion.run_count);
+    BluetoothUart_WriteText(" delta=");
+    speed_tuning_write_i32(motion.target_delta_count);
+    BluetoothUart_WriteText(" target=");
+    speed_tuning_write_i32(motion.target_count);
+    BluetoothUart_WriteText(" current=");
+    speed_tuning_write_i32(motion.current_count);
+    BluetoothUart_WriteText(" error=");
+    speed_tuning_write_i32(motion.position_error_count);
+    BluetoothUart_WriteText(" yawE=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        motion.heading_error_deg * 1000.0f));
+    BluetoothUart_WriteText(" base=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        motion.base_speed_target_pps));
+    BluetoothUart_WriteText(" corr=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        motion.heading_correction_pps));
+    BluetoothUart_WriteText(" tL=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        motion.left_speed_target_pps));
+    BluetoothUart_WriteText(" tR=");
+    speed_tuning_write_i32(speed_tuning_round_float(
+        motion.right_speed_target_pps));
+    BluetoothUart_WriteText(" vL=");
+    speed_tuning_write_i32(speed.left_measured_pps);
+    BluetoothUart_WriteText(" vR=");
+    speed_tuning_write_i32(speed.right_measured_pps);
+    BluetoothUart_WriteText(" elapsed=");
+    speed_tuning_write_u32(motion.elapsed_ms);
+    BluetoothUart_WriteText(" res=");
+    speed_tuning_write_u32((uint32_t) motion.last_result);
     BluetoothUart_WriteText(" hz=");
     speed_tuning_write_u32(
         BoardMotorSafe_IsHighImpedance() ? 1U : 0U);

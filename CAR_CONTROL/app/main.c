@@ -17,6 +17,7 @@
 #include "line_sensor_bringup.h"
 #include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
+#include "motion_supervisor.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "runtime_metrics.h"
@@ -27,6 +28,7 @@
 #include "ti_msp_dl_config.h"
 #include "wheel_heading_control.h"
 #include "wheel_line_tracking_control.h"
+#include "wheel_odometry.h"
 #include "wheel_position_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
@@ -55,6 +57,7 @@ int main(void)
     ControlSupervisor_Init(ResetDiagnostics_IsSuspicious());
     ICM20948_Init(delay_get_ms());
     EncoderInput_Init(delay_get_ms());
+    WheelOdometry_Init(delay_get_ms());
     EncoderInput_SetInverted(ENCODER_INPUT_0,
         BOARD_ENCODER_0_FORWARD_INVERTED != 0);
     EncoderInput_SetInverted(ENCODER_INPUT_1,
@@ -72,6 +75,7 @@ int main(void)
     LineSensorBringup_Init(delay_get_ms());
     LineTrackingBringupTest_Init(ResetDiagnostics_IsSuspicious());
     LineFollowMission_Init(ResetDiagnostics_IsSuspicious());
+    MotionSupervisor_Init(ResetDiagnostics_IsSuspicious());
     CarApp_Init(ResetDiagnostics_IsSuspicious());
     BluetoothUart_Init();
     JDY31_ConfigInit(delay_get_ms(),
@@ -118,6 +122,7 @@ int main(void)
             pb5_release_event;
 
         EncoderInput_Task(now_ms);
+        WheelOdometry_Task(now_ms);
         ICM20948_Task(now_ms);
         LineSensorBringup_Task(now_ms);
         BluetoothUart_Task(now_ms);
@@ -141,6 +146,7 @@ int main(void)
             LineTrackingBringupTest_IsActive();
         car_app_inputs.line_mission_active =
             LineFollowMission_IsActive();
+        car_app_inputs.motion_active = MotionSupervisor_IsActive();
         car_app_inputs.yaw_test_active = YawBringupTest_IsActive();
         car_app_inputs.pb21_press_event = pb21_press_event;
         car_app_inputs.pb4_press_event = pb4_press_event;
@@ -156,6 +162,7 @@ int main(void)
         HeadingBringupTest_Task(now_ms);
         LineTrackingBringupTest_Task(now_ms);
         LineFollowMission_Task(now_ms);
+        MotionSupervisor_Task(now_ms);
         WheelPositionControl_Task(now_ms);
         WheelYawControl_Task(now_ms);
         WheelHeadingControl_Task(now_ms);
@@ -228,6 +235,9 @@ static void app_process_car_action(
                 break;
             case CAR_APP_WORKFLOW_LINE_MISSION:
                 LineFollowMission_RequestStop();
+                break;
+            case CAR_APP_WORKFLOW_MOTION:
+                MotionSupervisor_RequestStop();
                 break;
             case CAR_APP_WORKFLOW_YAW_TEST:
                 YawBringupTest_RequestStop();

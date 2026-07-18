@@ -71,6 +71,22 @@ static void test_button_stops_formal_line_mission(void)
     assert(snapshot.action == CAR_APP_ACTION_STOP_ACTIVE);
 }
 
+static void test_button_stops_motion_workflow(void)
+{
+    car_app_inputs_t inputs;
+    car_app_snapshot_t snapshot;
+
+    memset(&inputs, 0, sizeof(inputs));
+    CarApp_Init(false);
+    inputs.motion_active = true;
+    inputs.pb21_press_event = true;
+    snapshot = step(&inputs);
+
+    assert(snapshot.state == CAR_APP_STATE_MOTION_ACTIVE);
+    assert(snapshot.active_workflow == CAR_APP_WORKFLOW_MOTION);
+    assert(snapshot.action == CAR_APP_ACTION_STOP_ACTIVE);
+}
+
 static void test_workflow_priority_is_deterministic(void)
 {
     car_app_inputs_t inputs;
@@ -151,6 +167,7 @@ int main(void)
     test_ready_button_commands();
     test_motion_button_stops_active_workflow();
     test_button_stops_formal_line_mission();
+    test_button_stops_motion_workflow();
     test_workflow_priority_is_deterministic();
     test_service_and_lockout_block_new_motion();
     test_button_still_stops_motion_during_service();

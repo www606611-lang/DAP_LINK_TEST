@@ -112,6 +112,9 @@ static car_app_workflow_t car_app_get_active_workflow(
     if (inputs->line_mission_active) {
         return CAR_APP_WORKFLOW_LINE_MISSION;
     }
+    if (inputs->motion_active) {
+        return CAR_APP_WORKFLOW_MOTION;
+    }
     if (inputs->yaw_test_active) {
         return CAR_APP_WORKFLOW_YAW_TEST;
     }

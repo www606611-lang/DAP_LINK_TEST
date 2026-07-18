@@ -12,6 +12,7 @@
 #include "line_sensor_bringup.h"
 #include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
+#include "motion_supervisor.h"
 #include "position_bringup_test.h"
 #include "reset_diagnostics.h"
 #include "speed_bringup_test.h"
@@ -141,6 +142,16 @@ volatile uint32_t g_car_line_tracking_test_state;
 volatile uint32_t g_car_line_tracking_run_count;
 volatile uint32_t g_car_line_mission_state;
 volatile uint32_t g_car_line_mission_run_count;
+volatile uint32_t g_car_motion_state;
+volatile uint32_t g_car_motion_run_count;
+volatile int32_t g_car_motion_target_count;
+volatile int32_t g_car_motion_current_count;
+volatile int32_t g_car_motion_error_count;
+volatile int32_t g_car_motion_heading_error_mdeg;
+volatile int32_t g_car_motion_base_target_pps;
+volatile int32_t g_car_motion_correction_pps;
+volatile uint32_t g_car_motion_elapsed_ms;
+volatile uint32_t g_car_motion_last_result;
 volatile int32_t g_car_line_tracking_error;
 volatile int32_t g_car_line_tracking_base_target_pps;
 volatile int32_t g_car_line_tracking_correction_pps;
@@ -338,6 +349,26 @@ void CarDebugSnapshot_Update(void)
             g_car_line_mission_run_count = mission.run_count;
         }
     }
+    {
+        motion_supervisor_snapshot_t motion;
+
+        if (MotionSupervisor_GetSnapshot(&motion)) {
+            g_car_motion_state = (uint32_t) motion.state;
+            g_car_motion_run_count = motion.run_count;
+            g_car_motion_target_count = motion.target_count;
+            g_car_motion_current_count = motion.current_count;
+            g_car_motion_error_count = motion.position_error_count;
+            g_car_motion_heading_error_mdeg = car_debug_round_float(
+                motion.heading_error_deg * 1000.0f);
+            g_car_motion_base_target_pps = car_debug_round_float(
+                motion.base_speed_target_pps);
+            g_car_motion_correction_pps = car_debug_round_float(
+                motion.heading_correction_pps);
+            g_car_motion_elapsed_ms = motion.elapsed_ms;
+            g_car_motion_last_result =
+                (uint32_t) motion.last_result;
+        }
+    }
     if (WheelLineTrackingControl_GetSnapshot(&line_tracking)) {
         g_car_line_tracking_error = line_tracking.line_error;
         g_car_line_tracking_base_target_pps = car_debug_round_float(
@@ -469,6 +500,8 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->line_tracking_base_target_pps =
         g_car_line_tracking_base_target_pps;
     snapshot->line_tracking_elapsed_ms = g_car_line_tracking_elapsed_ms;
+    snapshot->motion_base_target_pps = g_car_motion_base_target_pps;
+    snapshot->motion_elapsed_ms = g_car_motion_elapsed_ms;
     snapshot->line_sensor_state = g_car_line_sensor_state;
     snapshot->line_sensor_active_mask = g_car_line_sensor_active_mask;
     snapshot->line_sensor_error = g_car_line_sensor_error;

@@ -272,6 +272,28 @@ mission stat
 and seven-channel `linewave` VOFA+ format remain unchanged. Any board button
 stops an active mission before another button command can start.
 
+## Composite motion API
+
+`app/motion/motion_supervisor.h` is the first shared upper-layer motion
+interface. It owns the speed loop through the dedicated `MOTION` supervisor
+mode, so a position command cannot silently fight a Heading, Yaw, or line
+mission owner. The first supported action is relative encoder distance with
+either an absolute target heading or the heading captured at start:
+
+```text
+motion start DELTA_COUNTS HEADING_DEG MAX_SPEED_PPS TIMEOUT_MS
+motion start DELTA_COUNTS hold MAX_SPEED_PPS TIMEOUT_MS
+motion stop
+motion stat
+```
+
+The action applies a bounded distance correction and Heading correction at the
+same outer layer, refreshes the existing speed command lease, requires fresh
+encoder and IMU snapshots, and stops at the distance/heading settle window.
+It is intentionally explicit and does not start from boot or from a board
+button. Future route sequences and competition logic should call this API
+instead of starting the standalone position and Heading owners together.
+
 ## Reusable ICM20948 API
 
 `drivers/device/icm20948/icm20948.h` owns the external IMU protocol and uses

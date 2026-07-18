@@ -101,6 +101,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/display/car_display.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/line_follow_mission.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/motion/motion_supervisor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/services/firmware_update.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
@@ -116,6 +117,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/control/pid.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_heading_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_line_tracking_control.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_odometry.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_position_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_speed_control.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_yaw_control.c"
@@ -148,6 +150,16 @@ add_executable(${BOOTLOADER_NAME}
   "${BOOT_SYSCFG_C}"
 )
 
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/motion/motion_supervisor.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_odometry.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_status.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
+    PROPERTIES COMPILE_OPTIONS "-Os")
+endif()
+
 add_dependencies(${APP_NAME} car_control_syscfg)
 add_dependencies(${BOOTLOADER_NAME} car_bootloader_syscfg)
 set_target_properties(${APP_NAME} PROPERTIES SUFFIX "${APP_SUFFIX}")
@@ -161,6 +173,7 @@ target_include_directories(${APP_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/display"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mission"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/motion"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/services"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp"

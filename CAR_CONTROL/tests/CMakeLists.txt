@@ -42,6 +42,18 @@ target_include_directories(line_follow_mission_test PRIVATE
 
 add_test(NAME line_follow_mission COMMAND line_follow_mission_test)
 
+add_executable(wheel_odometry_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/wheel_odometry_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control/wheel_odometry.c"
+)
+target_compile_features(wheel_odometry_test PRIVATE c_std_99)
+target_include_directories(wheel_odometry_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/mcu"
+)
+
+add_test(NAME wheel_odometry COMMAND wheel_odometry_test)
+
 add_executable(tuning_codec_test
   "${CMAKE_CURRENT_SOURCE_DIR}/tuning_codec_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../app/tuning/tuning_codec.c"

@@ -18,6 +18,7 @@ typedef enum {
     CAR_APP_WORKFLOW_HEADING_TEST,
     CAR_APP_WORKFLOW_LINE_TEST,
     CAR_APP_WORKFLOW_LINE_MISSION,
+    CAR_APP_WORKFLOW_MOTION,
     CAR_APP_WORKFLOW_YAW_TEST
 } car_app_workflow_t;
 
@@ -34,6 +35,7 @@ typedef struct {
     bool heading_test_active;
     bool line_test_active;
     bool line_mission_active;
+    bool motion_active;
     bool yaw_test_active;
     bool pb21_press_event;
     bool pb4_press_event;

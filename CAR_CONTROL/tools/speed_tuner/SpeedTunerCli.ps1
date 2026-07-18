@@ -10,6 +10,7 @@ param(
         "HeadingRun", "HeadingStop", "HeadingStatus", "LineGet",
         "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
         "MissionStart", "MissionStop", "MissionStatus",
+        "MotionStart", "MotionStop", "MotionStatus",
         "AppStatus", "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
@@ -57,6 +58,10 @@ param(
     [uint16]$LineLimit = 750,
     [single]$LineDeadband = 2.0,
     [uint16]$LineDuration = 30000,
+    [int32]$MotionDeltaCount = 1060,
+    [string]$MotionHeading = "hold",
+    [single]$MotionMaxSpeed = 1400.0,
+    [uint16]$MotionTimeout = 6000,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -687,6 +692,19 @@ try {
         }
         "MissionStatus" {
             [void](Invoke-Protocol "mission stat" @("MSTAT ", "ERR "))
+        }
+        "MotionStart" {
+            $command = "motion start $MotionDeltaCount $MotionHeading $MotionMaxSpeed $MotionTimeout"
+            if ($MotionHeading -eq 'hold') {
+                $command = "motion start $MotionDeltaCount hold $MotionMaxSpeed $MotionTimeout"
+            }
+            [void](Invoke-Protocol $command @("OK MOTION START", "ERR "))
+        }
+        "MotionStop" {
+            [void](Invoke-Protocol "motion stop" @("OK MOTION STOP", "ERR "))
+        }
+        "MotionStatus" {
+            [void](Invoke-Protocol "motion stat" @("OSTAT ", "ERR "))
         }
         "AppStatus" {
             [void](Invoke-Protocol "app stat" @("ASTAT ", "ERR "))

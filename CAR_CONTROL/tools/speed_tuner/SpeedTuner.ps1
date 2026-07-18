@@ -46,6 +46,7 @@ $script:latestYawTelemetryPath = Join-Path $script:runtimeDir "latest_yaw_teleme
 $script:latestLineWavePath = Join-Path $script:runtimeDir "latest_line_wave.json"
 $script:latestLineStatusPath = Join-Path $script:runtimeDir "latest_line_status.json"
 $script:latestMissionStatusPath = Join-Path $script:runtimeDir "latest_mission_status.json"
+$script:latestMotionStatusPath = Join-Path $script:runtimeDir "latest_motion_status.json"
 $script:latestLineTelemetryPath = Join-Path $script:runtimeDir "latest_line_telemetry.csv"
 $script:lineStatusSource = 'mission'
 $script:lastPortPath = Join-Path $script:runtimeDir "last_port.txt"
@@ -179,6 +180,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^heading (get|run|stop|stat)$' -or
         $line -match '^line (get|run|stop|stat|cal)$' -or
         $line -match '^mission (start|stop|stat)$' -or
+        $line -match '^motion (stop|stat)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$' -or
         $line -match '^app stat$' -or
@@ -195,6 +197,9 @@ function Test-ControlCommand([string]$line) {
         return $true
     }
     if ($line -match '^line set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
+        return $true
+    }
+    if ($line -match '^motion start [+-]?\d+ (?:hold|[+-]?(?:\d+(?:\.\d*)?|\.\d+)) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
         return $true
     }
     return $line -match '^yaw set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+)(?: \d+)?)?$'
@@ -1130,6 +1135,16 @@ function Process-Line([string]$line) {
         } else {
             Add-Log "RX dropped malformed mission status." ([System.Drawing.Color]::DarkOrange)
         }
+        return
+    }
+    if ($line.StartsWith('OSTAT ')) {
+        Broadcast-ControlLine $line
+        $values = Parse-KeyValueLine $line
+        try {
+            [System.IO.File]::WriteAllText(
+                $script:latestMotionStatusPath,
+                ($values | ConvertTo-Json), $script:utf8NoBom)
+        } catch {}
         return
     }
     Broadcast-ControlLine $line

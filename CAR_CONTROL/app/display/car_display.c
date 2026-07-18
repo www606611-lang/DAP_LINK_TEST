@@ -6,6 +6,7 @@
 #include "line_follow_mission.h"
 #include "line_sensor.h"
 #include "line_tracking_bringup_test.h"
+#include "motion_supervisor.h"
 #include "st7789.h"
 #include "yaw_bringup_test.h"
 
@@ -66,16 +67,20 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     uint32_t display_elapsed_ms;
     bool heading_active = HeadingBringupTest_IsActive();
     bool yaw_active = YawBringupTest_IsActive();
+    bool motion_active = MotionSupervisor_IsActive();
     bool line_mission_active = LineFollowMission_IsActive();
     bool line_tracking_active = line_mission_active ||
         LineTrackingBringupTest_IsActive();
-    bool angle_motion_active = heading_active || yaw_active;
-    const char *control_state = line_mission_active ?
+    bool angle_motion_active = heading_active || yaw_active ||
+        motion_active;
+    const char *control_state = motion_active ?
+        MotionSupervisor_GetStateText() :
+        (line_mission_active ?
         LineFollowMission_GetStateText() :
         (line_tracking_active ?
             LineTrackingBringupTest_GetStateText() :
         (heading_active ? HeadingBringupTest_GetStateText() :
-            YawBringupTest_GetStateText()));
+            YawBringupTest_GetStateText())));
     uint16_t angle_color;
     uint16_t state_color = ST7789_COLOR_WHITE;
     uint16_t line_color = ST7789_COLOR_RED;
@@ -148,6 +153,9 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     } else if (line_tracking_active) {
         (void) snprintf(command_text, sizeof(command_text), "V:%4ld",
             (long) debug.line_tracking_base_target_pps);
+    } else if (motion_active) {
+        (void) snprintf(command_text, sizeof(command_text), "M:%4ld",
+            (long) debug.motion_base_target_pps);
     } else if (command_mdeg == 0) {
         (void) snprintf(command_text, sizeof(command_text), "CMD: ---");
     } else {
@@ -158,6 +166,9 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
         control_state);
     if (line_tracking_active) {
         display_elapsed_ms = debug.line_tracking_elapsed_ms;
+    }
+    if (motion_active) {
+        display_elapsed_ms = debug.motion_elapsed_ms;
     }
     if (display_elapsed_ms > 99990U) {
         display_elapsed_ms = 99990U;

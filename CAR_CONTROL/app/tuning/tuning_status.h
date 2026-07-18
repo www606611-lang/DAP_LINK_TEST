@@ -15,5 +15,6 @@ void speed_tuning_send_heading_status(void);
 void speed_tuning_send_line_config(void);
 void speed_tuning_send_line_status(uint32_t now_ms);
 void speed_tuning_send_mission_status(uint32_t now_ms);
+void speed_tuning_send_motion_status(uint32_t now_ms);
 
 #endif

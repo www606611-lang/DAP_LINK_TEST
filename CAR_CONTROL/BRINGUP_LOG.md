@@ -1085,3 +1085,36 @@ maximum was 18 ms, and I2C read/recovery errors remained zero. The run ended
 through explicit operator stop with `MSTAT state=STOP`, result 9, controller
 inactive, and motor outputs in high impedance. This promotes `1400 pps` as the
 formal mission baseline; higher requested speeds remain experimental.
+
+## 2026-07-18: composite distance and Heading motion owner
+
+The first shared upper-layer motion interface is now implemented in
+`app/motion/motion_supervisor` with `control/wheel_odometry`. It owns the
+dedicated `MOTION` speed mode and combines a bounded average encoder-distance
+correction with a bounded Heading correction. The caller can provide an
+absolute target Heading or request a hold of the Heading captured at motion
+start. Existing Position, Heading, Yaw, and line owners are rejected while
+this owner is active, preventing accidental parallel outer loops.
+
+The GCC image was rebuilt at 110872 bytes with CRC32 `0x15638787` and updated
+over JDY-31 in 24.4 seconds. After restart, `OSTAT state=READY` and all motor
+outputs were high impedance. Host coverage reached five passing tests,
+including odometry deltas and application button-stop routing.
+
+The first visible-distance trial used `+530` counts, `700 pps`, and a `4000 ms`
+timeout. It correctly returned `ABORT / TIMEOUT` at 26 counts of remaining
+error, demonstrating the timeout guard rather than falsely reporting success.
+The following supervised trials all completed with high impedance:
+
+```text
+delta  heading  max pps  timeout  elapsed  final error  yaw error  result
++530   hold     700      8000     6606 ms  +23          +0.084 deg  DONE
+-530   hold     350      10000    5345 ms  -24          +0.262 deg  DONE
++1060  hold     500      10000    3835 ms  +23          -0.920 deg  DONE
++2120  hold     220      15000   11794 ms  +22          +0.316 deg  DONE
+```
+
+The operator confirmed the vehicle showed no obvious deflection and remained
+straight during the long, low-speed run. This promotes the composite owner as
+the reusable interface for future distance, route, and competition tasks;
+those tasks still need their own behavior-level tests.
