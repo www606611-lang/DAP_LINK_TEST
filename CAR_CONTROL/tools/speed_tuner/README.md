@@ -7,12 +7,16 @@ their commands and telemetry over one Bluetooth UART connection.
 
 | MSPM0G3507 | Bluetooth module |
 | --- | --- |
-| PA26 / UART3 TX | RX |
-| PA25 / UART3 RX | TX |
+| PA21 / UART2 TX | RX |
+| PA22 / UART2 RX | TX |
 | GND | GND |
 
 The serial format is `115200 8N1`. The Bluetooth module's UART side must use a
 3.3 V compatible logic level.
+
+The UART2 transport uses a short resynchronization preamble before each TX
+burst. The tuner discards its single-byte training line before forwarding
+commands or telemetry to either TCP bridge.
 
 ## Run
 

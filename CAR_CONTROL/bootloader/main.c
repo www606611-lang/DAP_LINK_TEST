@@ -14,6 +14,8 @@
 #define BOOT_PROTOCOL_CRC_SIZE         4U
 #define BOOT_PROTOCOL_MAX_PAYLOAD      1028U
 #define BOOT_PROTOCOL_DATA_SIZE        1024U
+#define BOOT_RESPONSE_GUARD_CYCLES     (CPUCLK_FREQ / 200U)
+#define BOOT_RESPONSE_SYNC_GAP_CYCLES  (CPUCLK_FREQ / 1000U)
 
 #define BOOT_COMMAND_PING              0x01U
 #define BOOT_COMMAND_BEGIN             0x02U
@@ -314,7 +316,13 @@ static void boot_process_frame(uint32_t frame_crc)
 static void boot_send_response(uint8_t command, uint16_t sequence,
     uint8_t status, const uint8_t *data, uint16_t length)
 {
-    uint8_t magic[2] = {BOOT_PROTOCOL_MAGIC_0, BOOT_PROTOCOL_MAGIC_1};
+    uint8_t sync[8] = {
+        BOOT_PROTOCOL_MAGIC_0, BOOT_PROTOCOL_MAGIC_0,
+        BOOT_PROTOCOL_MAGIC_0, BOOT_PROTOCOL_MAGIC_0,
+        BOOT_PROTOCOL_MAGIC_0, BOOT_PROTOCOL_MAGIC_0,
+        BOOT_PROTOCOL_MAGIC_0, BOOT_PROTOCOL_MAGIC_0
+    };
+    uint8_t sync_end = BOOT_PROTOCOL_MAGIC_1;
     uint8_t header[BOOT_PROTOCOL_HEADER_SIZE];
     uint8_t payload[16];
     uint8_t crc_bytes[4];
@@ -336,10 +344,17 @@ static void boot_send_response(uint8_t command, uint16_t sequence,
     crc = Crc32_Update(Crc32_Begin(), header, sizeof(header));
     crc = Crc32_End(Crc32_Update(crc, payload, payload_length));
     boot_write_u32(crc_bytes, crc);
-    BootUart_Write(magic, sizeof(magic));
+    delay_cycles(BOOT_RESPONSE_GUARD_CYCLES);
+    /* JDY-31 uplink can corrupt initial turnaround bytes; repeated 0x55
+     * lets the host parser reacquire before the terminating 0xAA. */
+    BootUart_Write(sync, sizeof(sync));
+    delay_cycles(BOOT_RESPONSE_SYNC_GAP_CYCLES);
+    BootUart_Write(&sync_end, sizeof(sync_end));
+    delay_cycles(BOOT_RESPONSE_SYNC_GAP_CYCLES);
     BootUart_Write(header, sizeof(header));
     BootUart_Write(payload, payload_length);
     BootUart_Write(crc_bytes, sizeof(crc_bytes));
+    BootUart_WaitTxIdle();
 }
 
 static void boot_handle_begin(uint16_t sequence,

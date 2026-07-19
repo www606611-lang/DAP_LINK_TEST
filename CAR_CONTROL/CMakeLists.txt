@@ -166,19 +166,6 @@ add_executable(${BOOTLOADER_NAME}
   "${BOOT_SYSCFG_C}"
 )
 
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/motion/motion_supervisor.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/control/wheel_odometry.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/speed_tuning_console.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_command_router.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_control_status.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_sensor_status.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/tuning/tuning_mission_status.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
-    PROPERTIES COMPILE_OPTIONS "-Os")
-endif()
-
 add_dependencies(${APP_NAME} car_control_syscfg)
 add_dependencies(${BOOTLOADER_NAME} car_bootloader_syscfg)
 set_target_properties(${APP_NAME} PROPERTIES SUFFIX "${APP_SUFFIX}")
@@ -249,10 +236,10 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     "${ARM_GCC_DIR}/arm-none-eabi/include"
   )
   target_compile_options(${APP_NAME} PRIVATE
-    -ffunction-sections -fdata-sections -gstrict-dwarf
+    -Os -ffunction-sections -fdata-sections -gstrict-dwarf
   )
   target_compile_options(${BOOTLOADER_NAME} PRIVATE
-    -ffunction-sections -fdata-sections -gstrict-dwarf
+    -Os -ffunction-sections -fdata-sections -gstrict-dwarf
   )
   target_link_directories(${APP_NAME} PRIVATE
     "${MSPM0_SDK_DIR}/source"
@@ -289,8 +276,8 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     COMMENT "Generating relocatable application binary"
   )
 elseif(CMAKE_C_COMPILER_ID STREQUAL "TIClang")
-  target_compile_options(${APP_NAME} PRIVATE -gdwarf-3)
-  target_compile_options(${BOOTLOADER_NAME} PRIVATE -gdwarf-3)
+  target_compile_options(${APP_NAME} PRIVATE -Os -gdwarf-3)
+  target_compile_options(${BOOTLOADER_NAME} PRIVATE -Os -gdwarf-3)
   target_link_directories(${APP_NAME} PRIVATE
     "${MSPM0_SDK_DIR}/source" "${SYSCFG_OUT_DIR}" "${TIARMCLANG_DIR}/lib"
   )

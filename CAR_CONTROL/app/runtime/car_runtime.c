@@ -146,7 +146,7 @@ void CarRuntime_Step(void)
     LineSensorBringup_Task(now_ms);
     BluetoothUart_Task(now_ms);
     JDY31_ConfigTask(now_ms);
-    if (!JDY31_ConfigIsExclusive()) {
+    if (!JDY31_ConfigIsExclusive() && !FirmwareUpdate_IsPending()) {
         SpeedTuningConsole_Task(now_ms);
     }
     FirmwareUpdate_Task();

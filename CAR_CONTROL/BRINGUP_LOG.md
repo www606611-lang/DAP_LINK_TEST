@@ -1220,3 +1220,24 @@ stable chassis boundary for competition work. Future competition firmware
 should add only the problem-specific upper workflow and its tests; it should call
 these owners rather than retune or duplicate their inner loops. Higher line
 speeds remain experimental and are not part of this acceptance.
+
+## 2026-07-19: Gate 0 UART2 migration and wireless update regression
+
+JDY-31 ownership moved from UART3 PA25/PA26 to UART2 PA21/PA22 in both the
+application and resident Bootloader. GCC and TIClang application and
+Bootloader targets build with global `-Os`; the final GCC application image is
+75,216 bytes and the Bootloader contains 4,688 bytes of code/data.
+
+The one-time J-Link installation completed with program verification. UART2
+testing exposed JDY-31 uplink synchronization loss on the first bytes of a TX
+burst. The Bootloader now uses a guarded synchronization preamble, and the
+application uses end-of-transmission-paced bytes with a short training line.
+The host updater tolerates bounded preamble noise, while the tuner drops the
+single-byte training line before TCP forwarding. Firmware-update pending state
+also suppresses waveform scheduling so the TX queue can drain before reset.
+
+The final image completed two consecutive COM6 wireless updates in 13.8 and
+13.9 seconds with CRC32 `0x34210D15`. After each restart the tuner TCP bridge
+reported `ASTAT state=READY` and `hz=1`; port 13470 delivered the expected
+FireWater wave stream, and the bridge retained seven-channel Yaw mode. This
+completes Gate 0. Gate 1 starts the read-only K230 UART3 parser and transport.

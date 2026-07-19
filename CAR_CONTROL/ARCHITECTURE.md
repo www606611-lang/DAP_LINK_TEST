@@ -59,8 +59,9 @@ control cascade
   sensor setup, calibration, units, and attitude estimates. The line-sensor
   device driver owns the external eight-channel protocol and weighted error.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
-  motor PWM output, UART3 interrupt-RX/nonblocking-TX transport, and the polling
-  I2C0/I2C1 transaction layers used by the IMU and line sensor. It also owns
+  motor PWM output, UART2 interrupt-RX/end-of-transmission-paced TX transport
+  for JDY-31, and the polling I2C0/I2C1 transaction layers used by the IMU and
+  line sensor. It also owns
   WWDT0 initialization, refresh, fault injection, and the required handoff that
   disables the running application watchdog before entering the resident
   Bootloader. CAN remains future work.
@@ -82,7 +83,7 @@ control cascade
   archived here instead of remaining in the active application directory.
 - `platform/mspm0g3507`: immutable Flash/SRAM partition constants and linker
   layouts shared by the application and resident Bootloader.
-- `bootloader`: isolated 115200-baud JDY-31 update protocol, safe motor-pin
+- `bootloader`: isolated UART2 115200-baud JDY-31 update protocol, safe motor-pin
   state, Flash erase/program, image validation, and application handoff.
 
 ## Integration gates

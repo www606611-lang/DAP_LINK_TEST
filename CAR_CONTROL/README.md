@@ -74,8 +74,8 @@ into `car_control`.
   after completing one full scheduling pass and immediately before sleeping.
   A watchdog reset is classified as suspicious and boots with motion locked;
   debugger halt pauses the watchdog.
-- UART3 provides detached speed-loop tuning at 115200 baud: PA26 is MCU TX and
-  PA25 is MCU RX. Applying parameters does not start either motor.
+- UART2 provides detached speed-loop tuning at 115200 baud: PA21 is MCU TX and
+  PA22 is MCU RX. Applying parameters does not start either motor.
 
 Direct mode requests remain blocked. Verified outer controllers enter
 position, yaw, heading, or line-tracking mode only through the supervised
@@ -337,8 +337,8 @@ keeps the physical sensor task near its nominal update rate.
 3.3 V compatible Bluetooth UART module as follows:
 
 ```text
-PA26 / UART3 TX -> Bluetooth RX
-PA25 / UART3 RX <- Bluetooth TX
+PA21 / UART2 TX -> Bluetooth RX
+PA22 / UART2 RX <- Bluetooth TX
 GND             -- common GND
 ```
 
@@ -412,10 +412,15 @@ The resident wireless updater uses this protected Flash layout:
 0x0001FC00..0x0001FFFF  update state, image size, and CRC32
 ```
 
+Both supported toolchains compile the application and Bootloader with `-Os`.
+The linker memory regions remain the hard size limit, so an oversized image
+fails the build instead of overlapping the Bootloader or metadata page.
+
 `Install Bootloader + App (J-Link, One Time)` performs the one-time full-chip
 installation. After that, close any program that owns COM6 and run `Build +
 Wireless Update (COM6)` from the VS Code task list. The current approximately
-109 KiB GCC image transfers through the JDY-31 at 115200 baud. `fw update`
+73.5 KiB GCC image transfers through the JDY-31 at 115200 baud in about
+14 seconds. `fw update`
 is accepted only while all motor outputs are high impedance. Each 1024-byte
 frame and the completed image have independent CRC32 checks; an interrupted
 update leaves the Bootloader resident and ready for the same task to be run

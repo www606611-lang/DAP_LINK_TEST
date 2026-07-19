@@ -123,6 +123,7 @@ function Read-BootFrame([System.IO.Ports.SerialPort]$Serial,
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     [long]$deadline = $TimeoutMs
     $sawFirstMagic = $false
+    $syncNoiseCount = 0
 
     while ($timer.ElapsedMilliseconds -lt $deadline) {
         $value = Read-SerialByte $Serial $timer $deadline
@@ -131,6 +132,9 @@ function Read-BootFrame([System.IO.Ports.SerialPort]$Serial,
         }
         if (-not $sawFirstMagic) {
             $sawFirstMagic = ([byte]$value -eq $Magic0)
+            if ($sawFirstMagic) {
+                $syncNoiseCount = 0
+            }
             continue
         }
         if ([byte]$value -eq $Magic1) {
@@ -141,6 +145,7 @@ function Read-BootFrame([System.IO.Ports.SerialPort]$Serial,
             [int]$length = Get-U16 $header 4
             if ($length -gt 64) {
                 $sawFirstMagic = $false
+                $syncNoiseCount = 0
                 continue
             }
             [byte[]]$payload = Read-Exact $Serial $timer $deadline $length
@@ -152,6 +157,7 @@ function Read-BootFrame([System.IO.Ports.SerialPort]$Serial,
             [uint32]$calculatedCrc = Get-Crc32 ([byte[]]($header + $payload))
             if ($receivedCrc -ne $calculatedCrc) {
                 $sawFirstMagic = $false
+                $syncNoiseCount = 0
                 continue
             }
             return [pscustomobject]@{
@@ -161,7 +167,16 @@ function Read-BootFrame([System.IO.Ports.SerialPort]$Serial,
                 Payload = $payload
             }
         }
-        $sawFirstMagic = ([byte]$value -eq $Magic0)
+        if ([byte]$value -eq $Magic0) {
+            $syncNoiseCount = 0
+        }
+        else {
+            $syncNoiseCount++
+            if ($syncNoiseCount -gt 4) {
+                $sawFirstMagic = $false
+                $syncNoiseCount = 0
+            }
+        }
     }
     return $null
 }
