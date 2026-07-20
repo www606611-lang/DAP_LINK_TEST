@@ -66,3 +66,15 @@ target_include_directories(tuning_codec_test PRIVATE
 )
 
 add_test(NAME tuning_codec COMMAND tuning_codec_test)
+
+add_executable(k230_vision_link_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/k230_vision_link_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/k230/k230_vision_link.c"
+)
+target_compile_features(k230_vision_link_test PRIVATE c_std_99)
+target_include_directories(k230_vision_link_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/k230"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/mcu"
+)
+
+add_test(NAME k230_vision_link COMMAND k230_vision_link_test)

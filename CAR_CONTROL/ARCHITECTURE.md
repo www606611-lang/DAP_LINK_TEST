@@ -32,6 +32,7 @@ app/main
   -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
      -> drivers/utility/imu_attitude_estimator
   -> drivers/device/line_sensor -> drivers/mcu/i2c1_polling
+  -> drivers/device/k230 -> drivers/mcu/vision_uart
   -> bsp/board_wheel_drive -> drivers/device/at8236
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
@@ -58,10 +59,13 @@ control cascade
   AT8236 dual-channel command layer. The ICM20948 owns register-bank selection,
   sensor setup, calibration, units, and attitude estimates. The line-sensor
   device driver owns the external eight-channel protocol and weighted error.
+  The K230 vision-link driver owns framed target validation, coordinate bounds,
+  link age, resynchronization, and the read-only target snapshot.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
   motor PWM output, UART2 interrupt-RX/end-of-transmission-paced TX transport
   for JDY-31, and the polling I2C0/I2C1 transaction layers used by the IMU and
-  line sensor. It also owns
+  line sensor. The independent UART3 PA13/PA14 interrupt-RX ring buffer belongs
+  to the K230 transport and does not share JDY-31 ownership. It also owns
   WWDT0 initialization, refresh, fault injection, and the required handoff that
   disables the running application watchdog before entering the resident
   Bootloader. CAN remains future work.
@@ -143,11 +147,16 @@ control cascade
     `MOTION` speed owner for relative-distance plus Heading commands. It is the
     composition point for future route sequencing; standalone outer loops must
     not be started concurrently to create a cascade by accident.
+17. K230 vision link: UART3 PA13/PA14 receives bounded 400 x 240 target frames
+    into a read-only device snapshot. Parser, timeout, resync, and overflow
+    behavior are host-tested; live prediction and sustained frame progress are
+    physically accepted without arming the chassis.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies and the
-tuning text codec without linking MCU drivers. Hardware-dependent control and
-safety paths still require the supervised bench and ground procedures recorded
-in `BRINGUP_LOG.md`.
+tuning text codec without linking MCU drivers. They also test the K230 device
+parser against a mock UART transport. Hardware-dependent control and safety
+paths still require the supervised bench and ground procedures recorded in
+`BRINGUP_LOG.md`.
 
 Product code must submit wheel commands through `BoardWheelDrive_SetCommands`.
 Direct `AT8236_MotorSetCommand` and `MotorPwm_SetDuty` calls are internal to the

@@ -19,6 +19,7 @@ const IMU_I2C       = I2C.addInstance();
 const LINE_I2C      = I2C.addInstance();
 const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
 const BLUETOOTH_UART = UART.addInstance();
+const K230_UART     = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
 const SYSTICK       = scripting.addModule("/ti/driverlib/SYSTICK");
 const WWDT          = scripting.addModule("/ti/driverlib/WWDT", {}, false);
@@ -208,6 +209,24 @@ BLUETOOTH_UART.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
 BLUETOOTH_UART.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
 BLUETOOTH_UART.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
 BLUETOOTH_UART.rxPinConfig.$name                = "BLUETOOTH_UART_RX_PIN";
+
+K230_UART.$name                            = "K230_UART";
+K230_UART.targetBaudRate                   = 115200;
+K230_UART.enableFIFO                       = true;
+K230_UART.rxFifoThreshold                  = "DL_UART_RX_FIFO_LEVEL_ONE_ENTRY";
+K230_UART.enabledInterrupts                = ["RX"];
+K230_UART.peripheral.$assign               = "UART3";
+K230_UART.peripheral.rxPin.$assign         = "PA13";
+K230_UART.peripheral.txPin.$assign         = "PA14";
+K230_UART.txPinConfig.direction            = scripting.forceWrite("OUTPUT");
+K230_UART.txPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+K230_UART.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+K230_UART.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+K230_UART.txPinConfig.$name                = "K230_UART_TX_PIN";
+K230_UART.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+K230_UART.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+K230_UART.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+K230_UART.rxPinConfig.$name                = "K230_UART_RX_PIN";
 
 SYSCTL.clockTreeEn = true;
 

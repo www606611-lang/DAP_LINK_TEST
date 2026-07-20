@@ -228,6 +228,33 @@ the latest parsed state is written to `latest_line_status.json`. At idle the
 LCD footer shows the eight active bits, signed error, and `LINE`, `MISS`,
 `CAL`, or `ERR`.
 
+## Reusable K230 vision-link API
+
+`drivers/device/k230/k230_vision_link.h` owns the read-only K230 target link.
+UART3 uses PA13 RX and PA14 TX at 115200 baud; the K230 sends ASCII frames in
+this fixed format:
+
+```text
+@valid,cx,cy#
+```
+
+Coordinates are bounded to `0..399` and `0..239`, with center `200/120`.
+`valid=0` means the K230 link is alive but no target is selected; receiving no
+complete frame for 150 ms marks the link offline. The public API is:
+
+```c
+K230VisionLink_Init(now_ms);
+K230VisionLink_Task(now_ms);
+K230VisionLink_GetSnapshot(&snapshot);
+```
+
+The snapshot exposes target validity, center error, frame count and age,
+parser/resync counts, received bytes, and UART overflow. `k230 stat` and CLI
+action `K230Status` expose the same evidence without arming a motor. The LCD
+health row shows K230 online/valid state and the latest center. Competition
+missions may consume the snapshot later; the driver itself never commands
+motion.
+
 ## Reusable line-tracking API
 
 `control/wheel_line_tracking_control.h` owns the supervised line-tracking

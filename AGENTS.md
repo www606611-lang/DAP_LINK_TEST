@@ -55,6 +55,22 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 - Preserve the existing seven-channel VOFA+ Yaw waveform format unless the
   user explicitly approves a channel change.
 
+## CanMV Workflow
+
+- The long-lived CanMV integration is the global `canmv` MCP registered in
+  `C:/Users/ASUS/.codex/config.toml`; its source is under
+  `C:/Users/ASUS/.codex/mcp/canmv` and is reusable across projects.
+- Use the CanMV MCP for IDE status, minimized launch, run, stop, console access,
+  background capture, and K230 link telemetry. Do not use foreground mouse or
+  keyboard automation for CanMV.
+- Keep CanMV minimized and never activate its window merely to inspect state.
+- When a required CanMV operation or API is missing, extend the global MCP and
+  add a focused test before using that capability. Do not fall back to ad hoc
+  foreground automation.
+- Minimized `PrintWindow` capture currently returns a blank content area. Treat
+  it as unavailable evidence and use structured link telemetry or ask for a
+  physical-display observation until a direct framebuffer API is added.
+
 ## Physical Test Safety
 
 - Flashing firmware does not authorize motor motion by itself.
@@ -110,6 +126,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   recorded in `CAR_CONTROL/BRINGUP_LOG.md`.
 - The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
   left, right, and no-line states with zero I2C errors.
+- The K230 read-only vision link is system validated on UART3 PA13/PA14 at
+  115200 baud. Preserve the `@valid,cx,cy#` 400 x 240 contract, 150 ms offline
+  timeout, and zero-motion ownership; `valid=0` is not the same as offline.
 - The composite `MOTION` owner and wheel odometry are ground validated for
   relative forward/reverse distance with startup-heading hold. Preserve the
   exclusive-owner rule; do not start standalone Position, Heading, Yaw, or

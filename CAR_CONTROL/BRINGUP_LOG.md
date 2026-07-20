@@ -1261,3 +1261,33 @@ Both GCC and TIClang application/Bootloader targets build successfully with the
 JDY-31 configurator disabled for normal operation. The GCC application contains
 75,280 bytes of code/data and the Bootloader contains 4,696 bytes of code/data;
 GCC retains `-Os`, function/data sections, and linker garbage collection.
+
+## 2026-07-20: Gate 1 K230 vision-link acceptance
+
+The dedicated K230 path now uses UART3 PA13 RX and PA14 TX at 115200 baud. An
+interrupt-driven 128-byte MCU ring buffer feeds a bounded device parser for
+`@valid,cx,cy#`; coordinates are limited to the 400 x 240 contract and a 150 ms
+frame lease distinguishes live `valid=0` from an offline link. The public
+snapshot is read-only and exposes coordinates, center error, frame age, parser
+errors, resyncs, received bytes, UART overflow, and timeout count.
+
+The LCD health slice and read-only `k230 stat` command expose the link without
+starting a workflow. The tuner TCP bridge and CLI accept that command while the
+existing seven-channel VOFA+ stream remains unchanged. GCC and TIClang builds
+completed with global size optimization; the GCC application binary is 76,976
+bytes. All six host tests passed, including the K230 cases for fragmented,
+concatenated, malformed, oversize, out-of-range, resync, and timeout input.
+
+The original K230 rectangle script was replaced by the maintained YOLOv8 KPU
+and AI2D pipeline derived from the zoom-camera reference project. It uses fixed
+focus position 210, performs no runtime autofocus or sensor restart, selects
+the highest-confidence box, scales its center to 400 x 240, and sends a lost
+target frame when no detection is present. Resources have bounded cleanup and
+exceptions retain full diagnostics.
+
+Live center probing reported `online=1`, `valid=1`, `cx=200`, `cy=120`, with
+zero parser errors and zero UART overflow. A later sustained MCP run sampled
+ten points over approximately 49 seconds: frames advanced monotonically from
+26720 to 27591 at about 19.4 FPS, frame age remained below 150 ms, and status
+remained `READY / HIGH-Z`. The operator confirmed that physical prediction was
+normal. This completes Gate 1; Gate 2 is the read-only MCAN transport.

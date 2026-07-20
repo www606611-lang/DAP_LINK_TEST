@@ -183,6 +183,7 @@ function Test-ControlCommand([string]$line) {
         $line -match '^motion (stop|stat)$' -or
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$' -or
+        $line -match '^k230 stat$' -or
         $line -match '^app stat$' -or
         $line -match '^wdt (stat|test)$') {
         return $true

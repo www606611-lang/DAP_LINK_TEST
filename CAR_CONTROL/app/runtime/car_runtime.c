@@ -17,6 +17,7 @@
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
+#include "k230_vision_link.h"
 #include "line_follow_mission.h"
 #include "line_sensor_bringup.h"
 #include "line_tracking_bringup_test.h"
@@ -35,6 +36,7 @@
 #include "wheel_position_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
+#include "vision_uart.h"
 #include "yaw_bringup_test.h"
 
 #include <stdbool.h>
@@ -100,6 +102,8 @@ void CarRuntime_Init(void)
     MotionSupervisor_Init(suspicious_reset);
     CarApp_Init(suspicious_reset);
     BluetoothUart_Init();
+    VisionUart_Init();
+    K230VisionLink_Init(now_ms);
     JDY31_ConfigInit(now_ms, CAR_JDY31_CONFIGURE_ON_BOOT != 0);
     if (!JDY31_ConfigIsExclusive()) {
         SpeedTuningConsole_Init();
@@ -145,6 +149,7 @@ void CarRuntime_Step(void)
     WheelOdometry_Task(now_ms);
     ICM20948_Task(now_ms);
     LineSensorBringup_Task(now_ms);
+    K230VisionLink_Task(now_ms);
     BluetoothUart_Task(now_ms);
     JDY31_ConfigTask(now_ms);
     if (!JDY31_ConfigIsExclusive() && !FirmwareUpdate_IsPending()) {

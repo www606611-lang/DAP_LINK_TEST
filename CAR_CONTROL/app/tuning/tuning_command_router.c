@@ -323,6 +323,12 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
         return;
     }
     if ((token_count == 2U) &&
+        (strcmp(tokens[0], "k230") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        speed_tuning_send_k230_status(now_ms);
+        return;
+    }
+    if ((token_count == 2U) &&
         (strcmp(tokens[0], "yaw") == 0) &&
         (strcmp(tokens[1], "get") == 0)) {
         speed_tuning_send_yaw_config();
@@ -559,5 +565,5 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
     }
 
     BluetoothUart_WriteText(
-        "ERR use spd|pos|yaw|heading|line|mission|motion|imu or fw update\r\n");
+        "ERR use spd|pos|yaw|heading|line|mission|motion|imu|k230 or fw update\r\n");
 }

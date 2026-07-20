@@ -11,7 +11,7 @@ param(
         "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
         "MissionStart", "MissionStop", "MissionStatus",
         "MotionStart", "MotionStop", "MotionStatus",
-        "AppStatus", "WatchdogStatus", "WatchdogTest")]
+        "K230Status", "AppStatus", "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -611,6 +611,9 @@ try {
         }
         "ImuZero" {
             [void](Invoke-Protocol "imu zero" @("OK IMU ZERO", "ERR "))
+        }
+        "K230Status" {
+            [void](Invoke-Protocol "k230 stat" @("KSTAT ", "ERR "))
         }
         "YawGet" {
             [void](Invoke-Protocol "yaw get" @("OK YCFG ", "ERR "))

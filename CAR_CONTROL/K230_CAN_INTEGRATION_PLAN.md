@@ -1,7 +1,7 @@
 # K230 Vision And CAN Stepper Integration Plan
 
-Status: Gate 0 communication migration complete. K230 and CAN feature code,
-SysConfig resources, and EDA files remain unchanged; Gate 1 is next.
+Status: Gate 1 K230 parser and transport complete. The dedicated UART3 vision
+link is physically accepted; Gate 2 MCAN transport is next.
 
 ## 1. Scope
 
@@ -234,6 +234,8 @@ consecutive wireless updates in 13.8 and 13.9 seconds; each restart reported
 
 ### Gate 1: K230 parser and transport
 
+Status: completed 2026-07-20.
+
 - Add host tests for valid, lost-target, fragmented, concatenated, malformed,
   overflow, out-of-range, and timeout input.
 - Add UART3 RX transport and read-only vision snapshot.
@@ -242,6 +244,15 @@ consecutive wireless updates in 13.8 and 13.9 seconds; each restart reported
 Acceptance: moving the target covers the full 400 x 240 range, center is near
 200/120, `valid=0` is distinct from offline, and unplugging data becomes offline
 within the expected timeout without affecting chassis timing.
+
+Evidence: UART3 PA13/PA14 receives `@valid,cx,cy#` at 115200 baud. Host tests
+cover fragmented, concatenated, malformed, oversize, out-of-range, resync, and
+timeout input. Live status reported center `200/120`, zero parser errors and
+zero UART overflow. A sustained run advanced from frame 26720 to 27591 at
+approximately 19.4 FPS while frame age remained below the 150 ms lease and the
+chassis stayed `READY / HIGH-Z`. The operator accepted physical prediction and
+the fixed-focus KPU preview. The old detector was replaced by the maintained
+YOLOv8/KPU implementation with bounded cleanup and no runtime autofocus.
 
 ### Gate 2: MCAN transport
 
