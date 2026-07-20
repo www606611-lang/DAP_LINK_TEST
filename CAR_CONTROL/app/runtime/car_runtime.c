@@ -4,6 +4,7 @@
 #include "board_gpio_irq.h"
 #include "board_motor_safe.h"
 #include "board_resources.h"
+#include "board_startup.h"
 #include "board_wheel_drive.h"
 #include "bluetooth_uart.h"
 #include "car_app.h"
@@ -67,7 +68,7 @@ void CarRuntime_Init(void)
     bool suspicious_reset;
 
     FirmwareUpdate_AppInit();
-    SYSCFG_DL_init();
+    BoardStartup_Init();
     SystemWatchdog_Init();
     ResetDiagnostics_Init();
     suspicious_reset = ResetDiagnostics_IsSuspicious();

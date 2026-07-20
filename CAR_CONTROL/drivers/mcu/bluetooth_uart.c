@@ -9,6 +9,7 @@
 #define BLUETOOTH_UART_IDLE_MS    40U
 #define BLUETOOTH_UART_RX_SIZE   128U
 #define BLUETOOTH_UART_TX_SIZE   512U
+#define BLUETOOTH_UART_TX_SYNC_BYTES 8U
 #define BLUETOOTH_UART_TX_GAP_CYCLES (CPUCLK_FREQ / 50000U)
 
 static char g_line[BLUETOOTH_UART_LINE_SIZE];
@@ -201,7 +202,8 @@ void BluetoothUart_WriteText(const char *text)
                 BLUETOOTH_UART_TX_SIZE);
         }
         if (!DL_UART_Main_isBusy(BLUETOOTH_UART_INST)) {
-            g_tx_preamble_remaining = 2U;
+            g_tx_preamble_remaining =
+                BLUETOOTH_UART_TX_SYNC_BYTES + 2U;
             DL_UART_Main_clearInterruptStatus(
                 BLUETOOTH_UART_INST,
                 DL_UART_MAIN_INTERRUPT_EOT_DONE);
@@ -272,7 +274,10 @@ static void bluetooth_uart_transmit_next(void)
 {
     uint8_t byte;
 
-    if (g_tx_preamble_remaining > 0U) {
+    if (g_tx_preamble_remaining > 2U) {
+        byte = 0x55U;
+        g_tx_preamble_remaining--;
+    } else if (g_tx_preamble_remaining > 0U) {
         byte = (g_tx_preamble_remaining == 2U) ?
             (uint8_t) '\r' : (uint8_t) '\n';
         g_tx_preamble_remaining--;

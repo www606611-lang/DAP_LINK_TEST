@@ -5,6 +5,8 @@
 #include "encoder_input.h"
 #include "ti_msp_dl_config.h"
 
+#define BOARD_GPIO_IRQ_MAX_EVENTS 8U
+
 static uint32_t board_gpiob_interrupt_pin_mask(void)
 {
     return ENCODER_GPIOB_ENCODER_0_A_PIN |
@@ -26,23 +28,22 @@ void BoardGpioIrq_Init(void)
 
 void GROUP1_IRQHandler(void)
 {
-    while (true) {
-        uint32_t interrupt_index;
+    uint32_t event_count;
 
-        if (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1) !=
-            GPIO_MULTIPLE_GPIOB_INT_IIDX) {
+    if (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1) !=
+        GPIO_MULTIPLE_GPIOB_INT_IIDX) {
+        return;
+    }
+
+    for (event_count = 0U; event_count < BOARD_GPIO_IRQ_MAX_EVENTS;
+         event_count++) {
+        uint32_t interrupt_index = DL_GPIO_getPendingInterrupt(
+            ENCODER_GPIOB_PORT);
+
+        if (interrupt_index == DL_GPIO_IIDX_NO_INTR) {
             return;
         }
-
-        while (true) {
-            interrupt_index = DL_GPIO_getPendingInterrupt(
-                ENCODER_GPIOB_PORT);
-            if (interrupt_index == DL_GPIO_IIDX_NO_INTR) {
-                break;
-            }
-            if (EncoderInput_OnGpioInterrupt(interrupt_index)) {
-                continue;
-            }
+        if (!EncoderInput_OnGpioInterrupt(interrupt_index)) {
             (void) BoardButton_OnGpioInterrupt(
                 interrupt_index, delay_get_ms());
         }

@@ -74,7 +74,7 @@ into `car_control`.
   after completing one full scheduling pass and immediately before sleeping.
   A watchdog reset is classified as suspicious and boots with motion locked;
   debugger halt pauses the watchdog.
-- UART2 provides detached speed-loop tuning at 115200 baud: PA21 is MCU TX and
+- UART2 provides detached speed-loop tuning at 115200 baud: PB17 is MCU TX and
   PA22 is MCU RX. Applying parameters does not start either motor.
 
 Direct mode requests remain blocked. Verified outer controllers enter
@@ -337,7 +337,7 @@ keeps the physical sensor task near its nominal update rate.
 3.3 V compatible Bluetooth UART module as follows:
 
 ```text
-PA21 / UART2 TX -> Bluetooth RX
+PB17 / UART2 TX -> Bluetooth RX
 PA22 / UART2 RX <- Bluetooth TX
 GND             -- common GND
 ```

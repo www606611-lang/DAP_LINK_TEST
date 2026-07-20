@@ -128,6 +128,7 @@ add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_button.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_gpio_irq.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_motor_safe.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_startup.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/bsp/board_wheel_drive.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/control_supervisor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/control/pid.c"

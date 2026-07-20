@@ -31,7 +31,7 @@ Sources inspected:
 
 | Function | Final MCU resource | Board evidence | Decision |
 | --- | --- | --- | --- |
-| JDY-31 tuning/update | UART2: PA21 TX, PA22 RX | Free Tianmengxing header pins; valid UART2 mux | Move from UART3 |
+| JDY-31 tuning/update | UART2: PB17 TX, PA22 RX | Free Tianmengxing header pins; valid UART2 mux | Move from UART3, then isolate TX from the PA21 route |
 | K230 vision | UART3: PA13 RX, PA14 TX | Main-board U9 routes RX to A13 and TX to A14 | Use the intended U9 connector |
 | ZDT CAN bus | CANFD0: PA26 CANTX, PA27 CANRX | Main-board CAN module nets map A26/A27 to MCAN0_TX/RX | Use classic CAN at 500 kbit/s |
 | LCD DMA | DMA channel 2 | Existing validated ST7789 configuration | Preserve unchanged |
@@ -59,7 +59,7 @@ the final board interfaces:
 The durable allocation is therefore:
 
 ```text
-UART2 PA21/PA22 -> JDY-31
+UART2 PB17/PA22 -> JDY-31
 UART3 PA13/PA14 -> K230 U9
 CANFD0 PA26/PA27 -> onboard SN65HVD230
 ```
@@ -221,8 +221,8 @@ queue or return a clear busy/error result.
 
 Status: completed 2026-07-19.
 
-- Move application JDY-31 SysConfig to UART2 PA21/PA22.
-- Move Bootloader UART to UART2 PA21/PA22.
+- Move application JDY-31 SysConfig to UART2 PB17/PA22.
+- Move Bootloader UART to UART2 PB17/PA22.
 - Build GCC and TIClang application and Bootloader targets.
 - Perform the one-time Bootloader/application installation and complete the
   five migration checks in section 3.

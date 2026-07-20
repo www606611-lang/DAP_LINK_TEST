@@ -114,6 +114,11 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   relative forward/reverse distance with startup-heading hold. Preserve the
   exclusive-owner rule; do not start standalone Position, Heading, Yaw, or
   line owners concurrently with a motion command.
+- JDY-31 tuning and wireless update use UART2 at 115200 baud with PB17 TX and
+  PA22 RX in both the application and resident Bootloader. The eight-byte TX
+  training preamble is required for reliable first-byte turnaround. Startup
+  must keep all four motor inputs inactive and report `READY / HIGH-Z` before
+  any command is accepted.
 - The supervised line-tracking outer loop is ground validated on the fixed
   five-corner route at a commanded 1400 pps base speed. Preserve the accepted
   1400 pps behavior and the validated standalone speed, position, Yaw, and

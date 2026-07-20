@@ -1057,7 +1057,7 @@ function Update-StatusFromLine([string]$line) {
 function Process-Line([string]$line) {
     $line = $line.Trim()
     if ($line.Length -eq 0) { return }
-    if ($line.Length -eq 1) { return }
+    if (($line.Length -eq 1) -or $line.EndsWith('UUUU')) { return }
     if ($line.StartsWith('wave:')) {
         $wave = Parse-WaveLine $line
         if ($null -ne $wave) {

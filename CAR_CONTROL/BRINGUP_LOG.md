@@ -1241,3 +1241,23 @@ The final image completed two consecutive COM6 wireless updates in 13.8 and
 reported `ASTAT state=READY` and `hz=1`; port 13470 delivered the expected
 FireWater wave stream, and the bridge retained seven-channel Yaw mode. This
 completes Gate 0. Gate 1 starts the read-only K230 UART3 parser and transport.
+
+## 2026-07-20: UART2 PB17 remap and startup-stop acceptance
+
+The JDY-31 UART2 TX route was moved from PA21 to PB17 in both the application
+and resident Bootloader; RX remains PA22. The module was restored to 115200
+baud, and its RX lead was physically moved to the Tianmengxing PB17 header.
+The eight-byte `0x55` training preamble remains required for reliable first-byte
+turnaround through the JDY-31 link.
+
+Application and Bootloader startup now drive PA23/PA24/PA29/PA30 to their safe
+inactive level before the remaining generated peripheral initialization runs.
+The full Bootloader plus application image was programmed and verified. The
+tuner subsequently returned a complete `STAT state=READY left=0 right=0
+outL=0 outR=0 ... hz=1` frame and a complete `OK YCFG` response over COM6.
+The operator confirmed that a fresh power-up no longer starts the right motor.
+
+Both GCC and TIClang application/Bootloader targets build successfully with the
+JDY-31 configurator disabled for normal operation. The GCC application contains
+75,280 bytes of code/data and the Bootloader contains 4,696 bytes of code/data;
+GCC retains `-Os`, function/data sections, and linker garbage collection.

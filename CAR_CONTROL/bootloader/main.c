@@ -94,8 +94,12 @@ int main(void)
 {
     uint8_t byte;
 
-    SYSCFG_DL_init();
+    SYSCFG_DL_initPower();
     boot_force_motor_high_z();
+    SYSCFG_DL_GPIO_init();
+    boot_force_motor_high_z();
+    SYSCFG_DL_SYSCTL_init();
+    SYSCFG_DL_BOOT_UART_init();
     BootUart_Init();
 
     if (!boot_mailbox_requested() && boot_image_valid()) {
@@ -115,11 +119,12 @@ static void boot_force_motor_high_z(void)
     const uint32_t motor_pins = DL_GPIO_PIN_23 | DL_GPIO_PIN_24 |
         DL_GPIO_PIN_29 | DL_GPIO_PIN_30;
 
-    DL_GPIO_disableOutput(GPIOA, motor_pins);
-    DL_GPIO_initDigitalInput(IOMUX_PINCM53);
-    DL_GPIO_initDigitalInput(IOMUX_PINCM54);
-    DL_GPIO_initDigitalInput(IOMUX_PINCM4);
-    DL_GPIO_initDigitalInput(IOMUX_PINCM5);
+    DL_GPIO_clearPins(GPIOA, motor_pins);
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM53);
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM54);
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM4);
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM5);
+    DL_GPIO_enableOutput(GPIOA, motor_pins);
 }
 
 static bool boot_mailbox_requested(void)

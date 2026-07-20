@@ -65,9 +65,10 @@ void MotorPwm_Disable(motor_pwm_channel_t channel)
     motor_pwm_force_low(hw.timer, hw.in1_index);
     motor_pwm_force_low(hw.timer, hw.in2_index);
     DL_TimerG_stopCounter(hw.timer);
-    DL_GPIO_disableOutput(hw.port, hw.in1_pin | hw.in2_pin);
-    DL_GPIO_initDigitalInput(hw.in1_iomux);
-    DL_GPIO_initDigitalInput(hw.in2_iomux);
+    DL_GPIO_clearPins(hw.port, hw.in1_pin | hw.in2_pin);
+    DL_GPIO_initDigitalOutput(hw.in1_iomux);
+    DL_GPIO_initDigitalOutput(hw.in2_iomux);
+    DL_GPIO_enableOutput(hw.port, hw.in1_pin | hw.in2_pin);
     g_enabled[channel] = false;
 }
 
