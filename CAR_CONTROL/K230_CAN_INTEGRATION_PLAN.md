@@ -1,311 +1,276 @@
-# K230 Vision And CAN Stepper Integration Plan
+# K230 Gimbal And Chassis Integration Plan
 
-Status: Gate 1 K230 parser and transport complete. The dedicated UART3 vision
-link is physically accepted; Gate 2 MCAN transport is next.
+Status: Gate 0 and Gate 1 of the chassis vision link and K0/K1 of the independent
+K230 gimbal project are complete. CAN and all accessory-motor output remain
+disabled until the MCP2515 hardware is installed and K2 begins.
 
-## 1. Scope
+## 1. Final Ownership
 
-Add these independent capabilities to `CAR_CONTROL` without changing the
-validated chassis loops:
-
-- receive K230 vision targets over a dedicated UART;
-- control two ZDT CAN closed-loop motors on one classic CAN bus;
-- keep JDY-31 tuning and wireless application updates available;
-- expose device state to the LCD and tuner status without changing the
-  accepted seven-channel VOFA+ Yaw stream;
-- leave competition behavior in `app/mission` until the actual task is known.
-
-The existing speed, position, Yaw, Heading, line-tracking, motion, and wheel
-odometry implementations remain unchanged during device bring-up.
-
-## 2. Confirmed Hardware Map
-
-Sources inspected:
-
-- main board backup:
-  `C:/Users/ASUS/Documents/LCEDA-Pro/projects/电赛电机驱动板_backup/电赛电机驱动板_2026-07-14-16-44.epro2`;
-- CAN distribution board project:
-  `C:/Users/ASUS/Documents/LCEDA-Pro/projects/电赛电机驱动板_before_step_can_plan_20260710_1645.eprj2`;
-- MSPM0G3507 SysConfig device pin-mux database;
-- `DAP_LINK_TEST` K230 and ZDT reference code.
-
-| Function | Final MCU resource | Board evidence | Decision |
-| --- | --- | --- | --- |
-| JDY-31 tuning/update | UART2: PB17 TX, PA22 RX | Free Tianmengxing header pins; valid UART2 mux | Move from UART3, then isolate TX from the PA21 route |
-| K230 vision | UART3: PA13 RX, PA14 TX | Main-board U9 routes RX to A13 and TX to A14 | Use the intended U9 connector |
-| ZDT CAN bus | CANFD0: PA26 CANTX, PA27 CANRX | Main-board CAN module nets map A26/A27 to MCAN0_TX/RX | Use classic CAN at 500 kbit/s |
-| LCD DMA | DMA channel 2 | Existing validated ST7789 configuration | Preserve unchanged |
-
-Connector details:
-
-- U9 has `NC/RX/TX/GL`, with no K230 power output. Connect K230 TX to U9 RX
-  (PA13), K230 RX to U9 TX (PA14), and connect the grounds.
-- The main-board SN65HVD230 module exposes `CANH_STEP` and `CANL_STEP` to CN2.
-- The stepper distribution board routes the incoming CAN bus to CN1 and CN2
-  for the two motors. Follow the `CANH`, `CANL`, and `GL` net names rather than
-  assuming that the connector pin numbers have the same physical orientation.
-- The distribution-board R2 position is a 120 ohm termination option and is
-  initially DNP. With power removed, the complete bus should measure about
-  60 ohms between CANH and CANL when two endpoint terminators are present.
-
-## 3. Resource Conflict Resolution
-
-The former JDY-31 assignment was UART3 on PA25/PA26. It conflicted twice with
-the final board interfaces:
-
-- K230 U9 also requires the UART3 peripheral instance on PA13/PA14;
-- CANFD0 requires PA26 as CANTX.
-
-The durable allocation is therefore:
+The system is split by physical responsibility:
 
 ```text
-UART2 PB17/PA22 -> JDY-31
-UART3 PA13/PA14 -> K230 U9
-CANFD0 PA26/PA27 -> onboard SN65HVD230
+K230 camera board
+  - YOLO target detection
+  - gimbal Yaw/Pitch control
+  - SPI MCP2515 CAN controller
+  - two ZDT CAN motors and their feedback
+
+Tianmengxing MSPM0 board
+  - chassis speed/position/Yaw/Heading/line loops
+  - chassis odometry and competition mission execution
+  - optional high-level command/status exchange when a mission requires it
 ```
 
-Both the application and resident Bootloader now use UART2. The one-time wired
-installation of the migrated Bootloader and application is complete. Normal
-builds and updates continue over JDY-31/COM6 and the tuner TCP bridge.
+The K230 vision and gimbal stack starts and runs without Tianmengxing, UART,
+the chassis tuner, or any chassis control loop. A future competition mission
+may exchange high-level commands and status through UART, but it does not
+exchange individual gimbal step pulses, raw CAN frames, or continuous vision
+coordinates by default. This keeps rotating gimbal wiring local to the K230
+and preserves the validated chassis control timing.
 
-Migration is complete only after all of these checks pass:
+The former, unimplemented plan to connect the two ZDT motors to Tianmengxing
+CANFD0 PA26/PA27 is superseded by this document. PA26/PA27 remain unused by the
+gimbal path. Gate 0 and Gate 1 history is retained because the accepted UART3
+vision link is still part of the final system.
 
-1. tuner auto-connects on COM6 through UART2 at 115200 8N1;
-2. the live application reports HIGH-Z;
-3. an application image is updated through the resident Bootloader;
-4. the new application starts and again reports HIGH-Z;
-5. the tuner TCP status and VOFA+ TCP stream still work.
+## 2. Confirmed Interfaces
 
-## 4. Protocol Baselines
+### Optional K230 to Tianmengxing link
 
-### K230
+| Function | K230 | Tianmengxing | Settings |
+| --- | --- | --- | --- |
+| Vision/status TX | UART2 GPIO11 TX | U9 RX / UART3 PA13 | 115200 8N1 |
+| Reserved command RX | UART2 GPIO12 RX | U9 TX / UART3 PA14 | 115200 8N1 |
+| Reference | Common GND | U9 GL | 3.3 V logic |
 
-The existing K230 script is the compatibility baseline:
+This interface is disabled in the independent K230 build. The previously
+validated compatibility frame remains available only as a legacy diagnostic
+adapter:
 
 ```text
-115200 8N1
-frame: @valid,cx,cy#
-example: @1,203,117#
+@valid,cx,cy#
 coordinates: 400 x 240
 center: 200,120
-offline timeout: 150 ms
+example: @1,203,117#
+lost target while online: @0,last_cx,last_cy#
+Tianmengxing offline timeout: 150 ms
 ```
 
-The first implementation remains receive-only and accepts bounded decimal
-fields. A complete valid `valid=0` frame means that the link is online but no
-target is present. Only a complete, correctly parsed frame refreshes the link
-timestamp; random bytes and partial frames do not keep the device online.
+`valid=0` is an online no-target frame. It is not an offline indication.
 
-The old reference implementation is not copied directly because it mixes UART
-register access, parsing, timeout state, and LCD updates in one application
-file. It also lacks coordinate range validation and useful parser statistics.
+### K230 to MCP2515 module
 
-### ZDT CAN motors
+The selected module is a complete 3.3 V MCP2515 plus SN65HVD230 CAN module
+with an 8 MHz oscillator.
 
-The existing reference establishes this baseline:
+| Module signal | Lushan Pi K230 physical pin | K230 function |
+| --- | ---: | --- |
+| VCC | 17 | 3V3 |
+| GND | 20 | GND |
+| SCK | 23 | GPIO15 / QSPI0_CLK |
+| SI / MOSI | 19 | GPIO16 / QSPI0_D0 |
+| SO / MISO | 21 | GPIO17 / QSPI0_D1 |
+| CS | 24 | GPIO14 / QSPI0_CS0 |
+| INT | 18 | GPIO19 |
+
+The complete accessory-control chain is:
+
+```text
+K230 control task
+  -> SPI/QSPI0
+  -> MCP2515 classic-CAN controller
+  -> onboard SN65HVD230 transceiver
+  -> CANH/CANL trunk
+  -> ZDT motor address 1 and address 2
+```
+
+The module oscillator value is part of the CAN bit-timing calculation. An
+8 MHz configuration must not be replaced with the common 16 MHz constants.
+
+## 3. K230 Project Layout
+
+The only script an operator runs is `K230_GIMBAL/main.py`. During IDE testing,
+it adds `/sdcard/K230_GIMBAL` to `sys.path` and imports the synchronized modules.
+When K1 is accepted, the same entry point may be installed as `/sdcard/main.py`
+for power-on execution.
+
+```text
+K230_GIMBAL/
+  main.py             only entry point and startup boundary
+  config.py           validated pins, dimensions, model and feature gates
+  vision.py           sensor, AI2D, KPU, postprocess, display and cleanup
+  chassis_link.py     disabled legacy UART diagnostic adapter
+  mcp2515.py          added in K2 with the tested controller driver
+  zdt_motor.py        added in K3 after read-only protocol evidence
+  gimbal_control.py   added in K4 after motor units and limits are known
+```
+
+Files are added at the gate that gives them real behavior and tests. Empty
+placeholder drivers are deliberately excluded. The former root-level script
+`矩形识别+串口发.py` was removed after K1 acceptance; its Git history and the
+backed-up device entry remain available for rollback.
+
+## 4. Runtime Safety Contract
+
+- `config.CHASSIS_LINK_ENABLED` defaults to `False`; K230 startup does not
+  initialize UART2 or require the Tianmengxing board.
+- `config.CAN_ENABLED` and `config.GIMBAL_MOTION_ENABLED` default to `False`.
+- K0/K1 do not import or initialize SPI, MCP2515, or any motor object.
+- Starting, stopping, or synchronizing a K230 script never creates motion.
+- K2 first verifies MCP2515 reset, register access, oscillator timing, loopback,
+  receive queues, transmit completion, and controller error state.
+- K3 performs read-only ZDT discovery before any enable or motion command.
+- K4 motion requires explicit arming, bounded travel, direction and limit data,
+  a command lease, timeout stop, and a physical stop path.
+- Loss of a vision target never invents a motor command. The gimbal owner makes
+  the hold, search, or stop decision explicitly.
+- The Tianmengxing chassis remains `READY / HIGH-Z` during K230 device bring-up.
+
+## 5. Protocol Baselines
+
+### Vision
+
+K1 must preserve the accepted implementation without parameter drift:
+
+```text
+model: /data/best.kmodel
+labels: /data/labels.txt
+sensor id: 2
+preview: 800 x 480 ST7701
+AI frame: 640 x 384
+model input: 320 x 320
+fixed focus: 210
+confidence/NMS: 0.45 / 0.45
+measured baseline: approximately 19.4 FPS
+```
+
+### ZDT CAN
+
+The reference-project assumptions are provisional until K3 reads the real
+devices:
 
 ```text
 classic CAN: 500 kbit/s
-motor addresses: 1 and 2
+candidate motor addresses: 1 and 2
 extended identifier: (address << 8) | packet_index
 maximum payload: 8 bytes
 protocol check byte: 0x6B
 ```
 
-The reusable device layer will cover enable/disable, velocity, relative and
-absolute position, stop, synchronized start, clear-stall, zero/origin, and
-read-only status requests. The old million-iteration register polling loops
-and direct MCAN ownership inside the ZDT protocol file are not reused.
+No K230 public call may wait in an unbounded polling loop. SPI/CAN operations
+must return a bounded result or queue work for a later scheduler tick.
 
-## 5. Planned Firmware Layers
+## 6. Acceptance Gates
 
-```text
-app/bringup/k230_vision_bringup.*
-app/bringup/zdt_stepper_bringup.*
-app/actuators/zdt_stepper_supervisor.*
-app/mission/<future competition workflow>.*
-        |
-drivers/device/k230/k230_vision_link.*
-drivers/device/zdt/zdt_stepper_can.*
-        |
-drivers/mcu/vision_uart.*
-drivers/mcu/mcan0.*
-        |
-SysConfig / TI DriverLib / platform
-```
-
-Responsibilities:
-
-- `vision_uart`: UART3 FIFO/interrupt byte transport and bounded RX ring;
-- `k230_vision_link`: framing, parsing, range checks, timeout, counters, and a
-  copyable snapshot; no LCD or motor calls;
-- `mcan0`: nonblocking classic-CAN transmit queue, RX FIFO draining, error
-  counters, bus state, and controlled bus-off recovery;
-- `zdt_stepper_can`: ZDT command encoding, response decoding, per-address state,
-  and explicit result codes; no direct MCAN register access;
-- bring-up modules: supervised hardware test sequences only;
-- `zdt_stepper_supervisor`: command lease, explicit arming, timeout stop, fault
-  latch, and board-button stop for accessory motion;
-- mission modules: the only place that may combine K230 targets, chassis motion,
-  and CAN motor actions for a competition task.
-
-The existing chassis `ControlSupervisor` remains the exclusive owner of wheel
-motion. Accessory motor ownership is separate, while an application-level stop
-request stops both supervisors.
-
-## 6. Public API Shape
-
-The exact names may be adjusted to existing style, but the behavior boundary is
-fixed before implementation.
-
-```c
-typedef struct {
-    bool online;
-    bool target_valid;
-    uint16_t cx;
-    uint16_t cy;
-    int16_t error_x;
-    int16_t error_y;
-    uint32_t frame_sequence;
-    uint32_t last_frame_ms;
-    uint32_t parse_error_count;
-    uint32_t overflow_count;
-    uint32_t timeout_count;
-} k230_vision_snapshot_t;
-
-void K230VisionLink_Init(uint32_t now_ms);
-void K230VisionLink_Task(uint32_t now_ms);
-bool K230VisionLink_GetSnapshot(k230_vision_snapshot_t *snapshot);
-```
-
-```c
-typedef enum {
-    ZDT_RESULT_OK = 0,
-    ZDT_RESULT_BUSY,
-    ZDT_RESULT_TIMEOUT,
-    ZDT_RESULT_BUS_OFF,
-    ZDT_RESULT_BAD_ARGUMENT,
-    ZDT_RESULT_NOT_ARMED
-} zdt_result_t;
-
-zdt_result_t ZdtStepper_Enable(uint8_t address, bool enable);
-zdt_result_t ZdtStepper_SetSpeed(uint8_t address, int16_t rpm, uint8_t accel);
-zdt_result_t ZdtStepper_MoveRelative(
-    uint8_t address, int32_t pulses, uint16_t rpm, uint8_t accel, bool sync);
-zdt_result_t ZdtStepper_Stop(uint8_t address, bool sync);
-zdt_result_t ZdtStepper_StartSync(void);
-bool ZdtStepper_GetSnapshot(uint8_t address, zdt_stepper_snapshot_t *snapshot);
-```
-
-No public call waits in a long polling loop. Commands either enter a bounded
-queue or return a clear busy/error result.
-
-## 7. Safety And Runtime Rules
-
-- Startup leaves both ZDT motors disabled or explicitly stopped.
-- Flashing firmware never starts either chassis or accessory motion.
-- A CAN motor command requires an active accessory lease that is refreshed by
-  its owning bring-up or mission workflow.
-- Lease expiry, any board-button stop, watchdog/reset lockout, CAN bus-off, or
-  an unrecoverable device fault sends stop/disable and latches the workflow.
-- K230 target loss does not invent a movement command. The owning mission
-  chooses stop, hold, or recovery behavior explicitly.
-- LCD rendering reads snapshots only and remains sliced so it cannot block the
-  100 Hz chassis control work.
-- New K230/CAN state is exposed through tuner status/JSON first. The accepted
-  seven-channel VOFA+ Yaw packet remains byte-for-byte unchanged.
-
-## 8. Implementation And Acceptance Gates
-
-### Gate 0: communication resource migration
+### Gate 0: JDY-31 resource migration
 
 Status: completed 2026-07-19.
 
-- Move application JDY-31 SysConfig to UART2 PB17/PA22.
-- Move Bootloader UART to UART2 PB17/PA22.
-- Build GCC and TIClang application and Bootloader targets.
-- Perform the one-time Bootloader/application installation and complete the
-  five migration checks in section 3.
+JDY-31 application update and tuning moved to UART2 PB17/PA22. The application
+and resident Bootloader were installed and wireless update, tuner, TCP bridge,
+VOFA+, and startup HIGH-Z were physically accepted. Two consecutive 75,216-byte
+wireless updates completed in 13.8 and 13.9 seconds.
 
-Acceptance: wireless update, tuner, TCP bridge, VOFA+, and HIGH-Z all match the
-current validated behavior. The final 75,216-byte image completed two
-consecutive wireless updates in 13.8 and 13.9 seconds; each restart reported
-`ASTAT state=READY` with `hz=1`, and both TCP ports were revalidated.
-
-### Gate 1: K230 parser and transport
+### Gate 1: Tianmengxing K230 vision receiver
 
 Status: completed 2026-07-20.
 
-- Add host tests for valid, lost-target, fragmented, concatenated, malformed,
-  overflow, out-of-range, and timeout input.
-- Add UART3 RX transport and read-only vision snapshot.
-- Display ONLINE/LOST, coordinates, frame age, and error counters.
+UART3 PA13/PA14 receives bounded `@valid,cx,cy#` frames. Fragmented,
+concatenated, malformed, oversize, out-of-range, resynchronization, and timeout
+tests pass. The live system reached the full 400 x 240 range with zero parser
+errors and zero UART overflow while the chassis remained `READY / HIGH-Z`.
 
-Acceptance: moving the target covers the full 400 x 240 range, center is near
-200/120, `valid=0` is distinct from offline, and unplugging data becomes offline
-within the expected timeout without affecting chassis timing.
+### K0: revised architecture freeze
 
-Evidence: UART3 PA13/PA14 receives `@valid,cx,cy#` at 115200 baud. Host tests
-cover fragmented, concatenated, malformed, oversize, out-of-range, resync, and
-timeout input. Live status reported center `200/120`, zero parser errors and
-zero UART overflow. A sustained run advanced from frame 26720 to 27591 at
-approximately 19.4 FPS while frame age remained below the 150 ms lease and the
-chassis stayed `READY / HIGH-Z`. The operator accepted physical prediction and
-the fixed-focus KPU preview. The old detector was replaced by the maintained
-YOLOv8/KPU implementation with bounded cleanup and no runtime autofocus.
+Status: completed 2026-07-22.
 
-### Gate 2: MCAN transport
+- Assign both ZDT motors and their CAN transport to the K230.
+- Keep Tianmengxing UART3 only as a disabled optional diagnostic/status link.
+- Record the 8 MHz MCP2515 module and final SPI pin map.
+- Mark the former Tianmengxing MCAN Gate 2-6 route as superseded.
 
-- Configure CANFD0 PA26/PA27 for classic 500 kbit/s operation.
-- Verify internal loopback before enabling external transmit.
-- Verify RX queue, TX completion, error counters, and bus-off behavior.
+Acceptance: this document, the hardware map, ownership, protocols, and gate
+boundaries agree before any CAN driver is written.
 
-Acceptance: no blocking-loop timing regression and no unexpected CAN errors in
-loopback or on an idle, correctly terminated bus.
+### K1: single-entry K230 vision project
 
-### Gate 3: one-motor read-only discovery
+Status: completed and physically accepted 2026-07-22.
 
-- Connect one motor only.
-- Query version, state, bus voltage, encoder/position, and fault flags.
-- Confirm its address and response framing without issuing enable or motion.
+- Split the accepted 459-line script into `main`, `config`, and `vision`
+  ownership while keeping the former UART publisher as a disabled adapter.
+- Add host tests for coordinate mapping, packet bounds, last-valid coordinates,
+  letterbox math, target selection, and NMS behavior.
+- Synchronize the project under `/sdcard/K230_GIMBAL` without replacing the
+  current `/sdcard/main.py`.
+- Run `K230_GIMBAL/main.py` through the minimized CanMV IDE.
 
-Acceptance: repeatable responses, stable address, zero unexplained bus errors,
-and a stopped motor.
+Acceptance: the K230 starts without Tianmengxing or UART; startup and cleanup
+have no exception; focus remains 210; physical prediction and preview match the
+accepted script; measured FPS remains close to 19.4. Tianmengxing telemetry is
+not part of K1 acceptance.
 
-### Gate 4: supervised motion and second motor
+Evidence: seven host tests cover the disabled hardware gates, coordinate and
+packet bounds, last-valid coordinates, letterbox math, target selection, and
+NMS. All four runtime files were synchronized to `/sdcard/K230_GIMBAL` and
+verified by SHA-256 readback. The former 11,481-byte `/sdcard/main.py` was backed
+up before installing the new 442-byte single entry point. The operator accepted
+the live preview, detection box, and fixed-focus result. CanMV remained
+connected, minimized, and running; UART, CAN, and motor output stayed disabled.
 
-- Test motor 1 at low speed with a short lease and automatic stop.
-- Confirm direction, units, acceleration, stop, and fault handling.
-- Repeat independently for motor 2, then test synchronized start/stop.
-- Verify every board button stops active accessory motion.
+### K2: MCP2515 transport, no motor commands
 
-Acceptance: both motors have confirmed addresses and direction signs; repeated
-tests stop on command, timeout, and button input without reset or bus-off.
+- Implement QSPI0 SPI transfer, CS and INT handling.
+- Verify reset and register read/write against the 8 MHz device.
+- Configure classic CAN 500 kbit/s and validate MCP2515 loopback.
+- Validate bounded TX/RX queues, timeouts and error counters.
+- Enter listen-only mode on the external bus before normal mode is allowed.
 
-### Gate 5: diagnostics and API promotion
+Acceptance: repeated loopback and idle-bus reads have no unexplained errors;
+the chassis and both ZDT motors remain stopped.
 
-- Add K230/CAN snapshots to the general LCD dashboard and tuner status files.
-- Promote only physically accepted device APIs out of bring-up ownership.
-- Record results in `BRINGUP_LOG.md`, update `HARDWARE_MAP.md` and
-  `ARCHITECTURE.md`, then commit and push only accepted files.
+### K3: one-motor read-only discovery
 
-### Gate 6: competition mission integration
+- Connect/query one ZDT motor at a time.
+- Read version, address, state, bus voltage, encoder/position and fault flags.
+- Record the real response format before accepting addresses 1 and 2.
 
-- Add the actual task state machine after the competition behavior is known.
-- Consume K230 and ZDT snapshots through their public APIs.
-- Compose existing chassis Motion/Heading/Line APIs rather than modifying the
-  validated inner loops.
+Acceptance: responses repeat reliably, address ownership is unambiguous, bus
+errors remain zero, and neither motor is enabled.
 
-Acceptance criteria are written from the real task before this gate begins.
+### K4: supervised two-axis motion
 
-## 9. Open Hardware Checks Before Motion
+- Add enable/disable, stop, speed, relative/absolute position and sync commands.
+- Confirm units, direction, acceleration and mechanical travel limits per axis.
+- Add explicit arming, command lease, timeout stop and fault latch.
+- Validate each motor independently before synchronized commands.
 
-These checks do not block parser/driver implementation, but must be closed
-before Gate 4:
+Acceptance: each axis stops on command, lease expiry and fault; all motion is
+bounded; no K230 or Tianmengxing reset occurs.
 
-- confirm the exact ZDT motor model and firmware protocol revision from the
-  read-only version response;
-- confirm addresses 1 and 2 without two same-address devices replying together;
-- measure CANH-to-CANL termination with power removed;
-- record motor direction/inversion and mechanical travel limits;
-- confirm K230 and main-board grounds are common and UART logic is 3.3 V.
+### K5: gimbal control
+
+- Add target filtering, deadband, limits and Yaw/Pitch trajectory generation.
+- Close the loop from vision coordinates through ZDT feedback.
+- Keep raw CAN and motor protocol details out of the controller.
+
+Acceptance: center hold, step response, target loss/reacquisition, edge targets
+and long-duration thermal behavior pass without oscillation or limit impact.
+
+### K6: competition integration
+
+- Define the actual task state machine after the competition behavior is known.
+- Enable the optional Tianmengxing UART only if that task needs high-level
+  chassis/gimbal command or status exchange.
+- Compose existing chassis Motion/Heading/Line APIs without changing validated
+  inner loops.
+
+Acceptance criteria are written from the real task before K6 begins.
+
+## 7. Hardware Checks Before K3/K4
+
+- Confirm K230, MCP2515 module and both ZDT devices share the required reference.
+- With power removed, measure CANH-to-CANL termination; expect about 60 ohms when
+  two endpoint 120-ohm terminators are installed.
+- Confirm the exact ZDT model and firmware protocol from read-only responses.
+- Confirm addresses one at a time before both devices share the bus.
+- Record axis direction, reduction, units, soft limits and physical hard stops.

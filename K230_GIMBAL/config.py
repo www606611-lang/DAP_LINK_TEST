@@ -1,0 +1,56 @@
+"""Validated hardware and model configuration for the K230 gimbal app."""
+
+BUILD_ID = "k230-gimbal-vision-k1"
+
+PROJECT_DEVICE_DIR = "/sdcard/K230_GIMBAL"
+KMODEL_PATH = "/data/best.kmodel"
+LABELS_PATH = "/data/labels.txt"
+
+SENSOR_ID = 2
+DISPLAY_DRIVER = "ST7701"
+DISPLAY_WIDTH = 800
+DISPLAY_HEIGHT = 480
+DISPLAY_TO_IDE = False
+
+AI_WIDTH = 640
+AI_HEIGHT = 384
+MODEL_INPUT_SIZE = (320, 320)
+
+ENABLE_FIXED_FOCUS = True
+FIXED_FOCUS_POS = 210
+
+UART_ID = 2
+UART_TX_PIN = 11
+UART_RX_PIN = 12
+UART_BAUDRATE = 115200
+UART_COORD_WIDTH = 400
+UART_COORD_HEIGHT = 240
+UART_SEND_EVERY_N_FRAMES = 1
+
+# Optional legacy telemetry adapter. Independent gimbal operation keeps it off.
+CHASSIS_LINK_ENABLED = False
+
+CONFIDENCE_THRESHOLD = 0.45
+NMS_THRESHOLD = 0.45
+PRE_NMS_TOPK = 25
+MAX_BOXES = 5
+GC_EVERY_N_FRAMES = 20
+STATUS_PRINT_MS = 2000
+
+BOX_COLOR = (0, 255, 0)
+TEXT_COLOR = (0, 255, 0)
+FPS_COLOR = (255, 255, 0)
+FOCUS_COLOR = (255, 255, 0)
+
+# K1 safety gates. No CAN module is imported or initialized while these are off.
+CAN_ENABLED = False
+GIMBAL_MOTION_ENABLED = False
+
+# Reserved for K2. The selected MCP2515 + SN65HVD230 module uses an 8 MHz clock.
+MCP2515_OSC_HZ = 8_000_000
+CAN_BITRATE = 500_000
+MCP2515_SCK_PIN = 15
+MCP2515_MOSI_PIN = 16
+MCP2515_MISO_PIN = 17
+MCP2515_CS_PIN = 14
+MCP2515_INT_PIN = 19
