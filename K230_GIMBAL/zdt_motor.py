@@ -11,9 +11,14 @@ READ_ENCODER = 0x31
 READ_REALTIME_POSITION = 0x36
 READ_MOTOR_FLAGS = 0x3A
 COMMAND_ENABLE = 0xF3
+COMMAND_SPEED = 0xF6
 COMMAND_POSITION_X = 0xFB
 COMMAND_POSITION_EMM = 0xFD
 COMMAND_STOP = 0xFE
+COMMAND_SYNC = 0xFF
+POSITION_MODE_RELATIVE_TARGET = 0
+POSITION_MODE_ABSOLUTE = 1
+POSITION_MODE_RELATIVE_CURRENT = 2
 MAX_CAN_PAYLOAD = 8
 
 
@@ -25,15 +30,16 @@ class ZdtCommandError(Exception):
     pass
 
 
-def validate_address(address):
+def validate_address(address, allow_broadcast=False):
     address = int(address)
-    if not 1 <= address <= 255:
+    minimum = 0 if allow_broadcast else 1
+    if not minimum <= address <= 255:
         raise ValueError("ZDT address must be in range 1..255")
     return address
 
 
 def extended_id(address, packet_index=0):
-    address = validate_address(address)
+    address = validate_address(address, allow_broadcast=True)
     packet_index = int(packet_index)
     if not 0 <= packet_index <= 255:
         raise ValueError("ZDT packet index must be in range 0..255")
@@ -61,7 +67,7 @@ def read_position_command(address):
 
 def split_serial_command(address, serial_command):
     """Convert address-prefixed ZDT serial bytes into extended CAN frames."""
-    address = validate_address(address)
+    address = validate_address(address, allow_broadcast=True)
     serial_command = bytes(serial_command)
     if len(serial_command) < 3:
         raise ValueError("ZDT command is too short")
@@ -124,15 +130,34 @@ def build_stop_command(address, sync=False):
     )
 
 
-def build_x_relative_command(address, degrees, speed_rpm, sync=False):
+def validate_position_mode(position_mode):
+    position_mode = int(position_mode)
+    if position_mode not in (
+        POSITION_MODE_RELATIVE_TARGET,
+        POSITION_MODE_ABSOLUTE,
+        POSITION_MODE_RELATIVE_CURRENT,
+    ):
+        raise ValueError("ZDT position mode must be 0, 1, or 2")
+    return position_mode
+
+
+def build_x_position_command(
+    address,
+    degrees,
+    speed_rpm,
+    position_mode=POSITION_MODE_RELATIVE_CURRENT,
+    sync=False,
+):
     address = validate_address(address)
     degrees = float(degrees)
+    position_mode = validate_position_mode(position_mode)
     speed_units = int(round(abs(float(speed_rpm)) * 10.0))
     angle_units = int(round(abs(degrees) * 10.0))
     if not 1 <= speed_units <= 30000:
         raise ValueError("X speed must be in range 0.1..3000.0 RPM")
-    if not 1 <= angle_units <= 0xFFFFFFFF:
-        raise ValueError("X relative angle must be nonzero and bounded")
+    minimum_angle = 0 if position_mode == POSITION_MODE_ABSOLUTE else 1
+    if not minimum_angle <= angle_units <= 0xFFFFFFFF:
+        raise ValueError("X position angle is outside the bounded range")
     direction = 0x01 if degrees < 0.0 else 0x00
     return bytes(
         (
@@ -145,18 +170,34 @@ def build_x_relative_command(address, degrees, speed_rpm, sync=False):
             (angle_units >> 16) & 0xFF,
             (angle_units >> 8) & 0xFF,
             angle_units & 0xFF,
-            0x02,
+            position_mode,
             0x01 if sync else 0x00,
             CHECK_BYTE,
         )
     )
 
 
-def build_emm_relative_command(
-    address, pulses, speed_rpm, acceleration=10, sync=False
+def build_x_relative_command(address, degrees, speed_rpm, sync=False):
+    return build_x_position_command(
+        address,
+        degrees,
+        speed_rpm,
+        POSITION_MODE_RELATIVE_CURRENT,
+        sync,
+    )
+
+
+def build_emm_position_command(
+    address,
+    pulses,
+    speed_rpm,
+    acceleration=10,
+    position_mode=POSITION_MODE_RELATIVE_CURRENT,
+    sync=False,
 ):
     address = validate_address(address)
     pulses = int(pulses)
+    position_mode = validate_position_mode(position_mode)
     speed_rpm = int(round(abs(float(speed_rpm))))
     acceleration = int(acceleration)
     pulse_count = abs(pulses)
@@ -164,8 +205,9 @@ def build_emm_relative_command(
         raise ValueError("Emm speed must be in range 1..3000 RPM")
     if not 0 <= acceleration <= 0xFF:
         raise ValueError("Emm acceleration must be in range 0..255")
-    if not 1 <= pulse_count <= 0xFFFFFFFF:
-        raise ValueError("Emm pulse count must be nonzero and bounded")
+    minimum_pulses = 0 if position_mode == POSITION_MODE_ABSOLUTE else 1
+    if not minimum_pulses <= pulse_count <= 0xFFFFFFFF:
+        raise ValueError("Emm pulse count is outside the bounded range")
     direction = 0x01 if pulses < 0 else 0x00
     return bytes(
         (
@@ -179,11 +221,81 @@ def build_emm_relative_command(
             (pulse_count >> 16) & 0xFF,
             (pulse_count >> 8) & 0xFF,
             pulse_count & 0xFF,
-            0x02,
+            position_mode,
             0x01 if sync else 0x00,
             CHECK_BYTE,
         )
     )
+
+
+def build_emm_relative_command(
+    address, pulses, speed_rpm, acceleration=10, sync=False
+):
+    return build_emm_position_command(
+        address,
+        pulses,
+        speed_rpm,
+        acceleration,
+        POSITION_MODE_RELATIVE_CURRENT,
+        sync,
+    )
+
+
+def build_x_speed_command(
+    address, speed_rpm, acceleration_rpm_s=100, sync=False
+):
+    address = validate_address(address)
+    speed_rpm = float(speed_rpm)
+    acceleration_rpm_s = int(acceleration_rpm_s)
+    speed_units = int(round(abs(speed_rpm) * 10.0))
+    if not 0 <= speed_units <= 30000:
+        raise ValueError("X speed must be in range 0..3000.0 RPM")
+    if not 0 <= acceleration_rpm_s <= 0xFFFF:
+        raise ValueError("X acceleration must be in range 0..65535 RPM/S")
+    direction = 0x01 if speed_rpm < 0.0 else 0x00
+    return bytes(
+        (
+            address,
+            COMMAND_SPEED,
+            direction,
+            (acceleration_rpm_s >> 8) & 0xFF,
+            acceleration_rpm_s & 0xFF,
+            (speed_units >> 8) & 0xFF,
+            speed_units & 0xFF,
+            0x01 if sync else 0x00,
+            CHECK_BYTE,
+        )
+    )
+
+
+def build_emm_speed_command(
+    address, speed_rpm, acceleration=10, sync=False
+):
+    address = validate_address(address)
+    speed_rpm = float(speed_rpm)
+    acceleration = int(acceleration)
+    speed_units = int(round(abs(speed_rpm)))
+    if not 0 <= speed_units <= 3000:
+        raise ValueError("Emm speed must be in range 0..3000 RPM")
+    if not 0 <= acceleration <= 0xFF:
+        raise ValueError("Emm acceleration must be in range 0..255")
+    direction = 0x01 if speed_rpm < 0.0 else 0x00
+    return bytes(
+        (
+            address,
+            COMMAND_SPEED,
+            direction,
+            (speed_units >> 8) & 0xFF,
+            speed_units & 0xFF,
+            acceleration,
+            0x01 if sync else 0x00,
+            CHECK_BYTE,
+        )
+    )
+
+
+def build_sync_trigger_command():
+    return bytes((0x00, COMMAND_SYNC, 0x66, CHECK_BYTE))
 
 
 class ResponseAssembler:
@@ -235,6 +347,21 @@ class ZdtReadOnlyClient:
 
     def query_position(self, address, timeout_ms=120):
         return self.query(address, READ_REALTIME_POSITION, timeout_ms)
+
+    def query_position_degrees(self, address, firmware, timeout_ms=120):
+        return parse_position_degrees(
+            self.query_position(address, timeout_ms)["raw"], firmware
+        )
+
+    def query_motor_flags(self, address, timeout_ms=120):
+        return parse_motor_flags(
+            self.query(address, READ_MOTOR_FLAGS, timeout_ms)["raw"]
+        )
+
+    def query_bus_voltage(self, address, timeout_ms=120):
+        return parse_bus_voltage(
+            self.query(address, READ_BUS_VOLTAGE, timeout_ms)["raw"]
+        )
 
     def query(self, address, function_code, timeout_ms=120):
         address = validate_address(address)
@@ -318,26 +445,48 @@ class ZdtCommandClient:
         self.can = can_controller
         self.reader = ZdtReadOnlyClient(can_controller)
 
-    def enable(self, address, enabled=True, timeout_ms=120):
+    def enable(self, address, enabled=True, timeout_ms=120, sync=False):
         return self._command(
-            build_enable_command(address, enabled), timeout_ms
+            build_enable_command(address, enabled, sync), timeout_ms
         )
 
-    def stop(self, address, timeout_ms=120):
-        return self._command(build_stop_command(address), timeout_ms)
+    def stop(self, address, timeout_ms=120, sync=False):
+        return self._command(
+            build_stop_command(address, sync), timeout_ms
+        )
 
-    def stop_no_reply(self, address, timeout_ms=20):
-        command = build_stop_command(address)
+    def stop_no_reply(self, address, timeout_ms=20, sync=False):
+        command = build_stop_command(address, sync)
         for can_id, data in split_serial_command(address, command):
             self.can.send(
                 can_id, data, extended=True, timeout_ms=timeout_ms
             )
 
     def move_x_relative(
-        self, address, degrees, speed_rpm, timeout_ms=120
+        self, address, degrees, speed_rpm, timeout_ms=120, sync=False
     ):
         return self._command(
-            build_x_relative_command(address, degrees, speed_rpm),
+            build_x_relative_command(address, degrees, speed_rpm, sync),
+            timeout_ms,
+        )
+
+    def move_x_position(
+        self,
+        address,
+        degrees,
+        speed_rpm,
+        position_mode=POSITION_MODE_RELATIVE_CURRENT,
+        timeout_ms=120,
+        sync=False,
+    ):
+        return self._command(
+            build_x_position_command(
+                address,
+                degrees,
+                speed_rpm,
+                position_mode,
+                sync,
+            ),
             timeout_ms,
         )
 
@@ -348,13 +497,97 @@ class ZdtCommandClient:
         speed_rpm,
         acceleration=10,
         timeout_ms=120,
+        sync=False,
     ):
         return self._command(
             build_emm_relative_command(
-                address, pulses, speed_rpm, acceleration
+                address, pulses, speed_rpm, acceleration, sync
             ),
             timeout_ms,
         )
+
+    def move_emm_position(
+        self,
+        address,
+        pulses,
+        speed_rpm,
+        acceleration=10,
+        position_mode=POSITION_MODE_RELATIVE_CURRENT,
+        timeout_ms=120,
+        sync=False,
+    ):
+        return self._command(
+            build_emm_position_command(
+                address,
+                pulses,
+                speed_rpm,
+                acceleration,
+                position_mode,
+                sync,
+            ),
+            timeout_ms,
+        )
+
+    def move_x_speed(
+        self,
+        address,
+        speed_rpm,
+        acceleration_rpm_s=100,
+        timeout_ms=120,
+        sync=False,
+    ):
+        return self._command(
+            build_x_speed_command(
+                address, speed_rpm, acceleration_rpm_s, sync
+            ),
+            timeout_ms,
+        )
+
+    def move_emm_speed(
+        self,
+        address,
+        speed_rpm,
+        acceleration=10,
+        timeout_ms=120,
+        sync=False,
+    ):
+        return self._command(
+            build_emm_speed_command(
+                address, speed_rpm, acceleration, sync
+            ),
+            timeout_ms,
+        )
+
+    def trigger_sync(self, timeout_ms=120):
+        command = build_sync_trigger_command()
+        self.reader._drain_receive_queue()
+        for can_id, data in split_serial_command(0, command):
+            self.can.send(
+                can_id, data, extended=True, timeout_ms=timeout_ms
+            )
+
+        deadline = _ticks_add(_ticks_ms(), int(timeout_ms))
+        while True:
+            message = self.can.receive()
+            if message is not None and message.get("extended", False):
+                response_address, packet = decode_extended_id(message["id"])
+                data = bytes(message["data"])
+                if (
+                    response_address != 0
+                    and packet == 0
+                    and len(data) == 3
+                    and data[0] == COMMAND_SYNC
+                    and data[2] == CHECK_BYTE
+                ):
+                    if data[1] in (0x02, 0x9F):
+                        return bytes((response_address,)) + data
+                    raise ZdtCommandError(
+                        "ZDT sync trigger rejected: %s" %
+                        format_hex(data)
+                    )
+            if _ticks_diff(_ticks_ms(), deadline) >= 0:
+                raise ZdtTimeout("ZDT sync trigger response timeout")
+            _sleep_ms(1)
 
     def _command(self, serial_command, timeout_ms):
         serial_command = bytes(serial_command)

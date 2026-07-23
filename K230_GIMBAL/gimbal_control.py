@@ -1,176 +1,436 @@
-"""Supervised gimbal motion built on the ZDT device API."""
+"""Bounded two-axis gimbal supervision above the ZDT protocol layer."""
 
 import time
 
 from zdt_motor import (
+    POSITION_MODE_ABSOLUTE,
     ZdtCommandClient,
     ZdtReadOnlyClient,
-    parse_position_degrees,
 )
 
 
 MIN_BUS_MV = 10000
-MAX_AXIS_PROBE_DEGREES = 8.0
-MAX_AXIS_PROBE_RPM = 10.0
 EMM_PULSES_PER_REVOLUTION = 3200
-MAX_EMM_AXIS_PROBE_PULSES = 72
 
 
-def run_axis_probe(
-    can_controller,
-    address,
-    degrees=5.0,
-    speed_rpm=5.0,
-    lease_ms=1200,
-):
-    degrees = float(degrees)
-    speed_rpm = float(speed_rpm)
-    lease_ms = int(lease_ms)
-    if abs(degrees) > MAX_AXIS_PROBE_DEGREES or degrees == 0.0:
-        raise ValueError("axis probe angle exceeds commissioning limit")
-    if not 0.0 < speed_rpm <= MAX_AXIS_PROBE_RPM:
-        raise ValueError("axis probe speed exceeds commissioning limit")
-    if not 200 <= lease_ms <= 2000:
-        raise ValueError("axis probe lease is outside bounded range")
+class GimbalControlError(Exception):
+    pass
 
-    reader = ZdtReadOnlyClient(can_controller)
-    motion = ZdtCommandClient(can_controller)
-    profile = reader.query_profile(address, 150)
-    _require_motion_ready(profile)
-    if profile["firmware"] != "X":
-        raise ValueError("first axis probe requires X firmware")
 
-    before_deg = profile["position_deg"]
-    result = {
-        "address": int(address),
-        "firmware": profile["firmware"],
-        "before_deg": before_deg,
-        "requested_deg": degrees,
-        "speed_rpm": speed_rpm,
-        "reached": False,
-    }
-    motion.stop(address, 150)
-    motion.enable(address, True, 150)
-    try:
-        motion.move_x_relative(address, degrees, speed_rpm, 150)
-        deadline = _ticks_add(_ticks_ms(), lease_ms)
-        while _ticks_diff(_ticks_ms(), deadline) < 0:
-            _sleep_ms(30)
-            position_raw = reader.query_position(address, 150)["raw"]
-            after_deg = _parse_x_position(position_raw)
-            flags = reader.query(address, 0x3A, 150)["raw"]
-            result["after_deg"] = after_deg
-            result["delta_deg"] = after_deg - before_deg
-            result["flags_raw"] = _format_hex(flags)
-            position_error = abs(result["delta_deg"] - degrees)
-            if (
-                len(flags) >= 4
-                and (flags[2] & 0x02)
-                and position_error <= 0.8
-            ):
-                result["reached"] = True
-                break
-        if "after_deg" not in result:
-            raise RuntimeError("axis probe produced no position feedback")
-        return result
-    finally:
+class GimbalSupervisor:
+    STATE_DISARMED = 0
+    STATE_ARMED = 1
+    STATE_MOVING = 2
+    STATE_FAULT = 3
+
+    def __init__(
+        self,
+        can_controller,
+        yaw_address,
+        pitch_address,
+        yaw_min_deg,
+        yaw_max_deg,
+        pitch_min_deg,
+        pitch_max_deg,
+        yaw_max_rpm,
+        pitch_max_rpm,
+        command_lease_ms=400,
+        poll_interval_ms=50,
+        voltage_interval_ms=500,
+        position_tolerance_deg=1.5,
+        reader=None,
+        motion=None,
+    ):
+        self.can = can_controller
+        self.yaw_address = int(yaw_address)
+        self.pitch_address = int(pitch_address)
+        if self.yaw_address == self.pitch_address:
+            raise ValueError("gimbal axes require different CAN addresses")
+
+        self.yaw_min_deg = float(yaw_min_deg)
+        self.yaw_max_deg = float(yaw_max_deg)
+        self.pitch_min_deg = float(pitch_min_deg)
+        self.pitch_max_deg = float(pitch_max_deg)
+        if not self.yaw_min_deg < 0.0 < self.yaw_max_deg:
+            raise ValueError("yaw software limits must span zero")
+        if not self.pitch_min_deg < 0.0 < self.pitch_max_deg:
+            raise ValueError("pitch software limits must span zero")
+
+        self.yaw_max_rpm = float(yaw_max_rpm)
+        self.pitch_max_rpm = float(pitch_max_rpm)
+        if self.yaw_max_rpm <= 0.0 or self.pitch_max_rpm < 1.0:
+            raise ValueError("gimbal speed limits are invalid")
+
+        self.command_lease_ms = _validate_lease(command_lease_ms)
+        self.poll_interval_ms = int(poll_interval_ms)
+        self.voltage_interval_ms = int(voltage_interval_ms)
+        self.position_tolerance_deg = float(position_tolerance_deg)
+        if self.poll_interval_ms < 20:
+            raise ValueError("gimbal poll interval is below 20 ms")
+        if self.voltage_interval_ms < self.poll_interval_ms:
+            raise ValueError("gimbal voltage interval is too short")
+        if self.position_tolerance_deg <= 0.0:
+            raise ValueError("gimbal position tolerance must be positive")
+
+        self.reader = reader or ZdtReadOnlyClient(can_controller)
+        self.motion = motion or ZdtCommandClient(can_controller)
+        self.state = self.STATE_DISARMED
+        self.fault_code = ""
+        self.fault_detail = ""
+        self.last_event = "INIT"
+        self.origins = {"yaw": 0.0, "pitch": 0.0}
+        self.positions = {"yaw": 0.0, "pitch": 0.0}
+        self.targets = {"yaw": 0.0, "pitch": 0.0}
+        self.flags = {"yaw": {}, "pitch": {}}
+        self.bus_mv = {"yaw": 0, "pitch": 0}
+        self.firmware = {"yaw": "X", "pitch": "Emm"}
+        self.lease_deadline_ms = None
+        self.command_started_ms = 0
+        self.last_poll_ms = 0
+        self.last_voltage_ms = 0
+        self.lease_expired_count = 0
+
+    def arm(self, now_ms):
+        now_ms = int(now_ms)
+        if self.state == self.STATE_FAULT:
+            raise GimbalControlError("clear the latched fault before arming")
+        if self.state == self.STATE_MOVING:
+            raise GimbalControlError("stop the active command before arming")
+
         try:
-            motion.stop(address, 150)
-        except Exception:
-            motion.stop_no_reply(address, 20)
+            self._stop_all()
+            yaw_profile = self.reader.query_profile(self.yaw_address, 150)
+            pitch_profile = self.reader.query_profile(
+                self.pitch_address, 150
+            )
+            self._validate_profile(yaw_profile, "X")
+            self._validate_profile(pitch_profile, "Emm")
+            self.motion.enable(self.yaw_address, True, 150)
+            self.motion.enable(self.pitch_address, True, 150)
+        except BaseException as exc:
+            self._latch_fault("ARM_FAILED", exc)
+            raise GimbalControlError(self.fault_detail)
 
+        self.origins["yaw"] = yaw_profile["position_deg"]
+        self.origins["pitch"] = pitch_profile["position_deg"]
+        self.positions.update(self.origins)
+        self.targets["yaw"] = 0.0
+        self.targets["pitch"] = 0.0
+        self.flags["yaw"] = _profile_flags(yaw_profile)
+        self.flags["pitch"] = _profile_flags(pitch_profile)
+        self.bus_mv["yaw"] = yaw_profile["bus_mv"]
+        self.bus_mv["pitch"] = pitch_profile["bus_mv"]
+        self.firmware["yaw"] = yaw_profile["firmware"]
+        self.firmware["pitch"] = pitch_profile["firmware"]
+        self.lease_deadline_ms = None
+        self.last_poll_ms = now_ms
+        self.last_voltage_ms = now_ms
+        self.state = self.STATE_ARMED
+        self.last_event = "ARMED"
+        return self.snapshot()
 
-def run_emm_axis_probe(
-    can_controller,
-    address,
-    pulses=71,
-    speed_rpm=3.0,
-    acceleration=10,
-    lease_ms=1500,
-):
-    pulses = int(pulses)
-    speed_rpm = float(speed_rpm)
-    acceleration = int(acceleration)
-    lease_ms = int(lease_ms)
-    if pulses == 0 or abs(pulses) > MAX_EMM_AXIS_PROBE_PULSES:
-        raise ValueError("Emm axis probe pulses exceed commissioning limit")
-    if not 0.0 < speed_rpm <= MAX_AXIS_PROBE_RPM:
-        raise ValueError("Emm axis probe speed exceeds commissioning limit")
-    if not 0 <= acceleration <= 0xFF:
-        raise ValueError("Emm axis probe acceleration is outside range")
-    if not 200 <= lease_ms <= 2000:
-        raise ValueError("Emm axis probe lease is outside bounded range")
+    def command_offsets(
+        self,
+        yaw_deg,
+        pitch_deg,
+        now_ms,
+        yaw_rpm=None,
+        pitch_rpm=None,
+        lease_ms=None,
+    ):
+        if self.state not in (self.STATE_ARMED, self.STATE_MOVING):
+            raise GimbalControlError("gimbal command requires explicit arm")
 
-    reader = ZdtReadOnlyClient(can_controller)
-    motion = ZdtCommandClient(can_controller)
-    profile = reader.query_profile(address, 150)
-    _require_motion_ready(profile)
-    if profile["firmware"] != "Emm":
-        raise ValueError("Emm axis probe requires Emm firmware")
-
-    before_deg = profile["position_deg"]
-    requested_deg = (
-        pulses * 360.0 / EMM_PULSES_PER_REVOLUTION
-    )
-    result = {
-        "address": int(address),
-        "firmware": profile["firmware"],
-        "before_deg": before_deg,
-        "requested_pulses": pulses,
-        "requested_deg": requested_deg,
-        "speed_rpm": speed_rpm,
-        "reached": False,
-    }
-    motion.stop(address, 150)
-    motion.enable(address, True, 150)
-    try:
-        motion.move_emm_relative(
-            address, pulses, speed_rpm, acceleration, 150
+        yaw_deg = float(yaw_deg)
+        pitch_deg = float(pitch_deg)
+        self._validate_target(yaw_deg, pitch_deg)
+        yaw_rpm = (
+            self.yaw_max_rpm if yaw_rpm is None else float(yaw_rpm)
         )
-        deadline = _ticks_add(_ticks_ms(), lease_ms)
-        while _ticks_diff(_ticks_ms(), deadline) < 0:
-            _sleep_ms(30)
-            position_raw = reader.query_position(address, 150)["raw"]
-            after_deg = parse_position_degrees(position_raw, "Emm")
-            flags = reader.query(address, 0x3A, 150)["raw"]
-            result["after_deg"] = after_deg
-            result["delta_deg"] = _wrapped_degrees(
-                after_deg - before_deg
+        pitch_rpm = (
+            self.pitch_max_rpm if pitch_rpm is None else float(pitch_rpm)
+        )
+        if not 0.0 < yaw_rpm <= self.yaw_max_rpm:
+            raise ValueError("yaw command speed exceeds validated limit")
+        if not 1.0 <= pitch_rpm <= self.pitch_max_rpm:
+            raise ValueError("pitch command speed exceeds validated limit")
+        lease_ms = _validate_lease(
+            self.command_lease_ms if lease_ms is None else lease_ms
+        )
+        now_ms = int(now_ms)
+
+        yaw_target_deg = self.origins["yaw"] + yaw_deg
+        pitch_target_deg = self.origins["pitch"] + pitch_deg
+        pitch_target_pulses = int(
+            round(
+                pitch_target_deg
+                * EMM_PULSES_PER_REVOLUTION
+                / 360.0
             )
-            result["flags_raw"] = _format_hex(flags)
-            position_error = abs(
-                result["delta_deg"] - requested_deg
-            )
-            if (
-                len(flags) >= 4
-                and (flags[2] & 0x02)
-                and position_error <= 1.0
-            ):
-                result["reached"] = True
-                break
-        if "after_deg" not in result:
-            raise RuntimeError("Emm axis probe produced no position feedback")
-        return result
-    finally:
+        )
         try:
-            motion.stop(address, 150)
-        except Exception:
-            motion.stop_no_reply(address, 20)
+            self.motion.move_x_position(
+                self.yaw_address,
+                yaw_target_deg,
+                yaw_rpm,
+                POSITION_MODE_ABSOLUTE,
+                150,
+                True,
+            )
+            self.motion.move_emm_position(
+                self.pitch_address,
+                pitch_target_pulses,
+                pitch_rpm,
+                10,
+                POSITION_MODE_ABSOLUTE,
+                150,
+                True,
+            )
+            self.motion.trigger_sync(150)
+        except BaseException as exc:
+            self._latch_fault("COMMAND_FAILED", exc)
+            raise GimbalControlError(self.fault_detail)
+
+        self.targets["yaw"] = yaw_deg
+        self.targets["pitch"] = pitch_deg
+        self.command_started_ms = now_ms
+        self.lease_deadline_ms = _ticks_add(now_ms, lease_ms)
+        self.state = self.STATE_MOVING
+        self.last_event = "COMMAND"
+        return self.snapshot()
+
+    def task(self, now_ms):
+        now_ms = int(now_ms)
+        if self.state == self.STATE_MOVING and self._lease_expired(now_ms):
+            self._stop_all()
+            self.state = self.STATE_DISARMED
+            self.lease_deadline_ms = None
+            self.lease_expired_count += 1
+            self.last_event = "LEASE_EXPIRED"
+            return self.state
+        if self.state not in (self.STATE_ARMED, self.STATE_MOVING):
+            return self.state
+        if _ticks_diff(now_ms, self.last_poll_ms) < self.poll_interval_ms:
+            return self.state
+
+        self.last_poll_ms = now_ms
+        try:
+            self._update_feedback(now_ms)
+        except BaseException as exc:
+            self._latch_fault("FEEDBACK_FAILED", exc)
+        return self.state
+
+    def stop(self, reason="STOP"):
+        self._stop_all()
+        self.state = self.STATE_DISARMED
+        self.lease_deadline_ms = None
+        self.last_event = str(reason)
+
+    def release(self):
+        try:
+            self._stop_all()
+            self.motion.enable(self.yaw_address, False, 150)
+            self.motion.enable(self.pitch_address, False, 150)
+        except BaseException as exc:
+            self._latch_fault("RELEASE_FAILED", exc)
+            raise GimbalControlError(self.fault_detail)
+        self.state = self.STATE_DISARMED
+        self.lease_deadline_ms = None
+        self.last_event = "RELEASED"
+
+    def clear_fault(self, now_ms):
+        if self.state != self.STATE_FAULT:
+            return True
+        try:
+            self._stop_all()
+            yaw_profile = self.reader.query_profile(self.yaw_address, 150)
+            pitch_profile = self.reader.query_profile(
+                self.pitch_address, 150
+            )
+            self._validate_profile(yaw_profile, "X")
+            self._validate_profile(pitch_profile, "Emm")
+        except BaseException as exc:
+            self.fault_detail = repr(exc)
+            return False
+
+        self.fault_code = ""
+        self.fault_detail = ""
+        self.state = self.STATE_DISARMED
+        self.lease_deadline_ms = None
+        self.last_poll_ms = int(now_ms)
+        self.last_event = "FAULT_CLEARED"
+        return True
+
+    def state_text(self):
+        if self.state == self.STATE_ARMED:
+            return "GIMBAL ARMED"
+        if self.state == self.STATE_MOVING:
+            return "GIMBAL MOVING"
+        if self.state == self.STATE_FAULT:
+            return "GIMBAL FAULT"
+        return "GIMBAL SAFE"
+
+    def snapshot(self):
+        return {
+            "state": self.state,
+            "state_text": self.state_text(),
+            "fault": self.fault_code,
+            "fault_detail": self.fault_detail,
+            "event": self.last_event,
+            "origins": dict(self.origins),
+            "positions": dict(self.positions),
+            "offsets": self._position_offsets(),
+            "targets": dict(self.targets),
+            "flags": {
+                "yaw": dict(self.flags["yaw"]),
+                "pitch": dict(self.flags["pitch"]),
+            },
+            "bus_mv": dict(self.bus_mv),
+            "lease_active": self.lease_deadline_ms is not None,
+            "lease_expired_count": self.lease_expired_count,
+        }
+
+    def _update_feedback(self, now_ms):
+        self.positions["yaw"] = self.reader.query_position_degrees(
+            self.yaw_address, self.firmware["yaw"], 150
+        )
+        self.positions["pitch"] = self.reader.query_position_degrees(
+            self.pitch_address, self.firmware["pitch"], 150
+        )
+        self.flags["yaw"] = self.reader.query_motor_flags(
+            self.yaw_address, 150
+        )
+        self.flags["pitch"] = self.reader.query_motor_flags(
+            self.pitch_address, 150
+        )
+        if _ticks_diff(now_ms, self.last_voltage_ms) >= (
+            self.voltage_interval_ms
+        ):
+            self.bus_mv["yaw"] = self.reader.query_bus_voltage(
+                self.yaw_address, 150
+            )
+            self.bus_mv["pitch"] = self.reader.query_bus_voltage(
+                self.pitch_address, 150
+            )
+            self.last_voltage_ms = now_ms
+
+        for axis in ("yaw", "pitch"):
+            flags = self.flags[axis]
+            if flags.get("stalled") or flags.get("stall_protected"):
+                raise GimbalControlError("%s axis stalled" % axis)
+            if flags.get("left_limit") or flags.get("right_limit"):
+                raise GimbalControlError(
+                    "%s hardware limit asserted" % axis
+                )
+            if self.bus_mv[axis] < MIN_BUS_MV:
+                raise GimbalControlError(
+                    "%s bus voltage below limit" % axis
+                )
+
+        offsets = self._position_offsets()
+        margin = self.position_tolerance_deg
+        if not (
+            self.yaw_min_deg - margin
+            <= offsets["yaw"]
+            <= self.yaw_max_deg + margin
+        ):
+            raise GimbalControlError("yaw software limit exceeded")
+        if not (
+            self.pitch_min_deg - margin
+            <= offsets["pitch"]
+            <= self.pitch_max_deg + margin
+        ):
+            raise GimbalControlError("pitch software limit exceeded")
+
+        if self.state == self.STATE_MOVING:
+            reached = (
+                self.flags["yaw"].get("position_reached", False)
+                and self.flags["pitch"].get("position_reached", False)
+            )
+            settled_long_enough = _ticks_diff(
+                now_ms, self.command_started_ms
+            ) >= self.poll_interval_ms
+            if reached and settled_long_enough:
+                yaw_error = abs(offsets["yaw"] - self.targets["yaw"])
+                pitch_error = abs(
+                    offsets["pitch"] - self.targets["pitch"]
+                )
+                if (
+                    yaw_error <= self.position_tolerance_deg
+                    and pitch_error <= self.position_tolerance_deg
+                ):
+                    self.state = self.STATE_ARMED
+                    self.lease_deadline_ms = None
+                    self.last_event = "REACHED"
+
+    def _validate_target(self, yaw_deg, pitch_deg):
+        if not self.yaw_min_deg <= yaw_deg <= self.yaw_max_deg:
+            raise ValueError("yaw target exceeds software limit")
+        if not self.pitch_min_deg <= pitch_deg <= self.pitch_max_deg:
+            raise ValueError("pitch target exceeds software limit")
+
+    def _validate_profile(self, profile, expected_firmware):
+        if profile["firmware"] != expected_firmware:
+            raise GimbalControlError(
+                "expected %s firmware at address %d" %
+                (expected_firmware, profile["address"])
+            )
+        if not profile["closed_loop"]:
+            raise GimbalControlError("motor is not in closed-loop mode")
+        if profile["bus_mv"] < MIN_BUS_MV:
+            raise GimbalControlError("motor bus voltage is below limit")
+        if profile["stalled"] or profile["stall_protected"]:
+            raise GimbalControlError("motor stall state blocks arming")
+
+    def _position_offsets(self):
+        return {
+            "yaw": self.positions["yaw"] - self.origins["yaw"],
+            "pitch": _wrapped_degrees(
+                self.positions["pitch"] - self.origins["pitch"]
+            ),
+        }
+
+    def _lease_expired(self, now_ms):
+        return (
+            self.lease_deadline_ms is not None
+            and _ticks_diff(now_ms, self.lease_deadline_ms) >= 0
+        )
+
+    def _stop_all(self):
+        for address in (self.yaw_address, self.pitch_address):
+            try:
+                self.motion.stop(address, 150)
+            except BaseException:
+                try:
+                    self.motion.stop_no_reply(address, 20)
+                except BaseException:
+                    pass
+
+    def _latch_fault(self, code, detail):
+        self._stop_all()
+        self.state = self.STATE_FAULT
+        self.fault_code = str(code)
+        self.fault_detail = repr(detail)
+        self.lease_deadline_ms = None
+        self.last_event = "FAULT"
 
 
-def _require_motion_ready(profile):
-    if not profile["closed_loop"]:
-        raise RuntimeError("ZDT motor is not in closed-loop mode")
-    if profile["bus_mv"] < MIN_BUS_MV:
-        raise RuntimeError("ZDT bus voltage is below commissioning limit")
-    if profile["stalled"] or profile["stall_protected"]:
-        raise RuntimeError("ZDT stall state blocks motion")
+def _profile_flags(profile):
+    return {
+        "enabled": profile["enabled"],
+        "position_reached": profile["position_reached"],
+        "stalled": profile["stalled"],
+        "stall_protected": profile["stall_protected"],
+        "left_limit": profile["left_limit"],
+        "right_limit": profile["right_limit"],
+    }
 
 
-def _parse_x_position(response):
-    response = bytes(response)
-    magnitude = int.from_bytes(response[3:7], "big") / 10.0
-    return -magnitude if response[2] else magnitude
+def _validate_lease(lease_ms):
+    lease_ms = int(lease_ms)
+    if not 100 <= lease_ms <= 2000:
+        raise ValueError("gimbal lease must be in range 100..2000 ms")
+    return lease_ms
 
 
 def _wrapped_degrees(degrees):
@@ -180,25 +440,6 @@ def _wrapped_degrees(degrees):
     while degrees <= -180.0:
         degrees += 360.0
     return degrees
-
-
-def _format_hex(data):
-    return " ".join("%02X" % value for value in bytes(data))
-
-
-def _sleep_ms(duration_ms):
-    sleep_ms = getattr(time, "sleep_ms", None)
-    if sleep_ms is not None:
-        sleep_ms(int(duration_ms))
-    else:
-        time.sleep(int(duration_ms) / 1000.0)
-
-
-def _ticks_ms():
-    ticks_ms = getattr(time, "ticks_ms", None)
-    if ticks_ms is not None:
-        return ticks_ms()
-    return int(time.monotonic() * 1000)
 
 
 def _ticks_add(value, delta):

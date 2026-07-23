@@ -11,7 +11,8 @@ import chassis_radio
 from chassis_radio import ChassisRadio
 from gimbal_control import (
     EMM_PULSES_PER_REVOLUTION,
-    run_emm_axis_probe,
+    GimbalControlError,
+    GimbalSupervisor,
 )
 from mcp2515 import MCP2515
 from vision import letterbox_param, map_target_center, nms_detections, select_target
@@ -28,14 +29,20 @@ from wire_protocol import (
     sequence_is_newer,
 )
 from zdt_motor import (
+    POSITION_MODE_ABSOLUTE,
     ResponseAssembler,
     ZdtCommandClient,
     ZdtReadOnlyClient,
     ZdtTimeout,
+    build_emm_position_command,
     build_emm_relative_command,
+    build_emm_speed_command,
     build_enable_command,
     build_stop_command,
+    build_sync_trigger_command,
+    build_x_position_command,
     build_x_relative_command,
+    build_x_speed_command,
     decode_extended_id,
     extended_id,
     parse_bus_voltage,
@@ -160,57 +167,149 @@ class FakeZdtCanController:
         return response
 
 
-class FakeEmmMotorController:
+class FakeGimbalReader:
     def __init__(self):
-        self.sent = []
-        self.response = None
-        self.position_reads = 0
+        self.positions = {1: 10.0, 2: 0.0}
+        self.bus_mv = {1: 12000, 2: 12000}
+        self.flags = {
+            1: self._normal_flags(),
+            2: self._normal_flags(),
+        }
 
-    def send(self, can_id, data, extended=True, timeout_ms=0):
-        data = bytes(data)
-        self.sent.append((can_id, data, extended, timeout_ms))
-        function_code = data[0]
-        response_data = None
-        if function_code == 0x1A:
-            response_data = bytes.fromhex("1A 00 06 6B")
-        elif function_code == 0x1F:
-            response_data = bytes.fromhex("1F 00 C8 13 0A 6B")
-        elif function_code == 0x24:
-            response_data = bytes.fromhex("24 2E 84 6B")
-        elif function_code == 0x31:
-            response_data = bytes.fromhex("31 00 00 6B")
-        elif function_code == 0x36:
-            self.position_reads += 1
-            position = 0 if self.position_reads == 1 else 0x05AE
-            response_data = bytes(
-                (
-                    0x36,
-                    0x00,
-                    (position >> 24) & 0xFF,
-                    (position >> 16) & 0xFF,
-                    (position >> 8) & 0xFF,
-                    position & 0xFF,
-                    0x6B,
-                )
+    @staticmethod
+    def _normal_flags():
+        return {
+            "enabled": True,
+            "position_reached": True,
+            "stalled": False,
+            "stall_protected": False,
+            "left_limit": False,
+            "right_limit": False,
+            "power_loss_recorded": False,
+            "motor_flags": 3,
+        }
+
+    def query_profile(self, address, _timeout_ms):
+        profile = {
+            "address": address,
+            "firmware": "X" if address == 1 else "Emm",
+            "closed_loop": True,
+            "bus_mv": self.bus_mv[address],
+            "position_deg": self.positions[address],
+        }
+        profile.update(self.flags[address])
+        return profile
+
+    def query_position_degrees(self, address, _firmware, _timeout_ms):
+        return self.positions[address]
+
+    def query_motor_flags(self, address, _timeout_ms):
+        return dict(self.flags[address])
+
+    def query_bus_voltage(self, address, _timeout_ms):
+        return self.bus_mv[address]
+
+
+class FakeGimbalMotion:
+    def __init__(self, reader, apply_commands=True):
+        self.reader = reader
+        self.apply_commands = apply_commands
+        self.calls = []
+        self.pending = {}
+
+    def stop(self, address, timeout_ms, sync=False):
+        self.calls.append(("stop", address, timeout_ms, sync))
+
+    def stop_no_reply(self, address, timeout_ms, sync=False):
+        self.calls.append(("stop_no_reply", address, timeout_ms, sync))
+
+    def enable(self, address, enabled, timeout_ms, sync=False):
+        self.calls.append(("enable", address, enabled, timeout_ms, sync))
+        self.reader.flags[address]["enabled"] = enabled
+
+    def move_x_position(
+        self,
+        address,
+        degrees,
+        speed_rpm,
+        position_mode,
+        timeout_ms,
+        sync,
+    ):
+        self.calls.append(
+            (
+                "move_x_position",
+                address,
+                degrees,
+                speed_rpm,
+                position_mode,
+                timeout_ms,
+                sync,
             )
-        elif function_code == 0x3A:
-            response_data = bytes.fromhex("3A 03 6B")
-        elif function_code in (0xF3, 0xFD, 0xFE):
-            response_data = bytes((function_code, 0x02, 0x6B))
-        if response_data is not None:
-            self.response = {
-                "id": 0x0200,
-                "extended": True,
-                "data": response_data,
-            }
+        )
+        self.pending[address] = float(degrees)
 
-    def receive(self):
-        response = self.response
-        self.response = None
-        return response
+    def move_emm_position(
+        self,
+        address,
+        pulses,
+        speed_rpm,
+        acceleration,
+        position_mode,
+        timeout_ms,
+        sync,
+    ):
+        self.calls.append(
+            (
+                "move_emm_position",
+                address,
+                pulses,
+                speed_rpm,
+                acceleration,
+                position_mode,
+                timeout_ms,
+                sync,
+            )
+        )
+        self.pending[address] = (
+            pulses * 360.0 / EMM_PULSES_PER_REVOLUTION
+        )
+
+    def trigger_sync(self, timeout_ms):
+        self.calls.append(("trigger_sync", timeout_ms))
+        for address in (1, 2):
+            self.reader.flags[address]["position_reached"] = False
+        if self.apply_commands:
+            self.reader.positions.update(self.pending)
+            for address in (1, 2):
+                self.reader.flags[address]["position_reached"] = True
+        self.pending = {}
+        return bytes.fromhex("01 FF 02 6B")
 
 
 class RuntimeLogicTest(unittest.TestCase):
+    def make_gimbal_supervisor(self, apply_commands=True):
+        reader = FakeGimbalReader()
+        motion = FakeGimbalMotion(reader, apply_commands)
+        supervisor = GimbalSupervisor(
+            None,
+            config.GIMBAL_YAW_CAN_ADDRESS,
+            config.GIMBAL_PITCH_CAN_ADDRESS,
+            config.GIMBAL_YAW_SESSION_MIN_DEG,
+            config.GIMBAL_YAW_SESSION_MAX_DEG,
+            config.GIMBAL_PITCH_SESSION_MIN_DEG,
+            config.GIMBAL_PITCH_SESSION_MAX_DEG,
+            config.GIMBAL_YAW_MAX_RPM,
+            config.GIMBAL_PITCH_MAX_RPM,
+            config.GIMBAL_COMMAND_LEASE_MS,
+            config.GIMBAL_FEEDBACK_POLL_MS,
+            config.GIMBAL_VOLTAGE_POLL_MS,
+            config.GIMBAL_POSITION_TOLERANCE_DEG,
+            reader,
+            motion,
+        )
+        return supervisor, reader, motion
+
     def test_radio_enabled_while_motion_gates_are_disabled(self):
         self.assertFalse(config.CHASSIS_RADIO_ENABLED)
         self.assertTrue(config.CAN_ENABLED)
@@ -220,21 +319,68 @@ class RuntimeLogicTest(unittest.TestCase):
         self.assertEqual(config.GIMBAL_PITCH_CAN_ADDRESS, 2)
         self.assertEqual(config.GIMBAL_YAW_POSITIVE_DIRECTION, "CW")
         self.assertEqual(config.GIMBAL_PITCH_POSITIVE_DIRECTION, "UP")
+        self.assertEqual(config.GIMBAL_YAW_SESSION_MIN_DEG, -16.0)
+        self.assertEqual(config.GIMBAL_YAW_SESSION_MAX_DEG, 16.0)
+        self.assertEqual(config.GIMBAL_PITCH_SESSION_MIN_DEG, -14.0)
+        self.assertEqual(config.GIMBAL_PITCH_SESSION_MAX_DEG, 14.0)
 
-    def test_emm_axis_probe_uses_manual_3200_pulses_per_revolution(self):
-        controller = FakeEmmMotorController()
-        result = run_emm_axis_probe(
-            controller, 2, pulses=71, speed_rpm=3, lease_ms=500
-        )
-        self.assertEqual(EMM_PULSES_PER_REVOLUTION, 3200)
-        self.assertTrue(result["reached"])
-        self.assertEqual(result["requested_pulses"], 71)
-        self.assertAlmostEqual(result["requested_deg"], 7.9875)
-        self.assertAlmostEqual(result["delta_deg"], 7.98706, places=3)
+    def test_gimbal_supervisor_requires_arm_and_enforces_limits(self):
+        supervisor, _reader, motion = self.make_gimbal_supervisor()
+        with self.assertRaises(GimbalControlError):
+            supervisor.command_offsets(1.0, 1.0, 0)
 
-    def test_emm_axis_probe_rejects_unbounded_motion(self):
+        snapshot = supervisor.arm(0)
+        self.assertEqual(snapshot["state"], GimbalSupervisor.STATE_ARMED)
         with self.assertRaises(ValueError):
-            run_emm_axis_probe(None, 2, pulses=73)
+            supervisor.command_offsets(17.0, 0.0, 0)
+
+        supervisor.command_offsets(8.0, -7.0, 0)
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_MOVING)
+        self.assertEqual(
+            [call[0] for call in motion.calls[-3:]],
+            ["move_x_position", "move_emm_position", "trigger_sync"],
+        )
+        supervisor.task(config.GIMBAL_FEEDBACK_POLL_MS)
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_ARMED)
+        self.assertEqual(supervisor.last_event, "REACHED")
+        self.assertAlmostEqual(supervisor.snapshot()["offsets"]["yaw"], 8.0)
+        self.assertAlmostEqual(
+            supervisor.snapshot()["offsets"]["pitch"], -7.0, places=1
+        )
+
+    def test_gimbal_supervisor_lease_expiry_stops_and_disarms(self):
+        supervisor, _reader, motion = self.make_gimbal_supervisor(False)
+        supervisor.arm(0)
+        supervisor.command_offsets(8.0, 7.0, 0, lease_ms=100)
+        supervisor.task(100)
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_DISARMED)
+        self.assertEqual(supervisor.last_event, "LEASE_EXPIRED")
+        self.assertEqual(supervisor.lease_expired_count, 1)
+        self.assertEqual(
+            [call[0] for call in motion.calls[-2:]], ["stop", "stop"]
+        )
+
+    def test_gimbal_supervisor_fault_latches_until_explicit_clear(self):
+        supervisor, reader, _motion = self.make_gimbal_supervisor()
+        supervisor.arm(0)
+        reader.flags[1]["stalled"] = True
+        supervisor.task(config.GIMBAL_FEEDBACK_POLL_MS)
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_FAULT)
+        self.assertEqual(supervisor.fault_code, "FEEDBACK_FAILED")
+        with self.assertRaises(GimbalControlError):
+            supervisor.command_offsets(0.0, 0.0, 100)
+        self.assertFalse(supervisor.clear_fault(100))
+        reader.flags[1]["stalled"] = False
+        self.assertTrue(supervisor.clear_fault(100))
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_DISARMED)
+
+    def test_gimbal_supervisor_release_disables_both_axes(self):
+        supervisor, reader, _motion = self.make_gimbal_supervisor()
+        supervisor.arm(0)
+        supervisor.release()
+        self.assertFalse(reader.flags[1]["enabled"])
+        self.assertFalse(reader.flags[2]["enabled"])
+        self.assertEqual(supervisor.state, GimbalSupervisor.STATE_DISARMED)
 
     def test_mcp2515_extended_identifier_round_trip(self):
         for can_id in (0, 0x100, 0x001ABCDE, 0x1FFFFFFF):
@@ -292,6 +438,53 @@ class RuntimeLogicTest(unittest.TestCase):
                 (0x0100, bytes.fromhex("FB 00 00 32 00 00 00 32")),
                 (0x0101, bytes.fromhex("FB 02 00 6B")),
             ],
+        )
+
+    def test_zdt_absolute_position_commands_allow_zero_and_sync(self):
+        self.assertEqual(
+            build_x_position_command(
+                1, 0.0, 3.0, POSITION_MODE_ABSOLUTE, True
+            ),
+            bytes.fromhex(
+                "01 FB 00 00 1E 00 00 00 00 01 01 6B"
+            ),
+        )
+        self.assertEqual(
+            build_emm_position_command(
+                2, 0, 2, 10, POSITION_MODE_ABSOLUTE, True
+            ),
+            bytes.fromhex(
+                "02 FD 00 00 02 0A 00 00 00 00 01 01 6B"
+            ),
+        )
+
+    def test_zdt_x_and_emm_speed_commands_match_manual_layouts(self):
+        self.assertEqual(
+            build_x_speed_command(1, -3.0, 100),
+            bytes.fromhex("01 F6 01 00 64 00 1E 00 6B"),
+        )
+        self.assertEqual(
+            build_emm_speed_command(2, 2.0, 10),
+            bytes.fromhex("02 F6 00 00 02 0A 00 6B"),
+        )
+
+    def test_zdt_sync_trigger_uses_broadcast_and_accepts_axis_ack(self):
+        command = build_sync_trigger_command()
+        self.assertEqual(command, bytes.fromhex("00 FF 66 6B"))
+        self.assertEqual(
+            split_serial_command(0, command),
+            [(0x0000, bytes.fromhex("FF 66 6B"))],
+        )
+        controller = FakeZdtCanController(
+            {
+                "id": 0x0100,
+                "extended": True,
+                "data": bytes.fromhex("FF 02 6B"),
+            }
+        )
+        self.assertEqual(
+            ZdtCommandClient(controller).trigger_sync(10),
+            bytes.fromhex("01 FF 02 6B"),
         )
 
     def test_zdt_emm_enable_stop_and_relative_commands(self):
