@@ -12,8 +12,10 @@ import vision
 
 
 def main():
-    if config.CAN_ENABLED or config.GIMBAL_MOTION_ENABLED:
-        raise RuntimeError("K1 build requires CAN and gimbal motion disabled")
+    if config.GIMBAL_MOTION_ENABLED:
+        raise RuntimeError(
+            "commissioning entry point requires gimbal motion disabled"
+        )
     vision.run()
 
 

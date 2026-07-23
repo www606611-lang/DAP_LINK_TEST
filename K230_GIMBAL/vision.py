@@ -169,14 +169,14 @@ def letterbox_param(input_size, output_size):
 
 def map_target_center(center_x, center_y):
     cx = (
-        int(center_x) * config.UART_COORD_WIDTH + (config.AI_WIDTH // 2)
+        int(center_x) * config.TARGET_COORD_WIDTH + (config.AI_WIDTH // 2)
     ) // config.AI_WIDTH
     cy = (
-        int(center_y) * config.UART_COORD_HEIGHT + (config.AI_HEIGHT // 2)
+        int(center_y) * config.TARGET_COORD_HEIGHT + (config.AI_HEIGHT // 2)
     ) // config.AI_HEIGHT
     return (
-        clamp(cx, 0, config.UART_COORD_WIDTH - 1),
-        clamp(cy, 0, config.UART_COORD_HEIGHT - 1),
+        clamp(cx, 0, config.TARGET_COORD_WIDTH - 1),
+        clamp(cy, 0, config.TARGET_COORD_HEIGHT - 1),
     )
 
 
@@ -237,7 +237,15 @@ def postprocess(results, labels, ratio, pad_top, pad_left):
     return nms_detections(detections, config.NMS_THRESHOLD)
 
 
-def draw_detections(osd_image, detections, labels, fps_value, focus_status):
+def draw_detections(
+    osd_image,
+    detections,
+    labels,
+    fps_value,
+    focus_status,
+    radio_status=None,
+    can_status=None,
+):
     osd_image.clear()
     osd_image.draw_string_advanced(
         8, 6, 24, "FPS %.1f" % fps_value, color=config.FPS_COLOR
@@ -245,6 +253,15 @@ def draw_detections(osd_image, detections, labels, fps_value, focus_status):
     osd_image.draw_string_advanced(
         8, 34, 22, focus_status, color=config.FOCUS_COLOR
     )
+    if radio_status is not None:
+        osd_image.draw_string_advanced(
+            8, 60, 20, radio_status, color=config.FOCUS_COLOR
+        )
+    if can_status is not None:
+        can_y = 84 if radio_status is not None else 60
+        osd_image.draw_string_advanced(
+            8, can_y, 20, can_status, color=config.FOCUS_COLOR
+        )
 
     for detection in detections:
         x1, y1, x2, y2 = [int(value) for value in detection[:4]]
@@ -282,11 +299,16 @@ def run():
     display_width = align_up(config.DISPLAY_WIDTH, 16)
     ai_width = align_up(config.AI_WIDTH, 16)
     sensor = None
-    link = None
-    if config.CHASSIS_LINK_ENABLED:
-        from chassis_link import ChassisLink
+    radio = None
+    if config.CHASSIS_RADIO_ENABLED:
+        from chassis_radio import ChassisRadio
 
-        link = ChassisLink()
+        radio = ChassisRadio()
+    can_gate = None
+    if config.CAN_ENABLED:
+        from mcp2515 import MCP2515RuntimeGate
+
+        can_gate = MCP2515RuntimeGate(config)
     ai2d = None
     ai2d_builder = None
     kpu = None
@@ -296,13 +318,11 @@ def run():
     display_initialized = False
     media_initialized = False
     sensor_running = False
-    last_cx = config.UART_COORD_WIDTH // 2
-    last_cy = config.UART_COORD_HEIGHT // 2
+    last_cx = config.TARGET_COORD_WIDTH // 2
+    last_cy = config.TARGET_COORD_HEIGHT // 2
     last_target_valid = False
 
     try:
-        if link is not None:
-            link.open()
         sensor = create_sensor()
         sensor.reset()
         sensor.set_framesize(
@@ -394,6 +414,10 @@ def run():
         fps = time.clock()
         frame_count = 0
         last_status_ms = time.ticks_ms()
+        if radio is not None:
+            radio.open(last_status_ms)
+        if can_gate is not None:
+            can_gate.start()
         print("vision build:", config.BUILD_ID)
 
         while True:
@@ -424,19 +448,27 @@ def run():
                 last_cx, last_cy = target
                 last_target_valid = True
 
-            if (
-                link is not None
-                and frame_count % config.UART_SEND_EVERY_N_FRAMES == 0
-            ):
-                link.publish(last_target_valid, last_cx, last_cy)
-
             fps_value = fps.fps()
+            now_ms = time.ticks_ms()
+            radio_status = None
+            if radio is not None:
+                radio.task(now_ms)
+                radio_status = radio.state_text()
+            can_status = None
+            if can_gate is not None:
+                can_gate.task()
+                can_status = can_gate.state_text()
             draw_detections(
-                osd_image, detections, labels, fps_value, focus_status
+                osd_image,
+                detections,
+                labels,
+                fps_value,
+                focus_status,
+                radio_status,
+                can_status,
             )
             Display.show_image(osd_image)
 
-            now_ms = time.ticks_ms()
             if time.ticks_diff(now_ms, last_status_ms) >= config.STATUS_PRINT_MS:
                 print(
                     "fps=%.2f boxes=%d valid=%d cx=%d cy=%d %s" %
@@ -449,6 +481,8 @@ def run():
                         focus_pos_text(sensor),
                     )
                 )
+                if can_gate is not None:
+                    print("CAN status:", can_gate.snapshot())
                 last_status_ms = now_ms
 
             if (
@@ -460,8 +494,6 @@ def run():
     except KeyboardInterrupt as exc:
         print("user stop:", exc)
     except BaseException as exc:
-        if link is not None:
-            link.publish(False)
         print_exception(exc)
     finally:
         if sensor_running and isinstance(sensor, Sensor):
@@ -485,5 +517,7 @@ def run():
         if kpu is not None:
             del kpu
         nn.shrink_memory_pool()
-        if link is not None:
-            link.close()
+        if radio is not None:
+            radio.close()
+        if can_gate is not None:
+            can_gate.close()

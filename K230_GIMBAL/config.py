@@ -1,6 +1,6 @@
 """Validated hardware and model configuration for the K230 gimbal app."""
 
-BUILD_ID = "k230-gimbal-vision-k1"
+BUILD_ID = "k230-gimbal-can-k4-axes"
 
 PROJECT_DEVICE_DIR = "/sdcard/K230_GIMBAL"
 KMODEL_PATH = "/data/best.kmodel"
@@ -19,16 +19,20 @@ MODEL_INPUT_SIZE = (320, 320)
 ENABLE_FIXED_FOCUS = True
 FIXED_FOCUS_POS = 210
 
-UART_ID = 2
-UART_TX_PIN = 11
-UART_RX_PIN = 12
-UART_BAUDRATE = 115200
-UART_COORD_WIDTH = 400
-UART_COORD_HEIGHT = 240
-UART_SEND_EVERY_N_FRAMES = 1
+TARGET_COORD_WIDTH = 400
+TARGET_COORD_HEIGHT = 240
 
-# Optional legacy telemetry adapter. Independent gimbal operation keeps it off.
-CHASSIS_LINK_ENABLED = False
+# Chassis radio stays dormant while the independent gimbal is brought up.
+CHASSIS_RADIO_ENABLED = False
+CHASSIS_WIFI_SSID = "CAR-K230"
+CHASSIS_WIFI_PASSWORD = "K230CAR2026"
+CHASSIS_RADIO_HOST = "192.168.4.1"
+CHASSIS_RADIO_REMOTE_PORT = 4210
+CHASSIS_RADIO_LOCAL_PORT = 4211
+CHASSIS_RADIO_HEARTBEAT_MS = 250
+CHASSIS_RADIO_HELLO_MS = 1000
+CHASSIS_RADIO_OFFLINE_MS = 1000
+CHASSIS_RADIO_RECONNECT_MS = 5000
 
 CONFIDENCE_THRESHOLD = 0.45
 NMS_THRESHOLD = 0.45
@@ -42,9 +46,13 @@ TEXT_COLOR = (0, 255, 0)
 FPS_COLOR = (255, 255, 0)
 FOCUS_COLOR = (255, 255, 0)
 
-# K1 safety gates. No CAN module is imported or initialized while these are off.
-CAN_ENABLED = False
+# The normal entry point remains read-only until K5 enables supervised motion.
+CAN_ENABLED = True
 GIMBAL_MOTION_ENABLED = False
+GIMBAL_YAW_CAN_ADDRESS = 1
+GIMBAL_PITCH_CAN_ADDRESS = 2
+GIMBAL_YAW_POSITIVE_DIRECTION = "CW"
+GIMBAL_PITCH_POSITIVE_DIRECTION = "UP"
 
 # Reserved for K2. The selected MCP2515 + SN65HVD230 module uses an 8 MHz clock.
 MCP2515_OSC_HZ = 8_000_000
@@ -54,3 +62,10 @@ MCP2515_MOSI_PIN = 16
 MCP2515_MISO_PIN = 17
 MCP2515_CS_PIN = 14
 MCP2515_INT_PIN = 19
+MCP2515_SPI_BAUDRATE = 5_000_000
+MCP2515_SELF_TEST_ROUNDS = 4
+
+# K3 sends only function 0x36 once per address, then returns to listen-only.
+ZDT_DISCOVERY_ENABLED = True
+ZDT_DISCOVERY_ADDRESSES = (1, 2)
+ZDT_DISCOVERY_TIMEOUT_MS = 150
