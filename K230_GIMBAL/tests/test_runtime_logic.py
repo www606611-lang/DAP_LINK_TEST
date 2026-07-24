@@ -662,8 +662,12 @@ class RuntimeLogicTest(unittest.TestCase):
         self.assertEqual(tracker.state, TargetTracker.STATE_TRACKING)
         self.assertEqual(tracker.raw_error_x, 199)
         self.assertEqual(tracker.raw_error_y, 120)
-        self.assertAlmostEqual(tracker.command_yaw_rpm, -10.0)
-        self.assertAlmostEqual(tracker.command_pitch_rpm, -6.0)
+        self.assertAlmostEqual(
+            tracker.command_yaw_rpm, -config.TRACKING_MAX_YAW_RPM
+        )
+        self.assertAlmostEqual(
+            tracker.command_pitch_rpm, -config.TRACKING_MAX_PITCH_RPM
+        )
         self.assertEqual(supervisor.state, GimbalSupervisor.STATE_MOVING)
         self.assertEqual(supervisor.motion_mode, "speed")
         self.assertEqual(
