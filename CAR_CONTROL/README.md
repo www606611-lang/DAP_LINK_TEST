@@ -228,32 +228,33 @@ the latest parsed state is written to `latest_line_status.json`. At idle the
 LCD footer shows the eight active bits, signed error, and `LINE`, `MISS`,
 `CAL`, or `ERR`.
 
-## Reusable K230 vision-link API
+## Reusable chassis-radio shadow API
 
-`drivers/device/k230/k230_vision_link.h` owns the read-only K230 target link.
-UART3 uses PA13 RX and PA14 TX at 115200 baud; the K230 sends ASCII frames in
-this fixed format:
-
-```text
-@valid,cx,cy#
-```
-
-Coordinates are bounded to `0..399` and `0..239`, with center `200/120`.
-`valid=0` means the K230 link is alive but no target is selected; receiving no
-complete frame for 150 ms marks the link offline. The public API is:
+`drivers/device/chassis_radio/chassis_radio_link.h` owns the read-only wireless
+health state. UART3 uses PA13 RX and PA14 TX at 115200 baud to an ESP32-C3
+bridge; both UART and UDP use the bounded binary frame documented in
+`K230_CAN_INTEGRATION_PLAN.md`. The public API is:
 
 ```c
-K230VisionLink_Init(now_ms);
-K230VisionLink_Task(now_ms);
-K230VisionLink_GetSnapshot(&snapshot);
+ChassisRadioLink_Init(now_ms);
+ChassisRadioLink_SetStatusFlags(CHASSIS_RADIO_STATUS_HIGH_Z);
+ChassisRadioLink_Task(now_ms);
+ChassisRadioLink_GetSnapshot(&snapshot);
 ```
 
-The snapshot exposes target validity, center error, frame count and age,
-parser/resync counts, received bytes, and UART overflow. `k230 stat` and CLI
-action `K230Status` expose the same evidence without arming a motor. The LCD
-health row shows K230 online/valid state and the latest center. Competition
-missions may consume the snapshot later; the driver itself never commands
-motion.
+The snapshot exposes ESP32 and K230 health separately, independent sequence
+validation, frame age, CRC/length/version errors, UART overflows, duplicates,
+out-of-order frames, timeouts, and shadow-command count. `k230 stat` and CLI
+action `K230Status` retain their compatibility names but now report this radio
+state. The LCD health row shows ESP32/K230 status and link age. CONTROL and
+EMERGENCY_STOP IDs remain shadow-only until a later supervised owner is
+physically accepted.
+
+The bidirectional shadow path was accepted on production chassis 5 V power on
+2026-07-24. K230 reported `esp=1` and `chassis=1` for 30 seconds while receiving
+289 frames and sending 109 frames with zero CRC, length, duplicate,
+out-of-order, or socket errors. This acceptance does not grant wireless motion
+ownership.
 
 ## Reusable line-tracking API
 

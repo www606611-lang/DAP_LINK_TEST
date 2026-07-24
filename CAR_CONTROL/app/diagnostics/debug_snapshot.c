@@ -3,13 +3,13 @@
 #include "board_button.h"
 #include "board_motor_safe.h"
 #include "car_app.h"
+#include "chassis_radio_link.h"
 #include "control_supervisor.h"
 #include "delay.h"
 #include "encoder_input.h"
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
-#include "k230_vision_link.h"
 #include "line_sensor_bringup.h"
 #include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
@@ -171,12 +171,12 @@ volatile uint32_t g_car_jdy31_config_state;
 volatile uint32_t g_car_jdy31_uart_baud;
 volatile int32_t g_car_jdy31_reported_baud_code;
 volatile bool g_car_jdy31_config_success;
-volatile bool g_car_k230_online;
-volatile bool g_car_k230_target_valid;
-volatile uint32_t g_car_k230_cx;
-volatile uint32_t g_car_k230_cy;
-volatile uint32_t g_car_k230_frame_age_ms;
-volatile uint32_t g_car_k230_parse_error_count;
+volatile bool g_car_radio_online;
+volatile bool g_car_radio_esp32_online;
+volatile bool g_car_radio_k230_online;
+volatile uint32_t g_car_radio_frame_age_ms;
+volatile uint32_t g_car_radio_rx_frame_count;
+volatile uint32_t g_car_radio_parse_error_count;
 
 static int32_t car_debug_round_float(float value);
 
@@ -192,7 +192,7 @@ void CarDebugSnapshot_Update(void)
     line_sensor_snapshot_t line_sensor;
     icm20948_snapshot_t imu;
     jdy31_config_snapshot_t jdy31;
-    k230_vision_snapshot_t k230;
+    chassis_radio_snapshot_t radio;
     car_app_snapshot_t car_app;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
@@ -235,14 +235,15 @@ void CarDebugSnapshot_Update(void)
             jdy31.reported_baud_code;
         g_car_jdy31_config_success = jdy31.success;
     }
-    if (K230VisionLink_GetSnapshot(&k230)) {
-        g_car_k230_online = k230.online;
-        g_car_k230_target_valid = k230.target_valid;
-        g_car_k230_cx = k230.cx;
-        g_car_k230_cy = k230.cy;
-        g_car_k230_frame_age_ms =
-            delay_get_ms() - k230.last_frame_ms;
-        g_car_k230_parse_error_count = k230.parse_error_count;
+    if (ChassisRadioLink_GetSnapshot(&radio)) {
+        g_car_radio_online = radio.online;
+        g_car_radio_esp32_online = radio.esp32_online;
+        g_car_radio_k230_online = radio.k230_online;
+        g_car_radio_frame_age_ms =
+            delay_get_ms() - radio.last_frame_ms;
+        g_car_radio_rx_frame_count = radio.rx_frame_count;
+        g_car_radio_parse_error_count = radio.crc_error_count +
+            radio.length_error_count + radio.version_error_count;
     }
 
     if (WheelSpeedControl_GetSnapshot(&speed)) {
@@ -562,13 +563,13 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->line_sensor_error = g_car_line_sensor_error;
     snapshot->line_sensor_seen = g_car_line_sensor_seen;
     snapshot->line_sensor_ready = g_car_line_sensor_ready;
-    snapshot->k230_online = g_car_k230_online;
-    snapshot->k230_target_valid = g_car_k230_target_valid;
-    snapshot->k230_cx = (uint16_t) g_car_k230_cx;
-    snapshot->k230_cy = (uint16_t) g_car_k230_cy;
-    snapshot->k230_frame_age_ms = g_car_k230_frame_age_ms;
-    snapshot->k230_parse_error_count =
-        g_car_k230_parse_error_count;
+    snapshot->radio_online = g_car_radio_online;
+    snapshot->radio_esp32_online = g_car_radio_esp32_online;
+    snapshot->radio_k230_online = g_car_radio_k230_online;
+    snapshot->radio_frame_age_ms = g_car_radio_frame_age_ms;
+    snapshot->radio_rx_frame_count = g_car_radio_rx_frame_count;
+    snapshot->radio_parse_error_count =
+        g_car_radio_parse_error_count;
     return true;
 }
 

@@ -12,6 +12,7 @@ const IPAddress kAccessPointAddress(192, 168, 4, 1);
 
 constexpr uint16_t kUdpListenPort = 4210;
 constexpr int32_t kAccessPointChannel = 1;
+constexpr wifi_power_t kAccessPointTxPower = WIFI_POWER_8_5dBm;
 constexpr uint32_t kChassisBaud = 115200;
 constexpr int8_t kChassisRxPin = 20;
 constexpr int8_t kChassisTxPin = 21;
@@ -40,6 +41,7 @@ bool uartHelloSent = false;
 bool udpHelloSent = false;
 bool apConfigOk = false;
 bool apStartOk = false;
+bool txPowerOk = false;
 bool udpStartOk = false;
 volatile bool apRestartRequested = false;
 volatile bool apRestartInProgress = false;
@@ -75,6 +77,7 @@ float sampleChipTemperatureC() {
 
 void startAccessPoint() {
     WiFi.mode(WIFI_AP);
+    txPowerOk = WiFi.setTxPower(kAccessPointTxPower);
     apStartOk = WiFi.softAP(kAccessPointSsid, kAccessPointPassword,
                             kAccessPointChannel, false, 4);
     apConfigOk = WiFi.softAPIP() == kAccessPointAddress;
@@ -275,13 +278,16 @@ void printStats(uint32_t nowMs) {
     const auto& chassisStats = uartParser.stats();
     const float chipTemperatureC = sampleChipTemperatureC();
     Serial.printf(
-        "bridge ap=%u cfg=%u udp=%u ip=%s ch=%d sta=%u peer=%u "
+        "bridge ap=%u cfg=%u udp=%u txok=%u txq=%d ip=%s ch=%d "
+        "sta=%u peer=%u "
         "ap_disc=%lu ap_restart=%lu "
         "udp_rx=%lu udp_ok=%lu udp_crc=%lu "
         "uart_tx=%lu bridge_tx=%lu uart_ok=%lu uart_crc=%lu "
         "udp_tx=%lu drop=%lu ms=%lu temp=%.1f tempMax=%.1f tempErr=%lu\n",
         apStartOk ? 1U : 0U, apConfigOk ? 1U : 0U,
-        udpStartOk ? 1U : 0U, WiFi.softAPIP().toString().c_str(),
+        udpStartOk ? 1U : 0U, txPowerOk ? 1U : 0U,
+        static_cast<int>(WiFi.getTxPower()),
+        WiFi.softAPIP().toString().c_str(),
         WiFi.channel(), WiFi.softAPgetStationNum(),
         peerOnline(nowMs) ? 1U : 0U,
         static_cast<unsigned long>(apDisconnectEvents),
@@ -313,10 +319,13 @@ void setup() {
     const float chipTemperatureC = sampleChipTemperatureC();
 
     Serial.printf(
-        "bridge ready ssid=%s ap=%u cfg=%u ip=%s ch=%d udp=%u "
+        "bridge ready ssid=%s ap=%u cfg=%u txok=%u txq=%d ip=%s "
+        "ch=%d udp=%u "
         "uart=%lu rx=%d tx=%d temp=%.1f\n",
         kAccessPointSsid, apStartOk ? 1U : 0U,
-        apConfigOk ? 1U : 0U, WiFi.softAPIP().toString().c_str(),
+        apConfigOk ? 1U : 0U, txPowerOk ? 1U : 0U,
+        static_cast<int>(WiFi.getTxPower()),
+        WiFi.softAPIP().toString().c_str(),
         WiFi.channel(), udpStartOk ? kUdpListenPort : 0U,
         static_cast<unsigned long>(kChassisBaud), kChassisRxPin,
         kChassisTxPin, chipTemperatureC);

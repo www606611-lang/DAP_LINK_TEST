@@ -32,7 +32,8 @@ app/main
   -> drivers/device/icm20948 -> drivers/mcu/i2c0_polling
      -> drivers/utility/imu_attitude_estimator
   -> drivers/device/line_sensor -> drivers/mcu/i2c1_polling
-  -> drivers/device/k230 -> drivers/mcu/vision_uart
+  -> drivers/device/chassis_radio -> drivers/mcu/radio_uart
+     -> drivers/utility/wire_protocol
   -> bsp/board_wheel_drive -> drivers/device/at8236
      -> drivers/mcu/motor_pwm
   -> drivers/device/st7789
@@ -59,17 +60,20 @@ control cascade
   AT8236 dual-channel command layer. The ICM20948 owns register-bank selection,
   sensor setup, calibration, units, and attitude estimates. The line-sensor
   device driver owns the external eight-channel protocol and weighted error.
-  The K230 vision-link driver owns framed target validation, coordinate bounds,
-  link age, resynchronization, and the read-only target snapshot.
+  The chassis-radio link owns ESP32/K230 role health, independent sequence
+  windows, link age, timeout, and shadow-command accounting. It does not own a
+  control mode or call a motor API.
 - `drivers/mcu`: MCU-facing encoder GPIO/interrupt capture, shared TIMG6/TIMG7
   motor PWM output, UART2 interrupt-RX/end-of-transmission-paced TX transport
   for JDY-31, and the polling I2C0/I2C1 transaction layers used by the IMU and
-  line sensor. The independent UART3 PA13/PA14 interrupt-RX ring buffer belongs
-  to the K230 transport and does not share JDY-31 ownership. It also owns
+  line sensor. The independent UART3 PA13/PA14 interrupt-driven RX/TX rings
+  belong to the ESP32-C3 radio transport and do not share JDY-31 ownership. It also owns
   WWDT0 initialization, refresh, fault injection, and the required handoff that
   disables the running application watchdog before entering the resident
   Bootloader. CAN remains future work.
-- `drivers/utility`: hardware-independent helpers and algorithms. The IMU
+- `drivers/utility`: hardware-independent helpers and algorithms. The bounded
+  wireless frame parser owns CRC-16/CCITT-FALSE, length checks, byte resync,
+  and sequence comparison. The IMU
   attitude estimator owns quaternion integration, gravity-vector correction,
   Euler conversion, and relative-yaw tracking; it has no I2C or board access.
 - `app`: scheduling, display, commands, and mode transitions. `car_app` is the
@@ -147,14 +151,18 @@ control cascade
     `MOTION` speed owner for relative-distance plus Heading commands. It is the
     composition point for future route sequencing; standalone outer loops must
     not be started concurrently to create a cascade by accident.
-17. K230 vision link: UART3 PA13/PA14 receives bounded 400 x 240 target frames
-    into a read-only device snapshot. Parser, timeout, resync, and overflow
-    behavior are host-tested; live prediction and sustained frame progress are
-    physically accepted without arming the chassis.
+17. Historical K230 vision link: the former direct UART3 400 x 240 target
+    stream remains a validated baseline in Git history, but is superseded by
+    the ESP32-C3 wireless architecture.
+18. Wireless shadow link: UART3 PA13/PA14 now exchanges bounded binary
+    HELLO/HEARTBEAT/STATUS frames through ESP32-C3. Host tests cover CRC,
+    fragmentation, concatenation, length, resync, independent role sequences,
+    duplicate/out-of-order handling, shadow commands, and timeout. The module
+    has no motion owner; end-to-end WiFi/UART acceptance remains a physical gate.
 
-Host tests under `CAR_CONTROL/tests` cover pure application policies and the
-tuning text codec without linking MCU drivers. They also test the K230 device
-parser against a mock UART transport. Hardware-dependent control and safety
+Host tests under `CAR_CONTROL/tests` cover pure application policies, the
+tuning text codec, wireless framing, and the chassis-radio state machine
+against a mock UART transport. Hardware-dependent control and safety
 paths still require the supervised bench and ground procedures recorded in
 `BRINGUP_LOG.md`.
 

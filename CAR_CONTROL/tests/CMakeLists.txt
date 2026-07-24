@@ -67,14 +67,25 @@ target_include_directories(tuning_codec_test PRIVATE
 
 add_test(NAME tuning_codec COMMAND tuning_codec_test)
 
-add_executable(k230_vision_link_test
-  "${CMAKE_CURRENT_SOURCE_DIR}/k230_vision_link_test.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/k230/k230_vision_link.c"
+add_executable(wire_protocol_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/wire_protocol_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility/wire_protocol.c"
 )
-target_compile_features(k230_vision_link_test PRIVATE c_std_99)
-target_include_directories(k230_vision_link_test PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/k230"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/mcu"
+target_compile_features(wire_protocol_test PRIVATE c_std_99)
+target_include_directories(wire_protocol_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility"
 )
+add_test(NAME wire_protocol COMMAND wire_protocol_test)
 
-add_test(NAME k230_vision_link COMMAND k230_vision_link_test)
+add_executable(chassis_radio_link_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/chassis_radio_link_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/chassis_radio/chassis_radio_link.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility/wire_protocol.c"
+)
+target_compile_features(chassis_radio_link_test PRIVATE c_std_99)
+target_include_directories(chassis_radio_link_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/chassis_radio"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/mcu"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility"
+)
+add_test(NAME chassis_radio_link COMMAND chassis_radio_link_test)

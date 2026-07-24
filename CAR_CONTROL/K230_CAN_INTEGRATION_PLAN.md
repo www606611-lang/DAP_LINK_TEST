@@ -1,8 +1,9 @@
 # K230 Gimbal And Chassis Integration Plan
 
-Status: Gate 0 and Gate 1 of the chassis vision link and K0/K1 of the independent
-K230 gimbal project are complete. CAN and all accessory-motor output remain
-disabled until the MCP2515 hardware is installed and K2 begins.
+Status: Gate 0/Gate 1, K0/K1, and wireless W0/W1/W2 are complete. The W3
+end-to-end data path is validated; its independent endpoint-reset matrix is
+still pending. CAN and all accessory-motor output remain disabled until the
+MCP2515 hardware is installed and K2 begins.
 
 ## 1. Final Ownership
 
@@ -18,15 +19,16 @@ K230 camera board
 Tianmengxing MSPM0 board
   - chassis speed/position/Yaw/Heading/line loops
   - chassis odometry and competition mission execution
-  - optional high-level command/status exchange when a mission requires it
+  - high-level command/status exchange through the ESP32-C3 wireless bridge
 ```
 
 The K230 vision and gimbal stack starts and runs without Tianmengxing, UART,
-the chassis tuner, or any chassis control loop. A future competition mission
-may exchange high-level commands and status through UART, but it does not
-exchange individual gimbal step pulses, raw CAN frames, or continuous vision
-coordinates by default. This keeps rotating gimbal wiring local to the K230
-and preserves the validated chassis control timing.
+the chassis tuner, or any chassis control loop. When a competition mission
+needs chassis motion, K230 exchanges framed high-level commands and status over
+WiFi with the ESP32-C3 bridge on the chassis. It does not exchange individual
+gimbal step pulses, raw CAN frames, direct PWM values, or continuous vision
+coordinates. This keeps rotating gimbal wiring local to K230 and preserves the
+validated chassis control timing.
 
 The former, unimplemented plan to connect the two ZDT motors to Tianmengxing
 CANFD0 PA26/PA27 is superseded by this document. PA26/PA27 remain unused by the
@@ -35,28 +37,41 @@ vision link is still part of the final system.
 
 ## 2. Confirmed Interfaces
 
-### Optional K230 to Tianmengxing link
-
-| Function | K230 | Tianmengxing | Settings |
-| --- | --- | --- | --- |
-| Vision/status TX | UART2 GPIO11 TX | U9 RX / UART3 PA13 | 115200 8N1 |
-| Reserved command RX | UART2 GPIO12 RX | U9 TX / UART3 PA14 | 115200 8N1 |
-| Reference | Common GND | U9 GL | 3.3 V logic |
-
-This interface is disabled in the independent K230 build. The previously
-validated compatibility frame remains available only as a legacy diagnostic
-adapter:
+### K230 to Tianmengxing wireless link
 
 ```text
-@valid,cx,cy#
-coordinates: 400 x 240
-center: 200,120
-example: @1,203,117#
-lost target while online: @0,last_cx,last_cy#
-Tianmengxing offline timeout: 150 ms
+K230 built-in WiFi / CanMV network.WLAN (STA)
+    <-> WPA2 + UDP
+ESP32-C3 SuperMini (SoftAP 192.168.4.1)
+    <-> UART 115200 8N1
+Tianmengxing UART3 PA13 RX / PA14 TX
 ```
 
-`valid=0` is an online no-target frame. It is not an offline indication.
+Bottom-side wiring:
+
+| ESP32-C3 | Tianmengxing | Function |
+| --- | --- | --- |
+| GPIO21 TX | U9 RX / PA13 | ESP32 to chassis |
+| GPIO20 RX | U9 TX / PA14 | Chassis to ESP32 |
+| GND | U9 GL / board GND | Common 3.3 V logic reference |
+| 5V | Board 5 V rail | External module power; not U9 NC |
+
+ESP32-C3 external 5 V and USB power are mutually exclusive. The chassis 5 V
+lead is disconnected before USB programming. JDY-31 UART2 PB17/PA22 remains
+unchanged for tuning and wireless application updates.
+
+Both UDP and UART carry one bounded binary format:
+
+```text
+0xA5 0x5A | version | type | sequence_le16 | length | payload | crc16_le
+version: 1
+maximum payload: 64 bytes
+CRC: CRC-16/CCITT-FALSE over version through payload
+```
+
+Initial shadow messages are `HELLO`, `HEARTBEAT`, and `STATUS`. Command and
+emergency-stop message IDs are reserved but have no motion ownership until the
+separate supervised-motion gate is physically accepted.
 
 ### K230 to MCP2515 module
 
@@ -99,7 +114,8 @@ K230_GIMBAL/
   main.py             only entry point and startup boundary
   config.py           validated pins, dimensions, model and feature gates
   vision.py           sensor, AI2D, KPU, postprocess, display and cleanup
-  chassis_link.py     disabled legacy UART diagnostic adapter
+  wire_protocol.py    shared bounded wireless framing and CRC
+  chassis_radio.py    nonblocking WLAN STA and UDP state
   mcp2515.py          added in K2 with the tested controller driver
   zdt_motor.py        added in K3 after read-only protocol evidence
   gimbal_control.py   added in K4 after motor units and limits are known
@@ -112,8 +128,8 @@ backed-up device entry remain available for rollback.
 
 ## 4. Runtime Safety Contract
 
-- `config.CHASSIS_LINK_ENABLED` defaults to `False`; K230 startup does not
-  initialize UART2 or require the Tianmengxing board.
+- `config.CHASSIS_RADIO_ENABLED` defaults to `False` until the wireless shadow
+  link is accepted. K230 vision and gimbal startup never require the chassis.
 - `config.CAN_ENABLED` and `config.GIMBAL_MOTION_ENABLED` default to `False`.
 - K0/K1 do not import or initialize SPI, MCP2515, or any motor object.
 - Starting, stopping, or synchronizing a K230 script never creates motion.
@@ -259,14 +275,92 @@ and long-duration thermal behavior pass without oscillation or limit impact.
 ### K6: competition integration
 
 - Define the actual task state machine after the competition behavior is known.
-- Enable the optional Tianmengxing UART only if that task needs high-level
-  chassis/gimbal command or status exchange.
+- Exchange high-level chassis commands and status through the accepted
+  K230/ESP32-C3 wireless API.
 - Compose existing chassis Motion/Heading/Line APIs without changing validated
   inner loops.
 
 Acceptance criteria are written from the real task before K6 begins.
 
-## 7. Hardware Checks Before K3/K4
+## 7. K230-Chassis Wireless Gates
+
+### W0: protocol and ESP32-C3 bridge build
+
+Status: complete 2026-07-23; ESP32-C3 firmware installed.
+
+- Add host-tested framing, CRC, sequence, length, and resynchronization logic.
+- Build an ESP32-C3 SoftAP/UDP/UART bridge with PlatformIO.
+- Keep all command messages in shadow mode.
+
+Acceptance: both firmware projects build; malformed input is rejected; no
+motor API is referenced by the wireless modules.
+
+Evidence: K230 has 11 passing host tests, ESP32-C3 has five passing protocol
+tests and a successful `-Os` PlatformIO build, and Tianmengxing has seven
+passing host tests plus successful GCC/TIClang builds. ESP32-C3 uses 738,980
+bytes Flash and 39,716 bytes RAM in the current Arduino build.
+
+### W1: K230 to ESP32-C3 WiFi heartbeat
+
+Status: accepted 2026-07-23.
+
+- K230 joins the ESP32-C3 SoftAP through nonblocking `network.WLAN` state.
+- Exchange HELLO and HEARTBEAT datagrams without affecting the accepted vision
+  preview, focus, or sustained frame rate.
+
+Acceptance: sequence advances, packet age remains bounded, reconnect succeeds,
+and K230 vision remains physically normal.
+
+Evidence: a 90-second run included an ESP32 restart. K230 returned to
+`RADIO ONLINE` in about 8.5 seconds, received 318 frames, and sent 299 frames
+with zero socket, CRC, duplicate, or ordering errors.
+
+### W2: ESP32-C3 to Tianmengxing UART3 shadow link
+
+Status: accepted on production chassis power 2026-07-24.
+
+- Replace the retired direct K230 UART3 parser with interrupt-driven bidirectional
+  wireless transport on PA13/PA14.
+- Exchange HELLO, HEARTBEAT, and chassis STATUS only.
+- Expose link age and parser counters while retaining `READY / HIGH-Z`.
+
+Acceptance: fragmented, concatenated, malformed, overflow, CRC, duplicate,
+out-of-order, and timeout tests pass; live traffic never arms a motor.
+
+Evidence: the 78,776-byte Tianmengxing image was installed wirelessly in 15.4
+seconds and retained `READY / HIGH-Z`. Live ESP32 traffic advanced both UART3
+directions with zero parser, CRC, length, overflow, or transmit-drop errors.
+The final K230 run reported `esp=1` and `chassis=1` throughout.
+
+### W3: end-to-end shadow system
+
+Status: sustained bidirectional path accepted 2026-07-24; independent K230,
+ESP32-C3, and Tianmengxing reset/recovery matrix pending.
+
+- Validate K230 -> WiFi -> ESP32 -> UART3 -> Tianmengxing and the reverse path.
+- Test resets and reconnects independently at all three endpoints.
+
+Acceptance: bidirectional counters advance for a sustained run, command frames
+remain shadow-only, and chassis timing/watchdog metrics do not regress.
+
+Evidence so far: under chassis 5 V power, K230 reached end-to-end online state
+in about one second and stayed online for 30 seconds. It received 289 frames
+and sent 109 frames with zero CRC, length, duplicate, out-of-order, or socket
+errors. The SoftAP remained visible in all 11 scans at about 87% signal.
+
+### W4: supervised wireless chassis owner
+
+- Add one exclusive wireless outer-loop owner after the real command semantics
+  are defined.
+- Require explicit arm, monotonically advancing command sequence, a bounded
+  command lease, board-button stop, and automatic stop on either link timeout.
+- Submit targets through the validated speed/motion APIs; never call PWM or the
+  motor device driver directly.
+
+Acceptance: low-speed suspended-wheel and ground tests stop on command, timeout,
+WiFi loss, ESP32 reset, K230 reset, and every board button.
+
+## 8. Hardware Checks Before K3/K4
 
 - Confirm K230, MCP2515 module and both ZDT devices share the required reference.
 - With power removed, measure CANH-to-CANL termination; expect about 60 ohms when

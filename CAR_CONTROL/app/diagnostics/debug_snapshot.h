@@ -63,12 +63,12 @@ typedef struct {
     int32_t line_sensor_error;
     bool line_sensor_seen;
     bool line_sensor_ready;
-    bool k230_online;
-    bool k230_target_valid;
-    uint16_t k230_cx;
-    uint16_t k230_cy;
-    uint32_t k230_frame_age_ms;
-    uint32_t k230_parse_error_count;
+    bool radio_online;
+    bool radio_esp32_online;
+    bool radio_k230_online;
+    uint32_t radio_frame_age_ms;
+    uint32_t radio_rx_frame_count;
+    uint32_t radio_parse_error_count;
 } car_debug_display_snapshot_t;
 
 void CarDebugSnapshot_Update(void);

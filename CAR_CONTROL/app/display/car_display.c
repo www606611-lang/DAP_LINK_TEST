@@ -146,7 +146,7 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     key_color = (debug.pb21_pressed || debug.pb4_pressed ||
         debug.pb5_pressed) ? ST7789_COLOR_GREEN : ST7789_COLOR_WHITE;
     health_color = (debug.imu_ready && debug.imu_attitude_valid &&
-        debug.line_sensor_ready && debug.k230_online) ?
+        debug.line_sensor_ready && debug.radio_online) ?
         ST7789_COLOR_GREEN :
         ST7789_COLOR_YELLOW;
     uptime_s = now_ms / 1000U;
@@ -303,14 +303,13 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
         case CAR_DISPLAY_PHASE_HEALTH:
             car_display_show_row(128U, health_color,
                 ST7789_COLOR_BLACK,
-                "IMU %-3s LINE %-3s K230 %-3s V%u X%3u Y%3u",
+                "IMU %-3s LINE %-3s ESP %-3s K %-3s A%4lu",
                 (debug.imu_ready && debug.imu_attitude_valid) ?
                     "OK" : "BAD",
                 debug.line_sensor_ready ? "OK" : "BAD",
-                debug.k230_online ? "ON" : "OFF",
-                debug.k230_target_valid ? 1U : 0U,
-                (unsigned int) debug.k230_cx,
-                (unsigned int) debug.k230_cy);
+                debug.radio_esp32_online ? "ON" : "OFF",
+                debug.radio_k230_online ? "ON" : "OFF",
+                (unsigned long) debug.radio_frame_age_ms);
             break;
 
         case CAR_DISPLAY_PHASE_FOOTER:

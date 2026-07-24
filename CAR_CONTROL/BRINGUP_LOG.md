@@ -1291,3 +1291,29 @@ ten points over approximately 49 seconds: frames advanced monotonically from
 26720 to 27591 at about 19.4 FPS, frame age remained below 150 ms, and status
 remained `READY / HIGH-Z`. The operator confirmed that physical prediction was
 normal. This completes Gate 1; Gate 2 is the read-only MCAN transport.
+
+## 2026-07-24: K230-ESP32-Tianmengxing shadow-link acceptance
+
+The production inter-processor path is now physically installed as K230 WiFi
+STA to ESP32-C3 SoftAP/UDP to Tianmengxing UART3 PA13/PA14. ESP32-C3 GPIO21 is
+TX to PA13 RX, GPIO20 is RX from PA14 TX, and both boards share ground. USB and
+the chassis 5 V lead remain mutually exclusive.
+
+Bench diagnosis showed that placing the ESP32-C3 ceramic antenna against the
+carrier PCB or wiring could suppress the SoftAP even while its API reported
+`ap=1`, `cfg=1`, and `udp=1`. With the antenna end extending 2-3 cm beyond the
+carrier edge, `CAR-K230` remained visible in all 11 final scans at about 87%
+signal. SoftAP transmit power is fixed at 8.5 dBm for this short link; the
+release build uses 12.1% RAM and 56.7% application flash.
+
+The final run used only chassis 5 V for ESP32-C3 power. K230 entered
+`RADIO ONLINE` and `e2e=1 / esp=1 / chassis=1` in about one second, then stayed
+online for 30 seconds. Its counters reached 289 received and 109 transmitted
+frames with zero CRC, length, duplicate, out-of-order, or socket errors. The
+ESP bridge independently showed live traffic in both UDP/UART directions with
+zero CRC errors. No motion command was sent; wireless command IDs remain
+shadow-only and the chassis retained its existing `HIGH-Z` startup contract.
+
+This accepts W1 and W2 plus the sustained W3 data path. W3 independent endpoint
+reset/recovery coverage and W4 supervised wireless motion ownership remain
+future gates.

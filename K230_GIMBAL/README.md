@@ -169,7 +169,10 @@ as validated reusable infrastructure. Competition work belongs in a separate
 mission layer. It may submit high-level gimbal or chassis goals, but it must not
 rewrite the accepted tracker merely to compensate for mission behavior.
 
-The K230-to-ESP32 WiFi/UDP heartbeat gate is accepted. Remaining work is the
-ESP32-to-Tianmengxing UART3 shadow gate, followed by the real competition
-mission state machine and high-level chassis commands. Those items do not block
-the independent gimbal baseline documented here.
+The K230-to-ESP32 WiFi/UDP heartbeat gate and the bidirectional
+ESP32-to-Tianmengxing UART3 shadow gate are accepted. The production-power
+end-to-end run stayed online for 30 seconds with `esp=1`, `chassis=1`, 289
+received frames, 109 transmitted frames, and zero protocol/socket errors.
+Independent endpoint-reset coverage and the later supervised chassis owner
+remain separate gates. They do not block the independent gimbal baseline
+documented here.

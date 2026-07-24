@@ -32,7 +32,7 @@ void BoardStartup_Init(void)
     SYSCFG_DL_I2C_0_init();
     SYSCFG_DL_I2C_1_init();
     SYSCFG_DL_BLUETOOTH_UART_init();
-    SYSCFG_DL_K230_UART_init();
+    SYSCFG_DL_CHASSIS_RADIO_UART_init();
     SYSCFG_DL_SPI_LCD_init();
     SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
