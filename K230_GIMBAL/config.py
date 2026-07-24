@@ -33,6 +33,7 @@ CHASSIS_RADIO_HEARTBEAT_MS = 250
 CHASSIS_RADIO_HELLO_MS = 1000
 CHASSIS_RADIO_OFFLINE_MS = 1000
 CHASSIS_RADIO_RECONNECT_MS = 5000
+CHASSIS_RADIO_PEER_RECOVER_MS = 5000
 
 # Keep weak edge detections for the locked-target hysteresis below. A new
 # target still needs the higher acquire confidence, so this does not make the

@@ -42,12 +42,14 @@ class ChassisRadio:
         self.last_rx_ms = 0
         self.last_tx_ms = 0
         self.last_connect_attempt_ms = 0
+        self.peer_wait_since_ms = None
         self.rx_frame_count = 0
         self.tx_frame_count = 0
         self.duplicate_count = 0
         self.out_of_order_count = 0
         self.unsupported_count = 0
         self.socket_error_count = 0
+        self.recovery_count = 0
 
     def open(self, now_ms):
         if not NETWORK_RUNTIME:
@@ -75,7 +77,7 @@ class ChassisRadio:
             return
 
         if self.sock is None:
-            self._open_socket()
+            self._open_socket(now_ms)
             if self.sock is None:
                 return
             self.state = self.STATE_PEER_WAIT
@@ -85,6 +87,15 @@ class ChassisRadio:
         self.state = (
             self.STATE_ONLINE if bridge_online else self.STATE_PEER_WAIT
         )
+        if bridge_online:
+            self.peer_wait_since_ms = None
+        elif self.peer_wait_since_ms is None:
+            self.peer_wait_since_ms = now_ms
+        elif _elapsed(now_ms, self.peer_wait_since_ms) >= (
+            config.CHASSIS_RADIO_PEER_RECOVER_MS
+        ):
+            self._recover_wifi(now_ms)
+            return
 
         interval = (
             config.CHASSIS_RADIO_HEARTBEAT_MS
@@ -103,7 +114,6 @@ class ChassisRadio:
         if self.wlan is not None:
             try:
                 self.wlan.disconnect()
-                self.wlan.active(False)
             except Exception:
                 pass
             self.wlan = None
@@ -136,6 +146,7 @@ class ChassisRadio:
             "crc_errors": self.parser.crc_error_count,
             "length_errors": self.parser.length_error_count,
             "socket_errors": self.socket_error_count,
+            "recoveries": self.recovery_count,
         }
 
     def _connect(self, now_ms):
@@ -148,14 +159,28 @@ class ChassisRadio:
         except Exception:
             self.socket_error_count += 1
 
-    def _open_socket(self):
+    def _open_socket(self, now_ms):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind(("0.0.0.0", config.CHASSIS_RADIO_LOCAL_PORT))
-            self.sock.settimeout(0.001)
+            self.sock.setblocking(False)
+            self.peer_wait_since_ms = now_ms
         except Exception:
             self.socket_error_count += 1
             self._close_socket()
+
+    def _recover_wifi(self, now_ms):
+        self._close_socket()
+        self.peer_wait_since_ms = None
+        self.last_rx_sequence[ROLE_ESP32] = None
+        self.last_rx_by_role_ms[ROLE_ESP32] = 0
+        self.state = self.STATE_WIFI_WAIT
+        self.recovery_count += 1
+        try:
+            self.wlan.disconnect()
+        except Exception:
+            self.socket_error_count += 1
+        self._connect(now_ms)
 
     def _close_socket(self):
         if self.sock is not None:

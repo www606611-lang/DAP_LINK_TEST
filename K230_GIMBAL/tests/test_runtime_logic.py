@@ -66,8 +66,18 @@ from zdt_motor import (
 
 
 class FakeWlan:
+    def __init__(self):
+        self.disconnect_count = 0
+        self.connect_calls = []
+
     def isconnected(self):
         return True
+
+    def disconnect(self):
+        self.disconnect_count += 1
+
+    def connect(self, ssid, password):
+        self.connect_calls.append((ssid, password))
 
 
 class FakeSocket:
@@ -90,12 +100,16 @@ class FakeRuntimeSocket(FakeSocket):
         super().__init__()
         self.bound_address = None
         self.timeout = None
+        self.blocking = None
 
     def bind(self, address):
         self.bound_address = address
 
     def settimeout(self, timeout):
         self.timeout = timeout
+
+    def setblocking(self, blocking):
+        self.blocking = blocking
 
     def close(self):
         pass
@@ -1195,7 +1209,7 @@ class RuntimeLogicTest(unittest.TestCase):
         chassis_radio.socket = fake_socket_module
         try:
             radio = ChassisRadio()
-            radio._open_socket()
+            radio._open_socket(123)
         finally:
             chassis_radio.socket = original_socket_module
 
@@ -1204,7 +1218,27 @@ class RuntimeLogicTest(unittest.TestCase):
             radio.sock.bound_address,
             ("0.0.0.0", config.CHASSIS_RADIO_LOCAL_PORT),
         )
-        self.assertEqual(radio.sock.timeout, 0.001)
+        self.assertFalse(radio.sock.blocking)
+        self.assertIsNone(radio.sock.timeout)
+        self.assertEqual(radio.peer_wait_since_ms, 123)
+
+    def test_radio_recovers_when_wifi_status_is_stale(self):
+        radio = ChassisRadio()
+        radio.wlan = FakeWlan()
+        radio.sock = FakeSocket()
+        radio.peer_wait_since_ms = 100
+        now_ms = 100 + config.CHASSIS_RADIO_PEER_RECOVER_MS
+
+        radio.task(now_ms)
+
+        self.assertEqual(radio.state, ChassisRadio.STATE_WIFI_WAIT)
+        self.assertIsNone(radio.sock)
+        self.assertEqual(radio.recovery_count, 1)
+        self.assertEqual(radio.wlan.disconnect_count, 1)
+        self.assertEqual(
+            radio.wlan.connect_calls,
+            [(config.CHASSIS_WIFI_SSID, config.CHASSIS_WIFI_PASSWORD)],
+        )
 
     def test_letterbox_matches_accepted_pipeline(self):
         self.assertEqual(

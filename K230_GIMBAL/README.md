@@ -116,6 +116,9 @@ overshoot rather than materially reduce latency.
   motion. A repeated failure stops both axes and latches a fault.
 - Feedback, voltage, motor flags, and command timing are polled with bounded
   timeouts.
+- Chassis UDP receive is nonblocking. If ESP32 heartbeats remain absent for five
+  seconds while CanMV still reports WiFi connected, the radio state machine
+  forces one WLAN reconnect instead of remaining in a stale `RADIO WAIT` state.
 - IDE stop, script cleanup, target loss, lease expiry, and faults all return the
   gimbal to a stopped state.
 - `CHASSIS_RADIO_ENABLED` remains `False`; the gimbal does not depend on the
@@ -148,7 +151,7 @@ red for a fault.
   Pitch response is normally slower and may exceed 100 ms.
 - The final post-deployment observation completed hundreds of tracking commands
   with zero CAN controller errors and zero timeouts.
-- All 54 host tests pass.
+- All 55 host tests pass.
 - Every device runtime file and `/sdcard/main.py` passed SHA-256 readback
   verification after installation.
 
@@ -166,7 +169,7 @@ as validated reusable infrastructure. Competition work belongs in a separate
 mission layer. It may submit high-level gimbal or chassis goals, but it must not
 rewrite the accepted tracker merely to compensate for mission behavior.
 
-Remaining work is competition integration: define the real mission state
-machine, accept the K230-to-ESP32-to-Tianmengxing wireless link, and compose
-high-level chassis commands. Those items do not block the independent gimbal
-baseline documented here.
+The K230-to-ESP32 WiFi/UDP heartbeat gate is accepted. Remaining work is the
+ESP32-to-Tianmengxing UART3 shadow gate, followed by the real competition
+mission state machine and high-level chassis commands. Those items do not block
+the independent gimbal baseline documented here.
