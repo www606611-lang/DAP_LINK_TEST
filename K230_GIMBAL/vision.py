@@ -40,6 +40,13 @@ def clamp(value, low, high):
     return value
 
 
+def ticks_diff(now_ms, then_ms):
+    runtime_ticks_diff = getattr(time, "ticks_diff", None)
+    if runtime_ticks_diff is not None:
+        return runtime_ticks_diff(now_ms, then_ms)
+    return int(now_ms) - int(then_ms)
+
+
 def print_exception(exc):
     printer = getattr(sys, "print_exception", None)
     if printer:
@@ -192,6 +199,97 @@ def select_target(detections):
     return map_target_center(center_x, center_y)
 
 
+class TargetSelector:
+    """Keep one detection through short confidence drops near image edges."""
+
+    def __init__(
+        self,
+        acquire_confidence,
+        hold_confidence,
+        max_match_distance_px,
+        forget_ms,
+    ):
+        self.acquire_confidence = float(acquire_confidence)
+        self.hold_confidence = float(hold_confidence)
+        self.max_match_distance_sq = float(max_match_distance_px) ** 2
+        self.forget_ms = int(forget_ms)
+        if not 0.0 <= self.hold_confidence <= self.acquire_confidence <= 1.0:
+            raise ValueError("invalid target confidence hysteresis")
+        if self.max_match_distance_sq <= 0.0 or self.forget_ms <= 0:
+            raise ValueError("invalid target continuity limits")
+        self.last_center = None
+        self.last_class_id = None
+        self.last_seen_ms = None
+
+    def select(self, detections, now_ms):
+        now_ms = int(now_ms)
+        if (
+            self.last_seen_ms is not None
+            and ticks_diff(now_ms, self.last_seen_ms) >= self.forget_ms
+        ):
+            self.reset()
+
+        selected = None
+        if self.last_center is not None:
+            selected = self._nearest_held_detection(detections)
+            if selected is None:
+                return None
+        else:
+            selected = self._highest_confidence_detection(
+                detections, self.acquire_confidence
+            )
+        if selected is None:
+            return None
+
+        center_x, center_y = self._center(selected)
+        self.last_center = (center_x, center_y)
+        self.last_class_id = int(selected[5])
+        self.last_seen_ms = now_ms
+        return map_target_center(center_x, center_y)
+
+    def reset(self):
+        self.last_center = None
+        self.last_class_id = None
+        self.last_seen_ms = None
+
+    def _nearest_held_detection(self, detections):
+        best = None
+        best_distance_sq = None
+        for detection in detections:
+            if (
+                float(detection[4]) < self.hold_confidence
+                or int(detection[5]) != self.last_class_id
+            ):
+                continue
+            center_x, center_y = self._center(detection)
+            dx = center_x - self.last_center[0]
+            dy = center_y - self.last_center[1]
+            distance_sq = dx * dx + dy * dy
+            if distance_sq > self.max_match_distance_sq:
+                continue
+            if best is None or distance_sq < best_distance_sq:
+                best = detection
+                best_distance_sq = distance_sq
+        return best
+
+    @staticmethod
+    def _highest_confidence_detection(detections, minimum_confidence):
+        best = None
+        for detection in detections:
+            if float(detection[4]) < minimum_confidence:
+                continue
+            if best is None or detection[4] > best[4]:
+                best = detection
+        return best
+
+    @staticmethod
+    def _center(detection):
+        return (
+            (int(detection[0]) + int(detection[2])) // 2,
+            (int(detection[1]) + int(detection[3])) // 2,
+        )
+
+
 def postprocess(results, labels, ratio, pad_top, pad_left):
     output_data = results[0][0].transpose()
     boxes = output_data[:, 0:4]
@@ -202,7 +300,7 @@ def postprocess(results, labels, ratio, pad_top, pad_left):
     detections = []
     for index in range(len(boxes)):
         score = scores[index]
-        if score <= config.CONFIDENCE_THRESHOLD:
+        if score < config.CONFIDENCE_THRESHOLD:
             continue
 
         x, y, width, height = (
@@ -245,6 +343,7 @@ def draw_detections(
     focus_status,
     radio_status=None,
     can_status=None,
+    tracking_status=None,
 ):
     osd_image.clear()
     osd_image.draw_string_advanced(
@@ -253,15 +352,25 @@ def draw_detections(
     osd_image.draw_string_advanced(
         8, 34, 22, focus_status, color=config.FOCUS_COLOR
     )
-    if radio_status is not None:
+    status_y = 60
+    for status in (radio_status, can_status, tracking_status):
+        if status is None:
+            continue
         osd_image.draw_string_advanced(
-            8, 60, 20, radio_status, color=config.FOCUS_COLOR
+            8, status_y, 20, status, color=config.FOCUS_COLOR
         )
-    if can_status is not None:
-        can_y = 84 if radio_status is not None else 60
-        osd_image.draw_string_advanced(
-            8, can_y, 20, can_status, color=config.FOCUS_COLOR
-        )
+        status_y += 24
+
+    center_x = config.DISPLAY_WIDTH // 2
+    center_y = config.DISPLAY_HEIGHT // 2
+    osd_image.draw_rectangle(
+        center_x - 10,
+        center_y - 10,
+        20,
+        20,
+        color=config.FOCUS_COLOR,
+        thickness=2,
+    )
 
     for detection in detections:
         x1, y1, x2, y2 = [int(value) for value in detection[:4]]
@@ -305,6 +414,9 @@ def run():
 
         radio = ChassisRadio()
     can_gate = None
+    tracker = None
+    if config.GIMBAL_MOTION_ENABLED and not config.CAN_ENABLED:
+        raise RuntimeError("gimbal motion requires CAN")
     if config.CAN_ENABLED:
         from mcp2515 import MCP2515RuntimeGate
 
@@ -321,6 +433,12 @@ def run():
     last_cx = config.TARGET_COORD_WIDTH // 2
     last_cy = config.TARGET_COORD_HEIGHT // 2
     last_target_valid = False
+    target_selector = TargetSelector(
+        config.TARGET_ACQUIRE_CONFIDENCE,
+        config.TARGET_HOLD_CONFIDENCE,
+        config.TARGET_MATCH_MAX_DISTANCE_PX,
+        config.TARGET_FORGET_MS,
+    )
 
     try:
         sensor = create_sensor()
@@ -417,13 +535,63 @@ def run():
         if radio is not None:
             radio.open(last_status_ms)
         if can_gate is not None:
-            can_gate.start()
+            if not can_gate.start():
+                raise RuntimeError("CAN gate failed: %s" % can_gate.last_error)
+            if config.GIMBAL_MOTION_ENABLED:
+                from gimbal_control import GimbalSupervisor, TargetTracker
+
+                controller = can_gate.activate_normal()
+                supervisor = GimbalSupervisor(
+                    controller,
+                    config.GIMBAL_YAW_CAN_ADDRESS,
+                    config.GIMBAL_PITCH_CAN_ADDRESS,
+                    config.GIMBAL_YAW_SESSION_MIN_DEG,
+                    config.GIMBAL_YAW_SESSION_MAX_DEG,
+                    config.GIMBAL_PITCH_SESSION_MIN_DEG,
+                    config.GIMBAL_PITCH_SESSION_MAX_DEG,
+                    config.GIMBAL_YAW_MAX_RPM,
+                    config.GIMBAL_PITCH_MAX_RPM,
+                    config.GIMBAL_COMMAND_LEASE_MS,
+                    config.GIMBAL_FEEDBACK_POLL_MS,
+                    config.GIMBAL_VOLTAGE_POLL_MS,
+                    config.GIMBAL_POSITION_TOLERANCE_DEG,
+                    yaw_origin_deg=config.GIMBAL_YAW_CENTER_DEG,
+                    pitch_origin_deg=config.GIMBAL_PITCH_CENTER_DEG,
+                    yaw_continuous=config.GIMBAL_YAW_CONTINUOUS,
+                    pitch_continuous=config.GIMBAL_PITCH_CONTINUOUS,
+                )
+                tracker = TargetTracker(
+                    supervisor,
+                    config.TARGET_COORD_WIDTH,
+                    config.TARGET_COORD_HEIGHT,
+                    config.TRACKING_DEADBAND_X,
+                    config.TRACKING_DEADBAND_Y,
+                    config.TRACKING_DEADBAND_HYSTERESIS_X,
+                    config.TRACKING_DEADBAND_HYSTERESIS_Y,
+                    config.TRACKING_YAW_RPM_PER_PIXEL,
+                    config.TRACKING_PITCH_RPM_PER_PIXEL,
+                    config.TRACKING_FILTER_ALPHA,
+                    config.TRACKING_UPDATE_MS,
+                    config.TRACKING_MISSING_STOP_MS,
+                    config.TRACKING_LOST_TIMEOUT_MS,
+                    config.TRACKING_MIN_YAW_RPM,
+                    config.TRACKING_MIN_PITCH_RPM,
+                    config.TRACKING_MAX_YAW_RPM,
+                    config.TRACKING_MAX_PITCH_RPM,
+                    config.TRACKING_YAW_ACCELERATION_RPM_S,
+                    config.TRACKING_PITCH_ACCELERATION,
+                    config.TRACKING_SPEED_CHANGE_RPM,
+                    config.TRACKING_COMMAND_REFRESH_MS,
+                    config.TRACKING_COMMAND_LEASE_MS,
+                )
+                print("tracker arm:", tracker.start(time.ticks_ms()))
         print("vision build:", config.BUILD_ID)
 
         while True:
             fps.tick()
             os.exitpoint()
             frame_count += 1
+            frame_started_ms = time.ticks_ms()
 
             frame = sensor.snapshot(chn=CAM_CHN_ID_1)
             ai2d_input_tensor = nn.from_numpy(frame.to_numpy_ref())
@@ -441,7 +609,11 @@ def run():
             del results
             del ai2d_input_tensor
 
-            target = select_target(detections)
+            now_ms = time.ticks_ms()
+            vision_latency_ms = max(
+                0, time.ticks_diff(now_ms, frame_started_ms)
+            )
+            target = target_selector.select(detections, now_ms)
             if target is None:
                 last_target_valid = False
             else:
@@ -449,14 +621,24 @@ def run():
                 last_target_valid = True
 
             fps_value = fps.fps()
-            now_ms = time.ticks_ms()
+            tracking_status = None
+            if tracker is not None:
+                tracker.task(target, now_ms)
+                tracking_status = "%s ex=%d ey=%d y=%.1f p=%.1f" % (
+                    tracker.state_text(),
+                    tracker.raw_error_x,
+                    tracker.raw_error_y,
+                    tracker.command_yaw_rpm,
+                    tracker.command_pitch_rpm,
+                )
             radio_status = None
             if radio is not None:
                 radio.task(now_ms)
                 radio_status = radio.state_text()
             can_status = None
             if can_gate is not None:
-                can_gate.task()
+                if tracker is None:
+                    can_gate.task()
                 can_status = can_gate.state_text()
             draw_detections(
                 osd_image,
@@ -466,24 +648,64 @@ def run():
                 focus_status,
                 radio_status,
                 can_status,
+                tracking_status,
             )
             Display.show_image(osd_image)
+            frame_done_ms = time.ticks_ms()
+            frame_latency_ms = max(
+                0, time.ticks_diff(frame_done_ms, frame_started_ms)
+            )
 
-            if time.ticks_diff(now_ms, last_status_ms) >= config.STATUS_PRINT_MS:
+            if time.ticks_diff(frame_done_ms, last_status_ms) >= config.STATUS_PRINT_MS:
+                can_snapshot = (
+                    can_gate.snapshot() if can_gate is not None else {}
+                )
+                tracker_snapshot = (
+                    tracker.snapshot(frame_done_ms)
+                    if tracker is not None else {}
+                )
+                supervisor_snapshot = tracker_snapshot.get("supervisor", {})
+                tracker_timing = tracker_snapshot.get("timing", {})
+                supervisor_timing = supervisor_snapshot.get("timing", {})
+                motion_timing = supervisor_timing.get(
+                    "motion_response_ms", {}
+                )
                 print(
-                    "fps=%.2f boxes=%d valid=%d cx=%d cy=%d %s" %
+                    "PERF fps=%.2f frame_ms=%d vision_ms=%d "
+                    "control_ms=%d can_ms=%d motion_y_ms=%s "
+                    "motion_p_ms=%s" %
                     (
                         fps_value,
+                        frame_latency_ms,
+                        vision_latency_ms,
+                        tracker_timing.get("control_ms", 0),
+                        supervisor_timing.get("can_command_ms", 0),
+                        str(motion_timing.get("yaw")),
+                        str(motion_timing.get("pitch")),
+                    )
+                )
+                print(
+                    "TRACK state=%s event=%s boxes=%d valid=%d "
+                    "cx=%d cy=%d cmd=%d lease_expired=%d "
+                    "lease_recovered=%d can_errors=%d timeouts=%d "
+                    "tec=%d rec=%d" %
+                    (
+                        tracker_snapshot.get("state_text", "OFF"),
+                        tracker_snapshot.get("event", "NONE"),
                         len(detections),
                         1 if last_target_valid else 0,
                         last_cx,
                         last_cy,
-                        focus_pos_text(sensor),
+                        tracker_snapshot.get("command_count", 0),
+                        supervisor_snapshot.get("lease_expired_count", 0),
+                        tracker_snapshot.get("lease_recovery_count", 0),
+                        can_snapshot.get("errors", 0),
+                        can_snapshot.get("timeouts", 0),
+                        can_snapshot.get("tec", 0),
+                        can_snapshot.get("rec", 0),
                     )
                 )
-                if can_gate is not None:
-                    print("CAN status:", can_gate.snapshot())
-                last_status_ms = now_ms
+                last_status_ms = frame_done_ms
 
             if (
                 config.GC_EVERY_N_FRAMES
@@ -519,5 +741,10 @@ def run():
         nn.shrink_memory_pool()
         if radio is not None:
             radio.close()
+        if tracker is not None:
+            try:
+                tracker.close()
+            except BaseException as exc:
+                print("tracker close failed:", repr(exc))
         if can_gate is not None:
             can_gate.close()

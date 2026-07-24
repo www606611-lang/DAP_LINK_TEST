@@ -12,10 +12,6 @@ import vision
 
 
 def main():
-    if config.GIMBAL_MOTION_ENABLED:
-        raise RuntimeError(
-            "commissioning entry point requires gimbal motion disabled"
-        )
     vision.run()
 
 

@@ -257,6 +257,12 @@ class MCP2515:
             tx_control = self.read_register(self.REG_TXB0CTRL)
             if not (tx_control & self.TXBCTRL_TXREQ):
                 if tx_control & self.TXBCTRL_ERROR_MASK:
+                    self.bit_modify(
+                        self.REG_TXB0CTRL, self.TXBCTRL_ERROR_MASK, 0
+                    )
+                    self.bit_modify(
+                        self.REG_CANINTF, self.CANINTF_TX0IF, 0
+                    )
                     self.error_count += 1
                     raise MCP2515Error(
                         "CAN transmit error: 0x%02X" % tx_control
@@ -362,6 +368,7 @@ class MCP2515RuntimeGate:
     STATE_OFF = 0
     STATE_LISTEN = 1
     STATE_FAILED = 2
+    STATE_ACTIVE = 3
 
     def __init__(self, config_module, transport_factory=CanMvSpiTransport):
         self.config = config_module
@@ -427,7 +434,17 @@ class MCP2515RuntimeGate:
             self.state = self.STATE_FAILED
             print("CAN listen failed:", self.last_error)
 
+    def activate_normal(self):
+        if self.state != self.STATE_LISTEN or self.controller is None:
+            raise MCP2515Error("CAN gate is not ready for active ownership")
+        self.controller.set_mode(MCP2515.MODE_NORMAL)
+        self.state = self.STATE_ACTIVE
+        print("CAN mode=NORMAL owner=GIMBAL")
+        return self.controller
+
     def state_text(self):
+        if self.state == self.STATE_ACTIVE:
+            return "CAN ACTIVE"
         if self.state == self.STATE_LISTEN:
             if self.discovery:
                 parts = []
