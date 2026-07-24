@@ -19,6 +19,7 @@ from gimbal_control import (
 from mcp2515 import MCP2515, MCP2515RuntimeGate
 from vision import (
     TargetSelector,
+    build_hud,
     letterbox_param,
     map_target_center,
     nms_detections,
@@ -334,6 +335,73 @@ class FakeGimbalMotion:
 
 
 class RuntimeLogicTest(unittest.TestCase):
+    def test_hud_reports_tracking_motion_can_and_bus_health(self):
+        class Supervisor:
+            positions = {"yaw": 31.25, "pitch": -8.5}
+            bus_mv = {"yaw": 11620, "pitch": 11590}
+            command_retry_count = 0
+
+        class Tracker:
+            raw_error_x = -17
+            raw_error_y = 9
+            command_yaw_rpm = 2.5
+            command_pitch_rpm = -1.5
+            supervisor = Supervisor()
+
+            @staticmethod
+            def state_text():
+                return "TRACK MOVE"
+
+        class Controller:
+            error_count = 0
+            timeout_count = 0
+
+        class CanGate:
+            STATE_FAILED = 2
+            STATE_ACTIVE = 3
+            state = STATE_ACTIVE
+            controller = Controller()
+
+            @staticmethod
+            def state_text():
+                return "CAN ACTIVE"
+
+        hud = build_hud(
+            21.6, 34, "FOCUS 210", (183, 129), Tracker(), CanGate()
+        )
+
+        self.assertEqual(hud["state"], "TRACK MOVE")
+        self.assertEqual(hud["target"], "TARGET X183 Y129")
+        self.assertEqual(hud["error"], "ERROR  X -17 Y  +9")
+        self.assertEqual(hud["can"], "CAN OK E0 T0 R0")
+        self.assertEqual(hud["bus"], "BUS Y11.6 P11.6V")
+        self.assertIn("+2.5 RPM", hud["yaw"])
+        self.assertIn("-1.5 RPM", hud["pitch"])
+
+    def test_speed_command_retries_one_transient_timeout(self):
+        supervisor, reader, _motion = self.make_gimbal_supervisor(False)
+        supervisor.arm(0)
+
+        class TimeoutOnceMotion(FakeGimbalMotion):
+            def __init__(self, profile_reader):
+                super().__init__(profile_reader)
+                self.failed_once = False
+
+            def move_x_speed(self, *args):
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise ZdtTimeout("fixture transient response timeout")
+                return super().move_x_speed(*args)
+
+        motion = TimeoutOnceMotion(reader)
+        supervisor.motion = motion
+        snapshot = supervisor.command_speeds(2.0, -2.0, 100, lease_ms=300)
+
+        self.assertEqual(snapshot["state"], GimbalSupervisor.STATE_MOVING)
+        self.assertEqual(snapshot["command_retry_count"], 1)
+        self.assertEqual(snapshot["fault"], "")
+        self.assertTrue(motion.failed_once)
+
     def make_gimbal_supervisor(
         self,
         apply_commands=True,

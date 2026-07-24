@@ -6,6 +6,7 @@ from zdt_motor import (
     POSITION_MODE_ABSOLUTE,
     ZdtCommandClient,
     ZdtReadOnlyClient,
+    ZdtTimeout,
 )
 
 
@@ -128,6 +129,7 @@ class GimbalSupervisor:
         self.lease_expired_count = 0
         self.feedback_error_streak = 0
         self.feedback_retry_count = 0
+        self.command_retry_count = 0
         self.last_feedback_error = ""
         self.recovery_active = False
         self.recovery_limits = None
@@ -432,14 +434,16 @@ class GimbalSupervisor:
         )
         command_begin_ms = _command_completion_ms(now_ms)
         try:
-            self.motion.move_x_speed(
+            self._stage_speed_with_retry(
+                self.motion.move_x_speed,
                 self.yaw_address,
                 yaw_rpm,
                 yaw_acceleration_rpm_s,
                 150,
                 True,
             )
-            self.motion.move_emm_speed(
+            self._stage_speed_with_retry(
+                self.motion.move_emm_speed,
                 self.pitch_address,
                 pitch_rpm,
                 pitch_acceleration,
@@ -617,6 +621,7 @@ class GimbalSupervisor:
             "lease_expired_count": self.lease_expired_count,
             "feedback_error_streak": self.feedback_error_streak,
             "feedback_retry_count": self.feedback_retry_count,
+            "command_retry_count": self.command_retry_count,
             "last_feedback_error": self.last_feedback_error,
             "recovery_active": self.recovery_active,
             "timing": {
@@ -805,6 +810,13 @@ class GimbalSupervisor:
                     self.motion.stop_no_reply(address, 20)
                 except BaseException:
                     pass
+
+    def _stage_speed_with_retry(self, operation, *args):
+        try:
+            return operation(*args)
+        except ZdtTimeout:
+            self.command_retry_count += 1
+            return operation(*args)
 
     def _latch_fault(self, code, detail):
         self._stop_all()

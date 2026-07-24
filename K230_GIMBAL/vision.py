@@ -339,27 +339,41 @@ def draw_detections(
     osd_image,
     detections,
     labels,
-    fps_value,
-    focus_status,
-    radio_status=None,
-    can_status=None,
-    tracking_status=None,
+    hud,
 ):
     osd_image.clear()
     osd_image.draw_string_advanced(
-        8, 6, 24, "FPS %.1f" % fps_value, color=config.FPS_COLOR
+        10, 6, 28, hud["state"], color=hud["state_color"]
     )
     osd_image.draw_string_advanced(
-        8, 34, 22, focus_status, color=config.FOCUS_COLOR
+        10, 40, 21, hud["target"], color=config.HUD_INFO_COLOR
     )
-    status_y = 60
-    for status in (radio_status, can_status, tracking_status):
-        if status is None:
-            continue
+    osd_image.draw_string_advanced(
+        10, 66, 21, hud["error"], color=config.HUD_INFO_COLOR
+    )
+    osd_image.draw_string_advanced(
+        580, 6, 23, hud["performance"], color=config.FPS_COLOR
+    )
+    osd_image.draw_string_advanced(
+        650, 36, 19, hud["focus"], color=config.FOCUS_COLOR
+    )
+    if hud["radio"]:
         osd_image.draw_string_advanced(
-            8, status_y, 20, status, color=config.FOCUS_COLOR
+            560, 62, 19, hud["radio"], color=config.HUD_INFO_COLOR
         )
-        status_y += 24
+
+    osd_image.draw_string_advanced(
+        10, 418, 21, hud["yaw"], color=config.HUD_INFO_COLOR
+    )
+    osd_image.draw_string_advanced(
+        10, 446, 21, hud["pitch"], color=config.HUD_INFO_COLOR
+    )
+    osd_image.draw_string_advanced(
+        555, 418, 20, hud["can"], color=hud["can_color"]
+    )
+    osd_image.draw_string_advanced(
+        555, 446, 20, hud["bus"], color=config.HUD_INFO_COLOR
+    )
 
     center_x = config.DISPLAY_WIDTH // 2
     center_y = config.DISPLAY_HEIGHT // 2
@@ -397,6 +411,104 @@ def draw_detections(
             "%s %.2f" % (label, score),
             color=config.TEXT_COLOR,
         )
+
+
+def _voltage_text(millivolts):
+    if not millivolts:
+        return "--.-"
+    return "%.1f" % (float(millivolts) / 1000.0)
+
+
+def build_hud(
+    fps_value,
+    vision_latency_ms,
+    focus_status,
+    target,
+    tracker=None,
+    can_gate=None,
+    radio_status=None,
+):
+    state = "VISION"
+    state_color = config.HUD_GOOD_COLOR
+    error_x = 0
+    error_y = 0
+    yaw_rpm = 0.0
+    pitch_rpm = 0.0
+    yaw_position = 0.0
+    pitch_position = 0.0
+    yaw_bus_mv = 0
+    pitch_bus_mv = 0
+    command_retries = 0
+
+    if tracker is not None:
+        state = tracker.state_text()
+        error_x = tracker.raw_error_x
+        error_y = tracker.raw_error_y
+        yaw_rpm = tracker.command_yaw_rpm
+        pitch_rpm = tracker.command_pitch_rpm
+        supervisor = tracker.supervisor
+        yaw_position = supervisor.positions["yaw"]
+        pitch_position = supervisor.positions["pitch"]
+        yaw_bus_mv = supervisor.bus_mv["yaw"]
+        pitch_bus_mv = supervisor.bus_mv["pitch"]
+        command_retries = supervisor.command_retry_count
+        if "FAULT" in state:
+            state_color = config.HUD_BAD_COLOR
+        elif "LOST" in state or "SEARCH" in state:
+            state_color = config.HUD_WARN_COLOR
+
+    if target is None:
+        target_text = "TARGET ---"
+        error_text = "ERROR  X---  Y---"
+    else:
+        target_text = "TARGET X%03d Y%03d" % (target[0], target[1])
+        error_text = "ERROR  X%+4d Y%+4d" % (error_x, error_y)
+
+    can_text = "CAN OFF"
+    can_color = config.HUD_WARN_COLOR
+    if can_gate is not None:
+        controller = can_gate.controller
+        errors = getattr(controller, "error_count", 0) if controller else 0
+        timeouts = (
+            getattr(controller, "timeout_count", 0) if controller else 0
+        )
+        if can_gate.state == can_gate.STATE_FAILED:
+            can_text = "CAN FAIL E%d T%d R%d" % (
+                errors, timeouts, command_retries
+            )
+            can_color = config.HUD_BAD_COLOR
+        elif can_gate.state == can_gate.STATE_ACTIVE:
+            health = "OK" if errors == 0 and timeouts == 0 else "WARN"
+            can_text = "CAN %s E%d T%d R%d" % (
+                health, errors, timeouts, command_retries
+            )
+            can_color = (
+                config.HUD_GOOD_COLOR
+                if health == "OK"
+                else config.HUD_WARN_COLOR
+            )
+        else:
+            can_text = "%s E%d T%d R%d" % (
+                can_gate.state_text(), errors, timeouts, command_retries
+            )
+
+    return {
+        "state": state,
+        "state_color": state_color,
+        "target": target_text,
+        "error": error_text,
+        "performance": "FPS %.1f  AI %dms" %
+        (fps_value, int(vision_latency_ms)),
+        "focus": focus_status.replace("FOCUS ", "F "),
+        "radio": radio_status or "",
+        "yaw": "YAW %+5.1f RPM  %+6.1f DEG" % (yaw_rpm, yaw_position),
+        "pitch": "PITCH %+5.1f RPM  %+6.1f DEG" %
+        (pitch_rpm, pitch_position),
+        "can": can_text,
+        "can_color": can_color,
+        "bus": "BUS Y%s P%sV" %
+        (_voltage_text(yaw_bus_mv), _voltage_text(pitch_bus_mv)),
+    }
 
 
 def run():
@@ -532,6 +644,8 @@ def run():
         fps = time.clock()
         frame_count = 0
         last_status_ms = time.ticks_ms()
+        last_hud_ms = 0
+        hud = None
         if radio is not None:
             radio.open(last_status_ms)
         if can_gate is not None:
@@ -621,34 +735,34 @@ def run():
                 last_target_valid = True
 
             fps_value = fps.fps()
-            tracking_status = None
             if tracker is not None:
                 tracker.task(target, now_ms)
-                tracking_status = "%s ex=%d ey=%d y=%.1f p=%.1f" % (
-                    tracker.state_text(),
-                    tracker.raw_error_x,
-                    tracker.raw_error_y,
-                    tracker.command_yaw_rpm,
-                    tracker.command_pitch_rpm,
-                )
             radio_status = None
             if radio is not None:
                 radio.task(now_ms)
                 radio_status = radio.state_text()
-            can_status = None
             if can_gate is not None:
                 if tracker is None:
                     can_gate.task()
-                can_status = can_gate.state_text()
+            if (
+                hud is None
+                or time.ticks_diff(now_ms, last_hud_ms) >= config.HUD_UPDATE_MS
+            ):
+                hud = build_hud(
+                    fps_value,
+                    vision_latency_ms,
+                    focus_status,
+                    target,
+                    tracker,
+                    can_gate,
+                    radio_status,
+                )
+                last_hud_ms = now_ms
             draw_detections(
                 osd_image,
                 detections,
                 labels,
-                fps_value,
-                focus_status,
-                radio_status,
-                can_status,
-                tracking_status,
+                hud,
             )
             Display.show_image(osd_image)
             frame_done_ms = time.ticks_ms()

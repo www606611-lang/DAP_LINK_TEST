@@ -1,6 +1,6 @@
 """Validated hardware and model configuration for the K230 gimbal app."""
 
-BUILD_ID = "k230-gimbal-k7-response-r1"
+BUILD_ID = "k230-gimbal-k8-hud-r1"
 
 PROJECT_DEVICE_DIR = "/sdcard/K230_GIMBAL"
 KMODEL_PATH = "/data/best.kmodel"
@@ -52,6 +52,11 @@ BOX_COLOR = (0, 255, 0)
 TEXT_COLOR = (0, 255, 0)
 FPS_COLOR = (255, 255, 0)
 FOCUS_COLOR = (255, 255, 0)
+HUD_INFO_COLOR = (255, 255, 255)
+HUD_GOOD_COLOR = (0, 255, 0)
+HUD_WARN_COLOR = (255, 210, 0)
+HUD_BAD_COLOR = (255, 64, 64)
+HUD_UPDATE_MS = 100
 
 # K5 owns both gimbal axes through the supervised visual tracker.
 CAN_ENABLED = True
