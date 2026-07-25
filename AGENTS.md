@@ -71,6 +71,27 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   it as unavailable evidence and use structured link telemetry or ask for a
   physical-display observation until a direct framebuffer API is added.
 
+## K230-Chassis Wireless Architecture
+
+- The production inter-processor path is:
+  `K230 WLAN STA <-> ESP32-C3 SoftAP <-> UART3 <-> Tianmengxing`.
+- ESP32-C3 is the chassis-side wireless bridge. A PC may emulate K230 during
+  bring-up, but is not part of the production control path.
+- K230 owns vision, gimbal computation, MCP2515 CAN, and both ZDT gimbal motors.
+  Tianmengxing owns every chassis control loop and both wheel motors.
+- K230 and Tianmengxing exchange only framed high-level commands and status.
+  They never exchange raw CAN frames, gimbal step pulses, or direct PWM values.
+- ESP32-C3 uses GPIO21 TX and GPIO20 RX at 115200 8N1. Connect GPIO21 TX to
+  Tianmengxing UART3 PA13 RX, GPIO20 RX to PA14 TX, and share ground.
+- ESP32-C3 external 5 V and USB power are mutually exclusive. Disconnect the
+  chassis 5 V lead before plugging its USB cable into the computer.
+- JDY-31 remains the sole UART2 owner for tuning and wireless application
+  updates. The ESP32-C3 bridge must not alter the Bootloader or COM6 workflow.
+- The W3 wireless shadow transport is accepted, but received network commands
+  still have zero motion ownership. Motor control requires the later W4
+  supervisor owner, a command lease, button stop, and automatic HIGH-Z on link
+  loss.
+
 ## Physical Test Safety
 
 - Flashing firmware does not authorize motor motion by itself.
@@ -126,9 +147,12 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   recorded in `CAR_CONTROL/BRINGUP_LOG.md`.
 - The PA16/PA17 eight-channel line-sensor driver is bench validated for center,
   left, right, and no-line states with zero I2C errors.
-- The K230 read-only vision link is system validated on UART3 PA13/PA14 at
-  115200 baud. Preserve the `@valid,cx,cy#` 400 x 240 contract, 150 ms offline
-  timeout, and zero-motion ownership; `valid=0` is not the same as offline.
+- The former direct K230 read-only UART3 link is a validated historical
+  baseline. UART3 PA13/PA14 is assigned to the ESP32-C3 bridge; the new binary
+  parser, timeout, diagnostics, and zero-motion shadow ownership are host-tested
+  and installed on Tianmengxing. The production-power end-to-end path and the
+  independent K230, ESP32-C3, and Tianmengxing reset/recovery matrix are
+  accepted. W4 supervised wireless motion ownership remains pending.
 - The composite `MOTION` owner and wheel odometry are ground validated for
   relative forward/reverse distance with startup-heading hold. Preserve the
   exclusive-owner rule; do not start standalone Position, Heading, Yaw, or
