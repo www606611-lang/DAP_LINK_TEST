@@ -1,10 +1,10 @@
 # K230 Gimbal And Chassis Integration Plan
 
-Status: Gate 0/Gate 1, K0/K1, and wireless W0/W1/W2/W3 are complete. The W3
-end-to-end data path and independent endpoint-reset matrix are validated. W4
-supervised wireless motion ownership has not started. CAN and all
-accessory-motor output remain disabled until the MCP2515 hardware is installed
-and K2 begins.
+Status: Gate 0/Gate 1, K0-K5, and wireless W0-W3 are complete and physically
+accepted. The independent K230 vision/gimbal stack and the W3 shadow transport
+are frozen reusable baselines. K6 competition behavior and W4 supervised
+wireless chassis ownership are intentionally deferred until the actual task is
+known; neither is a prerequisite for operating the accepted gimbal or chassis.
 
 ## 1. Final Ownership
 
@@ -116,10 +116,10 @@ K230_GIMBAL/
   config.py           validated pins, dimensions, model and feature gates
   vision.py           sensor, AI2D, KPU, postprocess, display and cleanup
   wire_protocol.py    shared bounded wireless framing and CRC
-  chassis_radio.py    nonblocking WLAN STA and UDP state
-  mcp2515.py          added in K2 with the tested controller driver
-  zdt_motor.py        added in K3 after read-only protocol evidence
-  gimbal_control.py   added in K4 after motor units and limits are known
+  chassis_radio.py    W3-validated nonblocking WLAN STA and UDP state
+  mcp2515.py          K2-validated controller and bounded CAN transport
+  zdt_motor.py        K3/K4-validated ZDT protocol and supervised commands
+  gimbal_control.py   K4/K5-validated dual-axis owner and visual tracking
 ```
 
 Files are added at the gate that gives them real behavior and tests. Empty
@@ -129,25 +129,28 @@ backed-up device entry remain available for rollback.
 
 ## 4. Runtime Safety Contract
 
-- `config.CHASSIS_RADIO_ENABLED` defaults to `False` until the wireless shadow
-  link is accepted. K230 vision and gimbal startup never require the chassis.
-- `config.CAN_ENABLED` and `config.GIMBAL_MOTION_ENABLED` default to `False`.
-- K0/K1 do not import or initialize SPI, MCP2515, or any motor object.
-- Starting, stopping, or synchronizing a K230 script never creates motion.
-- K2 first verifies MCP2515 reset, register access, oscillator timing, loopback,
-  receive queues, transmit completion, and controller error state.
-- K3 performs read-only ZDT discovery before any enable or motion command.
-- K4 motion requires explicit arming, bounded travel, direction and limit data,
-  a command lease, timeout stop, and a physical stop path.
+- `config.CHASSIS_RADIO_ENABLED` remains `False` after W3 acceptance because W4
+  is deferred. K230 vision and gimbal startup never require the chassis.
+- `config.CAN_ENABLED` and `config.GIMBAL_MOTION_ENABLED` are `True` in the
+  accepted gimbal build. Startup performs read-only discovery before the
+  gimbal owner arms either axis.
+- MCP2515 and ZDT operations use bounded waits, explicit error state, and
+  supervised ownership. IDE stop, cleanup, target loss, command-lease expiry,
+  or a repeated transport fault stops both axes.
+- Synchronizing files does not run the application. Running the accepted
+  `main.py` may move the gimbal when it acquires a valid target.
+- Position-mode commissioning remains bounded. The accepted visual tracker
+  uses continuous supervised velocity mode because both axes have slip rings.
 - Loss of a vision target never invents a motor command. The gimbal owner makes
   the hold, search, or stop decision explicitly.
-- The Tianmengxing chassis remains `READY / HIGH-Z` during K230 device bring-up.
+- W3 probes use shadow traffic only, and the Tianmengxing chassis remains
+  `READY / HIGH-Z` throughout link testing.
 
 ## 5. Protocol Baselines
 
 ### Vision
 
-K1 must preserve the accepted implementation without parameter drift:
+The frozen production implementation uses:
 
 ```text
 model: /data/best.kmodel
@@ -158,17 +161,18 @@ AI frame: 640 x 384
 model input: 320 x 320
 fixed focus: 210
 confidence/NMS: 0.45 / 0.45
-measured baseline: approximately 19.4 FPS
+measured baseline: approximately 21.6 to 21.8 FPS
 ```
 
 ### ZDT CAN
 
-The reference-project assumptions are provisional until K3 reads the real
-devices:
+K2-K5 established the following physical baseline:
 
 ```text
 classic CAN: 500 kbit/s
-candidate motor addresses: 1 and 2
+MCP2515 oscillator: 8 MHz
+Yaw motor: address 1, firmware X, positive CW
+Pitch motor: address 2, firmware Emm, positive UP
 extended identifier: (address << 8) | packet_index
 maximum payload: 8 bytes
 protocol check byte: 0x6B
@@ -236,6 +240,8 @@ connected, minimized, and running; UART, CAN, and motor output stayed disabled.
 
 ### K2: MCP2515 transport, no motor commands
 
+Status: completed and accepted 2026-07-23 in `7e306e9`.
+
 - Implement QSPI0 SPI transfer, CS and INT handling.
 - Verify reset and register read/write against the 8 MHz device.
 - Configure classic CAN 500 kbit/s and validate MCP2515 loopback.
@@ -245,7 +251,13 @@ connected, minimized, and running; UART, CAN, and motor output stayed disabled.
 Acceptance: repeated loopback and idle-bus reads have no unexplained errors;
 the chassis and both ZDT motors remain stopped.
 
+Evidence: the installed 8 MHz MCP2515 completed reset, register access,
+loopback, listen-only, normal-mode transition, bounded TX/RX, and error-state
+checks at 500 kbit/s. Controller error and timeout counters remained zero.
+
 ### K3: one-motor read-only discovery
+
+Status: completed and accepted 2026-07-23 in `7e306e9`.
 
 - Connect/query one ZDT motor at a time.
 - Read version, address, state, bus voltage, encoder/position and fault flags.
@@ -254,7 +266,13 @@ the chassis and both ZDT motors remain stopped.
 Acceptance: responses repeat reliably, address ownership is unambiguous, bus
 errors remain zero, and neither motor is enabled.
 
+Evidence: address 1 was identified as the Yaw axis with firmware X and address
+2 as the Pitch axis with firmware Emm. Read-only state, position, voltage, and
+fault queries established the final axis map before motion ownership began.
+
 ### K4: supervised two-axis motion
+
+Status: completed and accepted 2026-07-23 in `e6de92a`.
 
 - Add enable/disable, stop, speed, relative/absolute position and sync commands.
 - Confirm units, direction, acceleration and mechanical travel limits per axis.
@@ -264,7 +282,14 @@ errors remain zero, and neither motor is enabled.
 Acceptance: each axis stops on command, lease expiry and fault; all motion is
 bounded; no K230 or Tianmengxing reset occurs.
 
+Evidence: explicit arming, ownership, bounded command waits, stop, relative and
+position commissioning, synchronized velocity staging, lease expiry, and fault
+latching are host-tested and physically exercised on both axes.
+
 ### K5: gimbal control
+
+Status: completed, tuned, and physically accepted 2026-07-24 in `be58724`,
+`d43183c`, `9f6b4f4`, and `9eea773`.
 
 - Add target filtering, deadband, limits and Yaw/Pitch trajectory generation.
 - Close the loop from vision coordinates through ZDT feedback.
@@ -273,7 +298,14 @@ bounded; no K230 or Tianmengxing reset occurs.
 Acceptance: center hold, step response, target loss/reacquisition, edge targets
 and long-duration thermal behavior pass without oscillation or limit impact.
 
+Evidence: the accepted tracker sustains approximately 21.6 to 21.8 FPS. Normal
+vision time is 32-35 ms, normal CAN command time is 8-11 ms, and hundreds of
+post-deployment tracking commands completed with zero CAN errors and zero
+timeouts. Final parameters and HUD layout are frozen in `K230_GIMBAL/README.md`.
+
 ### K6: competition integration
+
+Status: intentionally deferred until the competition task is known.
 
 - Define the actual task state machine after the competition behavior is known.
 - Exchange high-level chassis commands and status through the accepted
@@ -362,6 +394,40 @@ counters remained zero after recovery. No motion command was issued.
 
 ### W4: supervised wireless chassis owner
 
+Status: planned but intentionally deferred. W3 remains the accepted transport
+baseline; no W4 motion owner, command router, or competition state machine is
+implemented before the real task defines which side must coordinate chassis
+motion.
+
+Task-driven selection:
+
+| Competition architecture | W4 scope |
+| --- | --- |
+| K230 only owns vision and gimbal | Omit W4; keep `CHASSIS_RADIO_ENABLED=False` |
+| K230 only assists a chassis-local mission | Add only the required result/status fields and bounded STOP path |
+| K230 is the global mission coordinator | Add the supervised owner and only the required motion primitives |
+
+If the third architecture is selected, implementation remains deliberately
+thin:
+
+- K230 gets one mission-facing chassis client; it sends explicit task requests
+  and consumes ACK/result/status, without owning any wheel controller.
+- Tianmengxing gets one `app`-layer wireless motion gateway. It acquires one
+  exclusive supervisor owner and calls the existing Motion, Yaw/Heading, or
+  Line mission APIs. It never calls PWM, the motor device driver, or a PID
+  implementation directly.
+- The existing wire parser, UART3 driver, ESP32 bridge, chassis control loops,
+  and K230 gimbal tracker remain unchanged unless a reproduced defect belongs
+  to that layer.
+- Message types are selected from actual task needs. Candidate primitives are
+  `STOP`, `MOVE_DISTANCE`, `TURN_RELATIVE`, `LINE_START`, and `LINE_STOP`; unused
+  primitives are not compiled merely for possible future use.
+- A W4 build option excludes the gateway/client and their message handlers when
+  the selected competition profile does not use wireless chassis control.
+- Session identity, monotonic command sequence, explicit ACK/NACK, command
+  result, bounded lease, board-button stop, and automatic `HIGH-Z` on either
+  link timeout are mandatory for every motion-capable profile.
+
 - Add one exclusive wireless outer-loop owner after the real command semantics
   are defined.
 - Require explicit arm, monotonically advancing command sequence, a bounded
@@ -372,11 +438,19 @@ counters remained zero after recovery. No motion command was issued.
 Acceptance: low-speed suspended-wheel and ground tests stop on command, timeout,
 WiFi loss, ESP32 reset, K230 reset, and every board button.
 
-## 8. Hardware Checks Before K3/K4
+Implementation does not begin until a short task contract records: who owns the
+mission state machine, which commands are required, their units and bounds, the
+completion/error semantics, and whether W4 is included in the competition
+build. W4 is committed separately from any competition-specific K6 behavior.
 
-- Confirm K230, MCP2515 module and both ZDT devices share the required reference.
-- With power removed, measure CANH-to-CANL termination; expect about 60 ohms when
-  two endpoint 120-ohm terminators are installed.
-- Confirm the exact ZDT model and firmware protocol from read-only responses.
-- Confirm addresses one at a time before both devices share the bus.
-- Record axis direction, reduction, units, soft limits and physical hard stops.
+## 8. Validated Gimbal Hardware Baseline
+
+- K230, MCP2515, and both ZDT devices share the required electrical reference.
+- With power removed, CANH-to-CANL is expected to measure about 60 ohms with
+  both endpoint 120-ohm terminators enabled.
+- The installed MCP2515 oscillator is 8 MHz and CAN runs at 500 kbit/s.
+- Yaw is address 1, firmware X, positive CW; Pitch is address 2, firmware Emm,
+  positive UP.
+- Both assembled axes use conductive slip rings and continuous supervised
+  velocity tracking. Recheck wiring, termination, address, and direction after
+  any mechanical or CAN-harness rebuild before reusing the frozen baseline.
