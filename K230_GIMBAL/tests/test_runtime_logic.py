@@ -1190,6 +1190,30 @@ class RuntimeLogicTest(unittest.TestCase):
         self.assertEqual(radio.last_rx_sequence[ROLE_CHASSIS], 0)
         self.assertEqual(radio.rx_frame_count, 4)
 
+    def test_radio_rebases_sequence_after_peer_restart_timeout(self):
+        radio = ChassisRadio()
+        radio.sock = FakeSocket(
+            (encode_frame(TYPE_STATUS, 120, bytes((ROLE_CHASSIS,))),)
+        )
+        radio._receive(100)
+
+        radio.sock = FakeSocket(
+            (encode_frame(TYPE_STATUS, 0, bytes((ROLE_CHASSIS,))),)
+        )
+        radio._receive(500)
+        self.assertEqual(radio.rx_frame_count, 1)
+        self.assertEqual(radio.out_of_order_count, 1)
+        self.assertEqual(radio.last_rx_sequence[ROLE_CHASSIS], 120)
+
+        radio.sock = FakeSocket(
+            (encode_frame(TYPE_STATUS, 1, bytes((ROLE_CHASSIS,))),)
+        )
+        radio._receive(1100)
+        self.assertEqual(radio.rx_frame_count, 2)
+        self.assertEqual(radio.out_of_order_count, 1)
+        self.assertEqual(radio.last_rx_sequence[ROLE_CHASSIS], 1)
+        self.assertTrue(radio._role_online(ROLE_CHASSIS, 1100))
+
     def test_online_radio_task_sends_k230_heartbeat(self):
         radio = ChassisRadio()
         radio.wlan = FakeWlan()

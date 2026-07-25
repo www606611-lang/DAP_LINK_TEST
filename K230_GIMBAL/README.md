@@ -151,7 +151,7 @@ red for a fault.
   Pitch response is normally slower and may exceed 100 ms.
 - The final post-deployment observation completed hundreds of tracking commands
   with zero CAN controller errors and zero timeouts.
-- All 55 host tests pass.
+- All 56 host tests pass.
 - Every device runtime file and `/sdcard/main.py` passed SHA-256 readback
   verification after installation.
 
@@ -169,10 +169,11 @@ as validated reusable infrastructure. Competition work belongs in a separate
 mission layer. It may submit high-level gimbal or chassis goals, but it must not
 rewrite the accepted tracker merely to compensate for mission behavior.
 
-The K230-to-ESP32 WiFi/UDP heartbeat gate and the bidirectional
-ESP32-to-Tianmengxing UART3 shadow gate are accepted. The production-power
-end-to-end run stayed online for 30 seconds with `esp=1`, `chassis=1`, 289
-received frames, 109 transmitted frames, and zero protocol/socket errors.
-Independent endpoint-reset coverage and the later supervised chassis owner
-remain separate gates. They do not block the independent gimbal baseline
-documented here.
+The K230-to-ESP32 WiFi/UDP heartbeat gate, the bidirectional
+ESP32-to-Tianmengxing UART3 shadow gate, and the W3 independent endpoint-reset
+matrix are accepted. The production-power end-to-end run stayed online for 30
+seconds with `esp=1`, `chassis=1`, 289 received frames, 109 transmitted frames,
+and zero protocol/socket errors. K230 power cycling, ESP32-C3 reset, and
+Tianmengxing reset each returned automatically to end-to-end online state while
+the chassis remained `READY / HIGH-Z`. The later supervised chassis owner
+remains a separate gate and does not block the independent gimbal baseline.

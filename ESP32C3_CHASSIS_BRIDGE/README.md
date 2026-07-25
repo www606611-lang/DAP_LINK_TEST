@@ -61,7 +61,12 @@ disconnect event from causing a second rebuild.
   reached end-to-end online state in about one second and stayed online for a
   30-second production-power run. It received 289 frames and sent 109 frames
   with zero CRC, length, duplicate, ordering, or socket errors.
+- The independent endpoint-reset matrix passed on 2026-07-25. K230 power-cycle,
+  ESP32-C3 reset, and Tianmengxing reset each restored end-to-end online state
+  automatically. The measured recoveries were about 4.2, 9.0, and 2.1 seconds,
+  respectively, and the chassis remained `READY / HIGH-Z` throughout the
+  shadow-only test.
 
 This accepts the K230-to-ESP32 WiFi/UDP heartbeat gate and the bidirectional
-UART3 chassis shadow gate. Traffic retains zero motion ownership until the
-later supervised-owner gate.
+UART3 chassis shadow gate, including independent endpoint reset/recovery.
+Traffic retains zero motion ownership until the later supervised-owner gate.

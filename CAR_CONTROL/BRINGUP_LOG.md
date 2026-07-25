@@ -1315,5 +1315,35 @@ zero CRC errors. No motion command was sent; wireless command IDs remain
 shadow-only and the chassis retained its existing `HIGH-Z` startup contract.
 
 This accepts W1 and W2 plus the sustained W3 data path. W3 independent endpoint
-reset/recovery coverage and W4 supervised wireless motion ownership remain
-future gates.
+reset/recovery coverage was completed on 2026-07-25; W4 supervised wireless
+motion ownership remains a future gate.
+
+## 2026-07-25: wireless W3 endpoint-reset acceptance
+
+The W3 reset matrix independently restarted K230, ESP32-C3, and Tianmengxing
+while leaving the other endpoints powered. All tests used only
+HELLO/HEARTBEAT/STATUS shadow traffic; no motor command was issued, and the
+chassis ended every case in `READY / HIGH-Z`.
+
+A true K230 power cycle restored `RADIO ONLINE` and
+`e2e=1 / esp=1 / chassis=1` about 4.2 seconds after the monitor started. CRC,
+length, duplicate, ordering, and socket counters remained zero. Resetting the
+ESP32-C3 produced the expected link timeout, one K230 WiFi recovery, and full
+end-to-end recovery in about 9.0 seconds with all protocol counters still zero.
+
+The first Tianmengxing reset revealed that its transmit sequence restarted at
+zero after K230 had already recorded a higher chassis sequence. Since the
+fresh chassis quickly received an ESP32 heartbeat, its first presence frame was
+a HEARTBEAT rather than a HELLO, so K230 continued rejecting every restarted
+status frame as old. `ChassisRadio` now discards only a role's stale sequence
+baseline once its last accepted frame exceeds the 1000 ms offline threshold.
+Online duplicate and out-of-order rejection remains unchanged, and a dedicated
+host test covers both sides of that threshold.
+
+After synchronizing the fixed K230 runtime with SHA-256 readback verification,
+the repeated Tianmengxing reset dropped `e2e` as expected and restored it in
+about 2.1 seconds. K230 recorded `old=0`; Tianmengxing reported zero CRC,
+length, resync, overflow, and transmit-drop errors after restart. The final
+K230 and tuner snapshots both showed the complete link online and
+`READY / HIGH-Z`. This completes W3. W4 remains unimplemented and wireless
+frames still have zero motion ownership.

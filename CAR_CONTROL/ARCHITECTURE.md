@@ -158,7 +158,9 @@ control cascade
     HELLO/HEARTBEAT/STATUS frames through ESP32-C3. Host tests cover CRC,
     fragmentation, concatenation, length, resync, independent role sequences,
     duplicate/out-of-order handling, shadow commands, and timeout. The module
-    has no motion owner; end-to-end WiFi/UART acceptance remains a physical gate.
+    has no motion owner. The production-power end-to-end link and independent
+    K230, ESP32-C3, and Tianmengxing reset/recovery matrix are physically
+    accepted; supervised wireless motion ownership remains a separate gate.
 
 Host tests under `CAR_CONTROL/tests` cover pure application policies, the
 tuning text codec, wireless framing, and the chassis-radio state machine

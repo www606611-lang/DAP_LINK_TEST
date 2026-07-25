@@ -253,8 +253,15 @@ physically accepted.
 The bidirectional shadow path was accepted on production chassis 5 V power on
 2026-07-24. K230 reported `esp=1` and `chassis=1` for 30 seconds while receiving
 289 frames and sending 109 frames with zero CRC, length, duplicate,
-out-of-order, or socket errors. This acceptance does not grant wireless motion
-ownership.
+out-of-order, or socket errors. The independent endpoint-reset matrix was
+accepted on 2026-07-25: K230 power cycling recovered in about 4.2 seconds after
+the monitor started, ESP32-C3 reset recovered in about 9.0 seconds, and
+Tianmengxing reset recovered the complete path in about 2.1 seconds. The K230
+receiver rebases only a role whose accepted frame age has exceeded the offline
+timeout, preventing a restarted peer's reset sequence from being rejected
+forever while retaining normal duplicate and out-of-order rejection. Every
+case ended `READY / HIGH-Z` with zero protocol errors. This acceptance does not
+grant wireless motion ownership.
 
 ## Reusable line-tracking API
 

@@ -214,6 +214,13 @@ class ChassisRadio:
                     self.unsupported_count += 1
                     continue
                 previous = self.last_rx_sequence[role]
+                if (
+                    previous is not None
+                    and _elapsed(now_ms, self.last_rx_by_role_ms[role])
+                    >= config.CHASSIS_RADIO_OFFLINE_MS
+                ):
+                    previous = None
+                    self.last_rx_sequence[role] = None
                 if message_type == TYPE_HELLO:
                     self.last_rx_sequence[role] = sequence
                     self.last_rx_by_role_ms[role] = now_ms

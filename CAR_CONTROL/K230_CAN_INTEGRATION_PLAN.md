@@ -1,9 +1,10 @@
 # K230 Gimbal And Chassis Integration Plan
 
-Status: Gate 0/Gate 1, K0/K1, and wireless W0/W1/W2 are complete. The W3
-end-to-end data path is validated; its independent endpoint-reset matrix is
-still pending. CAN and all accessory-motor output remain disabled until the
-MCP2515 hardware is installed and K2 begins.
+Status: Gate 0/Gate 1, K0/K1, and wireless W0/W1/W2/W3 are complete. The W3
+end-to-end data path and independent endpoint-reset matrix are validated. W4
+supervised wireless motion ownership has not started. CAN and all
+accessory-motor output remain disabled until the MCP2515 hardware is installed
+and K2 begins.
 
 ## 1. Final Ownership
 
@@ -334,8 +335,8 @@ The final K230 run reported `esp=1` and `chassis=1` throughout.
 
 ### W3: end-to-end shadow system
 
-Status: sustained bidirectional path accepted 2026-07-24; independent K230,
-ESP32-C3, and Tianmengxing reset/recovery matrix pending.
+Status: complete; sustained path accepted 2026-07-24 and independent K230,
+ESP32-C3, and Tianmengxing reset/recovery matrix accepted 2026-07-25.
 
 - Validate K230 -> WiFi -> ESP32 -> UART3 -> Tianmengxing and the reverse path.
 - Test resets and reconnects independently at all three endpoints.
@@ -343,10 +344,21 @@ ESP32-C3, and Tianmengxing reset/recovery matrix pending.
 Acceptance: bidirectional counters advance for a sustained run, command frames
 remain shadow-only, and chassis timing/watchdog metrics do not regress.
 
-Evidence so far: under chassis 5 V power, K230 reached end-to-end online state
-in about one second and stayed online for 30 seconds. It received 289 frames
-and sent 109 frames with zero CRC, length, duplicate, out-of-order, or socket
-errors. The SoftAP remained visible in all 11 scans at about 87% signal.
+Evidence: under chassis 5 V power, K230 reached end-to-end online state in about
+one second and stayed online for 30 seconds. It received 289 frames and sent
+109 frames with zero CRC, length, duplicate, out-of-order, or socket errors.
+The SoftAP remained visible in all 11 scans at about 87% signal.
+
+A true K230 power cycle recovered `esp=1 / chassis=1` about 4.2 seconds after
+the monitor started. An ESP32-C3 reset produced the expected timeout and one
+WiFi recovery, then restored the complete path in about 9.0 seconds. A
+Tianmengxing reset initially exposed a stale sequence baseline: its restarted
+status frames began at zero and K230 rejected them as old. K230 now clears only
+the timed-out role's sequence baseline before accepting the next valid frame.
+After deployment, a repeat Tianmengxing reset restored end-to-end state in
+about 2.1 seconds with `old=0`. All three cases returned the chassis to
+`READY / HIGH-Z`; CRC, length, duplicate, ordering, socket, overflow, and drop
+counters remained zero after recovery. No motion command was issued.
 
 ### W4: supervised wireless chassis owner
 
