@@ -59,6 +59,14 @@ measure approximately 60 ohms when both 120-ohm terminators are enabled.
 | Yaw | 1 | X | CW |
 | Pitch | 2 | Emm | UP |
 
+Both installed motors are 1.8-degree units. Yaw address 1 must read back
+`MotType=1.8 deg` and option status `0x04` before motion. On the installed
+FW_X build, commissioning command `D7 35 01 19 6B` selects the correct
+1.8-degree mode even though the X42S V1.0.3 manual associates `0x19` with the
+0.9-degree type. Do not write `MotType` during normal startup. After changing
+it, run `Cal_MFL` once and require healthy phase R/L and clear motor flags
+before enabling Yaw.
+
 Both axes use continuous rotation because the assembled gimbal uses conductive
 slip rings. Position-mode APIs retain bounded limits for commissioning, but the
 validated visual tracker uses supervised velocity mode.
@@ -151,6 +159,10 @@ red for a fault.
   Pitch response is normally slower and may exceed 100 ms.
 - The final post-deployment observation completed hundreds of tracking commands
   with zero CAN controller errors and zero timeouts.
+- Yaw was recommissioned on 2026-07-26 after correcting `MotType` from 0.9 to
+  1.8 degrees. `Cal_MFL` produced 1539 mOhm / 3050 uH with flags `0x02`.
+  Bounded 5 RPM tests moved +54.6 and -54.7 degrees in two seconds, held
+  4.7-5.3 RPM in both directions, and ended disabled without stall or protect.
 - All 56 host tests pass.
 - Every device runtime file and `/sdcard/main.py` passed SHA-256 readback
   verification after installation.
