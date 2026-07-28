@@ -13,7 +13,7 @@ static char g_line[SPEED_TUNING_LINE_SIZE];
 void SpeedTuningConsole_Init(void)
 {
     speed_tuning_wave_init();
-    BluetoothUart_WriteText("OK READY v=7\r\n");
+    BluetoothUart_WriteText("OK READY v=10\r\n");
 }
 
 void SpeedTuningConsole_Task(uint32_t now_ms)

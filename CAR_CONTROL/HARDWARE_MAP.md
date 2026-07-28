@@ -19,6 +19,28 @@ the older firmware. Unconfirmed pins are intentionally absent from SysConfig.
 | ESP32-C3 radio UART3 | PA13 RX, PA14 TX | Firmware installed; end-to-end pending | Main-board U9 RX/TX routes to A13/A14 at 115200 8N1; ESP32 GPIO21 TX connects PA13 RX and GPIO20 RX connects PA14 TX; binary shadow link has zero motion ownership |
 | Bluetooth UART2 | PB17 TX, PA22 RX | System confirmed | JDY-31A remains at 115200 baud; application, resident Bootloader, tuner bridge, complete command replies, and startup `HIGH-Z` were verified after moving TX from PA21 |
 | CANFD0 | PA26 TX, PA27 RX | Schematic confirmed; firmware pending | Main-board CAN module maps `MCAN0_TX/MCAN0_RX` to A26/A27; CAN remains disabled until its own bring-up gate |
+| Electromagnet MOS switch IO | PA2 / TIMG8_CCP1 | Full-power GPIO attraction bench confirmed; reduced-power hold pending | Active-high output; default grip remains at full GPIO power because reduced-duty tests did not retain the steel ball; startup/Bootloader default low; module and MCU share GND |
+
+## Electromagnet MOS module wiring
+
+The 5 V electromagnet is powered through the MOS switch module; its current
+must not flow through an MCU pin:
+
+```text
+Tianmengxing PA2  -> MOS module IO
+Tianmengxing GND  -> MOS module control GND
+regulated 5 V +   -> MOS module power input +
+regulated 5 V GND -> MOS module power input -
+electromagnet +   -> MOS module load output +
+electromagnet -   -> MOS module load output -
+```
+
+The module in the merchant diagram is treated as active-high. The two repeated
+IO/GND pad rows are parallel connection points, not separate power inputs.
+Before powering it, measure the electromagnet resistance and estimate its
+steady current with `I = 5 V / R`; confirm the 5 V regulator, wiring, and MOS
+module current ratings all exceed that value. Keep the electromagnet away from
+the IMU and loose steel parts during the first pulse test.
 
 ## Motor naming rule
 

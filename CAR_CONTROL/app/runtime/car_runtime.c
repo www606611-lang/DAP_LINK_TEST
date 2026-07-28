@@ -14,6 +14,7 @@
 #include "debug_snapshot.h"
 #include "delay.h"
 #include "encoder_input.h"
+#include "electromagnet.h"
 #include "firmware_update.h"
 #include "heading_bringup_test.h"
 #include "icm20948.h"
@@ -77,6 +78,7 @@ void CarRuntime_Init(void)
     suspicious_reset = ResetDiagnostics_IsSuspicious();
     BoardMotorSafe_Init();
     BoardWheelDrive_Init();
+    Electromagnet_Init();
     now_ms = delay_get_ms();
     BoardButton_Init(now_ms);
     ControlSupervisor_Init(suspicious_reset);
@@ -155,6 +157,7 @@ void CarRuntime_Step(void)
             CHASSIS_RADIO_STATUS_HIGH_Z : 0U);
     ChassisRadioLink_Task(now_ms);
     BluetoothUart_Task(now_ms);
+    Electromagnet_Task(now_ms);
     JDY31_ConfigTask(now_ms);
     if (!JDY31_ConfigIsExclusive() && !FirmwareUpdate_IsPending()) {
         SpeedTuningConsole_Task(now_ms);

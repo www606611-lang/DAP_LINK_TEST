@@ -184,6 +184,8 @@ function Test-ControlCommand([string]$line) {
         $line -match '^yaw (get|run|stop|stat)$' -or
         $line -match '^imu (stat|zero)$' -or
         $line -match '^k230 stat$' -or
+        $line -match '^mag (on|off|release|grip|get|stat)$' -or
+        $line -match '^mag pulse \d+$' -or
         $line -match '^app stat$' -or
         $line -match '^wdt (stat|test)$') {
         return $true
@@ -201,6 +203,9 @@ function Test-ControlCommand([string]$line) {
         return $true
     }
     if ($line -match '^motion start [+-]?\d+ (?:hold|[+-]?(?:\d+(?:\.\d*)?|\.\d+)) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+$') {
+        return $true
+    }
+    if ($line -match '^mag set \d+ \d+$') {
         return $true
     }
     return $line -match '^yaw set [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ [+-]?(?:\d+(?:\.\d*)?|\.\d+) [+-]?(?:\d+(?:\.\d*)?|\.\d+) \d+ \d+(?: [+-]?(?:\d+(?:\.\d*)?|\.\d+)(?: \d+)?)?$'

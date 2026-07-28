@@ -3,6 +3,7 @@
 #include "bluetooth_uart.h"
 #include "board_motor_safe.h"
 #include "car_app.h"
+#include "electromagnet.h"
 #include "firmware_update.h"
 #include "heading_bringup_test.h"
 #include "icm20948.h"
@@ -26,6 +27,18 @@
 
 #define SPEED_TUNING_TOKEN_MAX 14U
 
+static void tuning_command_write_magnet_error(
+    electromagnet_result_t result)
+{
+    if (result == ELECTROMAGNET_RESULT_BUSY) {
+        BluetoothUart_WriteText("ERR busy\r\n");
+    } else if (result == ELECTROMAGNET_RESULT_OUTPUT_ERROR) {
+        BluetoothUart_WriteText("ERR output\r\n");
+    } else {
+        BluetoothUart_WriteText("ERR range\r\n");
+    }
+}
+
 void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
 {
     char *tokens[SPEED_TUNING_TOKEN_MAX];
@@ -36,6 +49,151 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
         return;
     }
 
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "grip") == 0)) {
+        electromagnet_result_t result;
+
+        if (!BoardMotorSafe_IsHighImpedance()) {
+            BluetoothUart_WriteText("ERR motor_active\r\n");
+            return;
+        }
+        result = Electromagnet_Grip(now_ms);
+        if (result == ELECTROMAGNET_RESULT_OK) {
+            BluetoothUart_WriteText("OK MAG GRIP\r\n");
+        } else {
+            tuning_command_write_magnet_error(result);
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        ((strcmp(tokens[1], "release") == 0) ||
+         (strcmp(tokens[1], "off") == 0))) {
+        Electromagnet_Release();
+        BluetoothUart_WriteText("OK MAG RELEASE\r\n");
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "get") == 0)) {
+        electromagnet_config_t config;
+
+        if (!Electromagnet_GetConfig(&config)) {
+            BluetoothUart_WriteText("ERR mag_state\r\n");
+            return;
+        }
+        BluetoothUart_WriteText("OK MAGCFG pull=");
+        speed_tuning_write_u32(config.pull_in_ms);
+        BluetoothUart_WriteText(" hold=");
+        speed_tuning_write_u32(config.hold_duty_permille);
+        BluetoothUart_WriteText("\r\n");
+        return;
+    }
+    if ((token_count == 4U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "set") == 0)) {
+        electromagnet_config_t config;
+        electromagnet_result_t result;
+
+        if (!speed_tuning_parse_u16(tokens[2], &config.pull_in_ms) ||
+            !speed_tuning_parse_u16(
+                tokens[3], &config.hold_duty_permille)) {
+            BluetoothUart_WriteText("ERR number\r\n");
+            return;
+        }
+        result = Electromagnet_SetConfig(&config);
+        if (result == ELECTROMAGNET_RESULT_OK) {
+            BluetoothUart_WriteText("OK MAGCFG pull=");
+            speed_tuning_write_u32(config.pull_in_ms);
+            BluetoothUart_WriteText(" hold=");
+            speed_tuning_write_u32(config.hold_duty_permille);
+            BluetoothUart_WriteText("\r\n");
+        } else {
+            tuning_command_write_magnet_error(result);
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "on") == 0)) {
+        electromagnet_result_t result;
+
+        if (!BoardMotorSafe_IsHighImpedance()) {
+            BluetoothUart_WriteText("ERR motor_active\r\n");
+            return;
+        }
+        result = Electromagnet_On();
+        if (result == ELECTROMAGNET_RESULT_OK) {
+            BluetoothUart_WriteText("OK MAG ON\r\n");
+        } else {
+            tuning_command_write_magnet_error(result);
+        }
+        return;
+    }
+    if ((token_count == 2U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "stat") == 0)) {
+        electromagnet_snapshot_t snapshot;
+
+        if (!Electromagnet_GetSnapshot(now_ms, &snapshot)) {
+            BluetoothUart_WriteText("ERR mag_state\r\n");
+            return;
+        }
+        BluetoothUart_WriteText("MAGSTAT state=");
+        BluetoothUart_WriteText(
+            Electromagnet_GetStateText(snapshot.state));
+        BluetoothUart_WriteText(" active=");
+        speed_tuning_write_u32(snapshot.active ? 1U : 0U);
+        BluetoothUart_WriteText(" continuous=");
+        speed_tuning_write_u32(snapshot.continuous ? 1U : 0U);
+        BluetoothUart_WriteText(" duty=");
+        speed_tuning_write_u32(snapshot.duty_permille);
+        BluetoothUart_WriteText(" pull=");
+        speed_tuning_write_u32(snapshot.pull_in_ms);
+        BluetoothUart_WriteText(" hold=");
+        speed_tuning_write_u32(snapshot.hold_duty_permille);
+        BluetoothUart_WriteText(" remaining=");
+        speed_tuning_write_u32(snapshot.remaining_ms);
+        BluetoothUart_WriteText(" grips=");
+        speed_tuning_write_u32(snapshot.grip_count);
+        BluetoothUart_WriteText(" releases=");
+        speed_tuning_write_u32(snapshot.release_count);
+        BluetoothUart_WriteText(" pulses=");
+        speed_tuning_write_u32(snapshot.pulse_count);
+        BluetoothUart_WriteText(" on_count=");
+        speed_tuning_write_u32(snapshot.continuous_on_count);
+        BluetoothUart_WriteText(" auto_off=");
+        speed_tuning_write_u32(snapshot.automatic_off_count);
+        BluetoothUart_WriteText(" faults=");
+        speed_tuning_write_u32(snapshot.fault_count);
+        BluetoothUart_WriteText("\r\n");
+        return;
+    }
+    if ((token_count == 3U) &&
+        (strcmp(tokens[0], "mag") == 0) &&
+        (strcmp(tokens[1], "pulse") == 0)) {
+        uint16_t duration_ms;
+        electromagnet_result_t result;
+
+        if (!speed_tuning_parse_u16(tokens[2], &duration_ms)) {
+            BluetoothUart_WriteText("ERR number\r\n");
+            return;
+        }
+        if (!BoardMotorSafe_IsHighImpedance()) {
+            BluetoothUart_WriteText("ERR motor_active\r\n");
+            return;
+        }
+        result = Electromagnet_Pulse(duration_ms, now_ms);
+        if (result == ELECTROMAGNET_RESULT_OK) {
+            BluetoothUart_WriteText("OK MAG PULSE ");
+            speed_tuning_write_u32(duration_ms);
+            BluetoothUart_WriteText("\r\n");
+        } else {
+            tuning_command_write_magnet_error(result);
+        }
+        return;
+    }
     if ((token_count == 2U) &&
         (strcmp(tokens[0], "fw") == 0) &&
         (strcmp(tokens[1], "update") == 0)) {
@@ -565,5 +723,5 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
     }
 
     BluetoothUart_WriteText(
-        "ERR use spd|pos|yaw|heading|line|mission|motion|imu|k230 or fw update\r\n");
+        "ERR use spd|pos|yaw|heading|line|mission|motion|imu|k230|mag or fw update\r\n");
 }

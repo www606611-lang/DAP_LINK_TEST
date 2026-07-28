@@ -2,6 +2,7 @@
 
 #include "bluetooth_uart.h"
 #include "board_motor_safe.h"
+#include "electromagnet.h"
 #include "firmware_layout.h"
 #include "system_watchdog.h"
 #include "ti_msp_dl_config.h"
@@ -22,6 +23,7 @@ bool FirmwareUpdate_RequestBootloader(void)
     if (g_bootloader_pending || !BoardMotorSafe_IsHighImpedance()) {
         return false;
     }
+    Electromagnet_Off();
     BoardMotorSafe_EmergencyStop();
     g_bootloader_pending = true;
     return true;
@@ -39,6 +41,7 @@ void FirmwareUpdate_Task(void)
     if (!g_bootloader_pending || !BluetoothUart_IsTxIdle()) {
         return;
     }
+    Electromagnet_Off();
     SystemWatchdog_PrepareForBootloader();
     mailbox = (volatile firmware_mailbox_t *) FIRMWARE_MAILBOX_ADDRESS;
     mailbox->magic = FIRMWARE_MAILBOX_MAGIC;

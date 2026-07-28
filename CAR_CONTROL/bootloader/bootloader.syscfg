@@ -3,6 +3,8 @@
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  */
 
+const GPIO          = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const AUX_OUTPUT    = GPIO.addInstance();
 const UART          = scripting.addModule("/ti/driverlib/UART", {}, false);
 const BOOT_UART     = UART.addInstance();
 const SYSCTL        = scripting.addModule("/ti/driverlib/SYSCTL");
@@ -20,6 +22,13 @@ const hfxIn       = system.clockTree["HFXT"];
 hfxIn.inputFreq   = 40;
 hfxIn.HFXTStartup = 10;
 hfxIn.enable      = true;
+
+AUX_OUTPUT.$name                                      = "AUX_OUTPUT";
+AUX_OUTPUT.associatedPins[0].$name                    = "ELECTROMAGNET_CTRL";
+AUX_OUTPUT.associatedPins[0].direction                = "OUTPUT";
+AUX_OUTPUT.associatedPins[0].initialValue             = "CLEARED";
+AUX_OUTPUT.associatedPins[0].internalResistor         = "PULL_DOWN";
+AUX_OUTPUT.associatedPins[0].pin.$assign              = "PA2";
 
 BOOT_UART.$name                            = "BOOT_UART";
 BOOT_UART.targetBaudRate                   = 115200;

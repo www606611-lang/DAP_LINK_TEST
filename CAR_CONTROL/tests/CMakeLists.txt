@@ -89,3 +89,14 @@ target_include_directories(chassis_radio_link_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility"
 )
 add_test(NAME chassis_radio_link COMMAND chassis_radio_link_test)
+
+add_executable(electromagnet_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/electromagnet_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/electromagnet/electromagnet.c"
+)
+target_compile_features(electromagnet_test PRIVATE c_std_99)
+target_include_directories(electromagnet_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/electromagnet"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/mcu"
+)
+add_test(NAME electromagnet COMMAND electromagnet_test)

@@ -11,7 +11,9 @@ param(
         "LineSet", "LineRun", "LineStop", "LineStatus", "LineCal",
         "MissionStart", "MissionStop", "MissionStatus",
         "MotionStart", "MotionStop", "MotionStatus",
-        "K230Status", "AppStatus", "WatchdogStatus", "WatchdogTest")]
+        "K230Status", "MagGrip", "MagRelease", "MagGet", "MagSet",
+        "MagOn", "MagPulse", "MagOff", "MagStatus",
+        "AppStatus", "WatchdogStatus", "WatchdogTest")]
     [string]$Action = "Status",
     [switch]$Takeover,
     [switch]$DirectSerial,
@@ -62,6 +64,9 @@ param(
     [string]$MotionHeading = "hold",
     [single]$MotionMaxSpeed = 1400.0,
     [uint16]$MotionTimeout = 6000,
+    [uint16]$MagnetPulseMs = 100,
+    [uint16]$MagnetPullInMs = 200,
+    [uint16]$MagnetHoldDuty = 1000,
     [uint32]$PollMs = 300,
     [uint32]$RunTimeoutMs = 15000
 )
@@ -614,6 +619,30 @@ try {
         }
         "K230Status" {
             [void](Invoke-Protocol "k230 stat" @("KSTAT ", "ERR "))
+        }
+        "MagGrip" {
+            [void](Invoke-Protocol "mag grip" @("OK MAG GRIP", "ERR "))
+        }
+        "MagRelease" {
+            [void](Invoke-Protocol "mag release" @("OK MAG RELEASE", "ERR "))
+        }
+        "MagGet" {
+            [void](Invoke-Protocol "mag get" @("OK MAGCFG ", "ERR "))
+        }
+        "MagSet" {
+            [void](Invoke-Protocol "mag set $MagnetPullInMs $MagnetHoldDuty" @("OK MAGCFG ", "ERR "))
+        }
+        "MagOn" {
+            [void](Invoke-Protocol "mag on" @("OK MAG ON", "ERR "))
+        }
+        "MagPulse" {
+            [void](Invoke-Protocol "mag pulse $MagnetPulseMs" @("OK MAG PULSE ", "ERR "))
+        }
+        "MagOff" {
+            [void](Invoke-Protocol "mag off" @("OK MAG RELEASE", "ERR "))
+        }
+        "MagStatus" {
+            [void](Invoke-Protocol "mag stat" @("MAGSTAT ", "ERR "))
         }
         "YawGet" {
             [void](Invoke-Protocol "yaw get" @("OK YCFG ", "ERR "))

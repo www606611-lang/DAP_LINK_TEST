@@ -15,6 +15,8 @@
 #define BOARD_POSITION_SW2_PIN_NAME   "PB4"
 #define BOARD_POSITION_SW1_PIN_NAME   "PB5"
 
+#define BOARD_ELECTROMAGNET_CTRL_PIN_NAME "PA2"
+
 /* Motor A/E0 is the left wheel; motor B/E1 is the right wheel. */
 #define BOARD_ENCODER_0_A_PIN_NAME    "PB0"
 #define BOARD_ENCODER_0_B_PIN_NAME    "PB1"

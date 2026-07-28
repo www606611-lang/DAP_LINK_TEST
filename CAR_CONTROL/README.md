@@ -32,6 +32,16 @@ into `car_control`.
   debounce. PB4/PB5 use the board's 200 kOhm pull-ups and 100 nF capacitors
   plus MCU internal pull-ups.
 - ST7789 SPI display support is enabled.
+- PA2/TIMG8_CCP1 controls an external active-high MOS switch for a 5 V
+  electromagnet. `Electromagnet_Grip()` applies full GPIO power continuously;
+  `Electromagnet_Release()` immediately forces the output low. Intermediate
+  hold duties remain available for later hardware characterization, but the
+  validated default does not reduce the holding force. Bluetooth
+  commands `mag grip`, `mag release`, `mag get`, `mag set PULL_MS HOLD`, and
+  `mag stat` expose the product workflow. `mag on` and `mag pulse <ms>` remain
+  diagnostic commands. Activation from the tuning console is accepted only
+  while the wheel motors are in `HIGH-Z`; startup and wireless update always
+  release the electromagnet.
 - Motor control nets are confirmed as:
   - channel A: `PA29 -> AIN1`, `PA30 -> AIN2`
   - channel B: `PA23 -> BIN1`, `PA24 -> BIN2`

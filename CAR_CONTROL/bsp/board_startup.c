@@ -1,5 +1,6 @@
 #include "board_startup.h"
 
+#include "electromagnet_pwm.h"
 #include "motor_pwm.h"
 #include "ti_msp_dl_config.h"
 
@@ -20,14 +21,18 @@ static void board_startup_force_motor_gpio_low(void)
 void BoardStartup_Init(void)
 {
     SYSCFG_DL_initPower();
+    ElectromagnetPwm_ForceGpioLow();
     board_startup_force_motor_gpio_low();
     SYSCFG_DL_GPIO_init();
+    ElectromagnetPwm_ForceGpioLow();
     board_startup_force_motor_gpio_low();
 
     /* Keep this list aligned with the generated SYSCFG_DL_init(). */
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_MOTOR_A_PWM_init();
     SYSCFG_DL_MOTOR_B_PWM_init();
+    SYSCFG_DL_ELECTROMAGNET_PWM_init();
+    ElectromagnetPwm_Init();
     MotorPwm_DisableAll();
     SYSCFG_DL_I2C_0_init();
     SYSCFG_DL_I2C_1_init();
