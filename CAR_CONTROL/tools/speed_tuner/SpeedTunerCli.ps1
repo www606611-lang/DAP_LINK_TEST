@@ -38,7 +38,7 @@ param(
     [single]$YawMinSpeed = 200.0,
     [uint16]$YawBoost = 40,
     [uint16]$YawLimit = 750,
-    [single]$YawTolerance = 0.7,
+    [single]$YawTolerance = 0.2,
     [single]$YawSettleRate = 5.0,
     [uint16]$YawSettleTime = 300,
     [uint16]$YawTimeout = 5000,

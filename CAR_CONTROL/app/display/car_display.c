@@ -562,6 +562,7 @@ static void car_display_format_signed_tenths(
         sign = '-';
         magnitude = -magnitude;
     }
+    magnitude += 50;
     if (magnitude > 999000) {
         magnitude = 999000;
     }

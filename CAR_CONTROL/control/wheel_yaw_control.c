@@ -10,7 +10,7 @@
 #define WHEEL_YAW_DEFAULT_KD                    7.0f
 #define WHEEL_YAW_DEFAULT_MAX_TURN_PPS        800.0f
 #define WHEEL_YAW_DEFAULT_MIN_TURN_PPS        200.0f
-#define WHEEL_YAW_DEFAULT_TOLERANCE_DEG         0.7f
+#define WHEEL_YAW_DEFAULT_TOLERANCE_DEG         0.2f
 #define WHEEL_YAW_DEFAULT_SETTLE_RATE_DPS       5.0f
 #define WHEEL_YAW_DEFAULT_SETTLE_TIME_MS      300U
 #define WHEEL_YAW_DEFAULT_FEEDFORWARD_BOOST    40U
@@ -29,7 +29,7 @@
 #define WHEEL_YAW_DT_MAX_MS                     30U
 #define WHEEL_YAW_INTEGRAL_LIMIT_DEG_S         100.0f
 #define WHEEL_YAW_RATE_FILTER_TAU_S               0.05f
-#define WHEEL_YAW_TOLERANCE_HYSTERESIS_DEG        0.3f
+#define WHEEL_YAW_TOLERANCE_HYSTERESIS_DEG        0.1f
 #define WHEEL_YAW_FEEDFORWARD_RAMP_MULTIPLIER      2.0f
 
 static wheel_yaw_control_config_t g_config;

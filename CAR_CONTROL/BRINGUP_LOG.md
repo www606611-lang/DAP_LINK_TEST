@@ -1347,3 +1347,20 @@ length, resync, overflow, and transmit-drop errors after restart. The final
 K230 and tuner snapshots both showed the complete link online and
 `READY / HIGH-Z`. This completes W3. W4 remains unimplemented and wireless
 frames still have zero motion ownership.
+
+## 2026-07-28: button Yaw terminal-accuracy refinement
+
+Repeated `+45`, `-60`, and `+90 degree` button turns exposed a consistent
+sub-degree terminal shortfall even though the established Yaw PID remained
+stable. The controller default completion tolerance was tightened from `0.7`
+to `0.2 degrees`, and its deadband-release hysteresis was reduced from `0.3`
+to `0.1 degrees`. This preserves symmetric targets and avoids direction-specific
+angle bias while allowing a small final correction if the stopped chassis
+drifts beyond the tighter band.
+
+The LCD signed-tenths formatter now rounds to the nearest `0.1 degree` instead
+of truncating, and both tuner front ends use the same `0.2 degree` default.
+GCC and TIClang builds passed along with all seven host tests. The 79,320-byte
+GCC image was installed through the JDY-31 updater, `yaw get` returned
+`tol=0.2000`, and the final supervisor check returned high impedance. The
+operator accepted the refined physical button behavior for promotion.

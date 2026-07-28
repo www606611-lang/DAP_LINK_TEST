@@ -1542,7 +1542,7 @@ $yawBottomColumns = $yawColumns
 $yawLabelsBottom = @(
     'PWM limit', 'Tolerance (deg)', 'Settle rate', 'Settle (ms)',
     'Timeout (ms)', 'FF boost')
-$yawDefaultsBottom = @('750', '0.7000', '5.0000', '300', '5000', '40')
+$yawDefaultsBottom = @('750', '0.2000', '5.0000', '300', '5000', '40')
 $yawBottomBoxes = @()
 for ($index = 0; $index -lt $yawBottomColumns.Count; $index++) {
     $yawTab.Controls.Add((New-Label $yawLabelsBottom[$index] $yawBottomColumns[$index] 47 105))
