@@ -48,6 +48,7 @@ static car_display_phase_t g_display_phase = CAR_DISPLAY_PHASE_HEADER;
 static bool g_display_dirty = true;
 static uint8_t g_display_priority_slot;
 static uint8_t g_display_slow_index;
+static bool g_display_idle_line_next = true;
 
 static const car_display_phase_t g_display_slow_phases[] = {
     CAR_DISPLAY_PHASE_HEADER,
@@ -243,9 +244,14 @@ static car_display_phase_t car_runtime_next_display_phase(
     if (g_display_priority_slot == 0U) {
         phase = CAR_DISPLAY_PHASE_ATTITUDE;
     } else if (g_display_priority_slot == 1U) {
-        phase = ((workflow == CAR_APP_WORKFLOW_LINE_TEST) ||
-            (workflow == CAR_APP_WORKFLOW_LINE_MISSION)) ?
-            CAR_DISPLAY_PHASE_LINE : CAR_DISPLAY_PHASE_SPEED;
+        if ((workflow == CAR_APP_WORKFLOW_LINE_TEST) ||
+            (workflow == CAR_APP_WORKFLOW_LINE_MISSION)) {
+            phase = CAR_DISPLAY_PHASE_LINE;
+        } else {
+            phase = g_display_idle_line_next ?
+                CAR_DISPLAY_PHASE_LINE : CAR_DISPLAY_PHASE_SPEED;
+            g_display_idle_line_next = !g_display_idle_line_next;
+        }
     } else {
         phase = g_display_slow_phases[g_display_slow_index];
         g_display_slow_index++;
