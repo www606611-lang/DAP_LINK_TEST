@@ -4,6 +4,7 @@
 #include "control_supervisor.h"
 #include "debug_snapshot.h"
 #include "jdy31_config.h"
+#include "line_follow_mission.h"
 #include "line_sensor.h"
 #include "st7789.h"
 
@@ -32,6 +33,7 @@ static void car_display_reset_row_cache(void);
 static uint8_t car_display_row_index(uint16_t y);
 static const char *car_display_app_state_text(uint32_t state);
 static const char *car_display_workflow_text(uint32_t workflow);
+static const char *car_display_line_mission_text(uint32_t state);
 static const char *car_display_control_mode_text(uint32_t mode);
 static const char *car_display_block_reason_text(uint32_t reason);
 static const char *car_display_key_text(
@@ -72,6 +74,7 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     uint16_t line_color;
     uint16_t health_color;
     uint16_t key_color;
+    uint16_t footer_color;
     uint8_t line_index;
     uint32_t uptime_s;
 
@@ -145,6 +148,15 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     key_text = car_display_key_text(&debug);
     key_color = (debug.pb21_pressed || debug.pb4_pressed ||
         debug.pb5_pressed) ? ST7789_COLOR_GREEN : ST7789_COLOR_WHITE;
+    if (debug.line_mission_state ==
+        (uint32_t) LINE_FOLLOW_MISSION_RUNNING) {
+        footer_color = ST7789_COLOR_GREEN;
+    } else if (debug.line_mission_state ==
+        (uint32_t) LINE_FOLLOW_MISSION_FAULT) {
+        footer_color = ST7789_COLOR_RED;
+    } else {
+        footer_color = key_color;
+    }
     health_color = (debug.imu_ready && debug.imu_attitude_valid &&
         debug.line_sensor_ready && debug.radio_online) ?
         ST7789_COLOR_GREEN :
@@ -313,11 +325,12 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
             break;
 
         case CAR_DISPLAY_PHASE_FOOTER:
-            car_display_show_row(150U, key_color,
+            car_display_show_row(150U, footer_color,
                 ST7789_COLOR_BLACK,
-                "KEY %-4s %-6s %-7s P%+4ld/%+4ld",
+                "KEY %-4s TRK %-5s %-7s P%+4ld/%+4ld",
                 key_text,
-                car_display_control_mode_text(debug.control_mode),
+                car_display_line_mission_text(
+                    debug.line_mission_state),
                 car_display_block_reason_text(
                     debug.control_block_reason),
                 (long) car_display_clamp_i32(
@@ -465,6 +478,24 @@ static const char *car_display_workflow_text(uint32_t workflow)
             return "YAW";
         default:
             return "IDLE";
+    }
+}
+
+static const char *car_display_line_mission_text(uint32_t state)
+{
+    switch ((line_follow_mission_state_t) state) {
+        case LINE_FOLLOW_MISSION_LOCKED:
+            return "LOCK";
+        case LINE_FOLLOW_MISSION_READY:
+            return "READY";
+        case LINE_FOLLOW_MISSION_RUNNING:
+            return "RUN";
+        case LINE_FOLLOW_MISSION_STOPPED:
+            return "STOP";
+        case LINE_FOLLOW_MISSION_FAULT:
+            return "FAULT";
+        default:
+            return "UNK";
     }
 }
 

@@ -1364,3 +1364,26 @@ GCC and TIClang builds passed along with all seven host tests. The 79,320-byte
 GCC image was installed through the JDY-31 updater, `yaw get` returned
 `tol=0.2000`, and the final supervisor check returned high impedance. The
 operator accepted the refined physical button behavior for promotion.
+
+## 2026-07-28: competition button mapping acceptance
+
+The physical controls now expose the reusable competition workflows directly:
+
+```text
+PB21:    start the formal 1400 pps line-following mission
+PB21:    stop the active line mission on the next press
+SW2/PB4: relative -90 degree Yaw turn from idle
+SW1/PB5: relative +90 degree Yaw turn from idle
+```
+
+The established stop-before-start rule remains active, so any board button
+pressed during motion stops the current owner without immediately starting a
+different command. The LCD footer reports `TRK READY/RUN/STOP/FAULT`; the
+header and HIGH-Z indicator retain the active workflow and motor-safety state.
+
+GCC, TIClang, and both product profiles built successfully, and all seven host
+tests passed. The 79,416-byte GCC image was installed through the JDY-31
+updater with CRC32 `0x61085C8A`. The operator accepted the physical line toggle,
+both 90-degree turns, and LCD state display. Final telemetry reported
+`MSTAT state=STOP runs=2 base=1400 limit=750 ... control=0 hz=1` and
+`ASTAT state=READY workflow=0 action=0 ... hz=1`.

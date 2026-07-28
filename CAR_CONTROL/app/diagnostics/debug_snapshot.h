@@ -52,6 +52,7 @@ typedef struct {
     int32_t line_tracking_left_target_pps;
     int32_t line_tracking_right_target_pps;
     uint32_t line_tracking_elapsed_ms;
+    uint32_t line_mission_state;
     int32_t motion_base_target_pps;
     int32_t motion_error_count;
     int32_t motion_heading_error_mdeg;

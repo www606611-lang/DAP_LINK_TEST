@@ -41,11 +41,12 @@ into `car_control`.
   three buttons is pressed during motion, after the speed-command lease
   expires, at the test endpoint, and on every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. For ground Yaw testing, PB21 commands `+45 degrees`, SW1/PB5 commands
-  `+90 degrees`, and SW2/PB4 commands `-60 degrees`. Each command is relative
-  to the heading at the button press. Pressing any key during motion stops
-  immediately; commands are never stacked while moving. Remote position-loop
-  commands and Stress 24 remain available through Bluetooth.
+  wheel. From idle, PB21 starts the formal `1400 pps` line-following mission;
+  pressing it again stops the mission. SW1/PB5 commands a relative `+90 degree`
+  Yaw turn and SW2/PB4 commands a relative `-90 degree` turn. Pressing any key
+  during motion stops immediately; commands are never stacked while moving.
+  Remote position-loop commands and Stress 24 remain available through
+  Bluetooth.
 - PB21, PB4, and PB5 use both-edge GPIOB interrupts with 5 ms press and 30 ms
   release debounce. The longer release qualification prevents switch bounce
   from re-arming a second command. The board-level GPIOB dispatcher drains
@@ -92,9 +93,9 @@ physical-button motion requests.
 
 When a supervised motion workflow is active, any of the three board buttons
 produces only `STOP_ACTIVE`; it cannot immediately start a different motion.
-When ready, the existing physical Yaw commands remain PB21 `+45 degrees`,
-SW2/PB4 `-60 degrees`, and SW1/PB5 `+90 degrees`. `main.c` is now a thin
-adapter from these policy actions to the already validated bring-up modules.
+When ready, PB21 starts the formal line mission, SW2/PB4 requests a relative
+`-90 degree` Yaw turn, and SW1/PB5 requests `+90 degrees`. `main.c` is now a
+thin adapter from these policy actions to the already validated workflows.
 The read-only `app stat` command and CLI `AppStatus` action expose state,
 workflow, last action, requested Yaw, transition count, and motor high-Z state.
 
@@ -590,5 +591,5 @@ ctest --test-dir build-host-tests -C Debug --output-on-failure
 The current suite verifies strict line-test completion, center-stability reset,
 grace timeout failure, 32-bit millisecond-counter wraparound, application-state
 transitions, service/reset lockout, deterministic workflow priority, physical
-button Yaw mapping, stop-before-start behavior, tuning tokenization, numeric
+button action mapping, stop-before-start behavior, tuning tokenization, numeric
 limits, and every supported bring-up profile keyword.

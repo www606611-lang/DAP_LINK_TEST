@@ -23,13 +23,14 @@ static void test_ready_button_commands(void)
     inputs.pb21_press_event = true;
     snapshot = step(&inputs);
     assert(snapshot.state == CAR_APP_STATE_READY);
-    assert(snapshot.action == CAR_APP_ACTION_START_YAW);
-    assert(snapshot.yaw_command_mdeg == 45000);
+    assert(snapshot.action == CAR_APP_ACTION_START_LINE_MISSION);
+    assert(snapshot.yaw_command_mdeg == 0);
 
     inputs.pb21_press_event = false;
     inputs.pb4_press_event = true;
     snapshot = step(&inputs);
-    assert(snapshot.yaw_command_mdeg == -60000);
+    assert(snapshot.action == CAR_APP_ACTION_START_YAW);
+    assert(snapshot.yaw_command_mdeg == -90000);
 
     inputs.pb4_press_event = false;
     inputs.pb5_press_event = true;
@@ -62,7 +63,7 @@ static void test_button_stops_formal_line_mission(void)
     memset(&inputs, 0, sizeof(inputs));
     CarApp_Init(false);
     inputs.line_mission_active = true;
-    inputs.pb5_press_event = true;
+    inputs.pb21_press_event = true;
     snapshot = step(&inputs);
 
     assert(snapshot.state == CAR_APP_STATE_MOTION_ACTIVE);

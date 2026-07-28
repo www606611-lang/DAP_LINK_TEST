@@ -550,6 +550,7 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->line_tracking_right_target_pps =
         g_car_line_tracking_right_target_pps;
     snapshot->line_tracking_elapsed_ms = g_car_line_tracking_elapsed_ms;
+    snapshot->line_mission_state = g_car_line_mission_state;
     snapshot->motion_base_target_pps = g_car_motion_base_target_pps;
     snapshot->motion_error_count = g_car_motion_error_count;
     snapshot->motion_heading_error_mdeg =

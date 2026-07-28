@@ -302,6 +302,11 @@ static void car_runtime_process_action(
                 break;
         }
         CarDebugSnapshot_SetButtonYawCommand(0);
+    } else if (snapshot->action ==
+        CAR_APP_ACTION_START_LINE_MISSION) {
+        if (LineFollowMission_RequestStart()) {
+            CarDebugSnapshot_SetButtonYawCommand(0);
+        }
     } else if ((snapshot->action == CAR_APP_ACTION_START_YAW) &&
         YawBringupTest_RequestTurn(
             (float) snapshot->yaw_command_mdeg / 1000.0f)) {
