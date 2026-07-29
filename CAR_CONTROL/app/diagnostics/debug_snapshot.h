@@ -76,6 +76,8 @@ typedef struct {
     uint32_t h_mission_sequence;
     int32_t h_target_x_0p1mm;
     uint32_t h_elapsed_ms;
+    uint32_t h_speed_stage;
+    int32_t h_base_speed_pps;
     uint32_t h_b_passage_ms;
     uint32_t h_finish_ms;
     bool h_route_ready;

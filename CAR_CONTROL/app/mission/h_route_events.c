@@ -13,12 +13,18 @@ bool HRouteEvents_ConfigIsValid(const h_route_config_t *config)
     }
     return (config->precision_stop_delta_count >= -2000) &&
         (config->precision_stop_delta_count <= 2000) &&
+        (config->finish_arm_count > 0) &&
         (config->finish_rearm_ms >= 100U) &&
         (config->finish_rearm_ms <= 5000U) &&
         (config->marker_active_min >= 4U) &&
         (config->marker_active_min <= 8U) &&
+        (config->finish_marker_active_min >= 4U) &&
+        (config->finish_marker_active_min <=
+            config->marker_active_min) &&
         (config->marker_confirm_ms > 0U) &&
         (config->marker_confirm_ms <= 200U) &&
+        (config->finish_marker_confirm_ms > 0U) &&
+        (config->finish_marker_confirm_ms <= 200U) &&
         (config->marker_release_ms > 0U) &&
         (config->marker_release_ms <= 200U);
 }
@@ -122,6 +128,8 @@ void HRouteEvents_Update(h_route_events_t *events,
     if (events->snapshot.left_start_a &&
         !events->snapshot.finish_armed &&
         !events->snapshot.marker_wide &&
+        (events->snapshot.progress_count >=
+            events->config.finish_arm_count) &&
         ((uint32_t) (input->now_ms - events->left_start_ms) >=
             events->config.finish_rearm_ms)) {
         events->snapshot.finish_armed = true;
@@ -168,10 +176,15 @@ static void h_route_events_reset_run(h_route_events_t *events)
 static void h_route_events_update_marker(h_route_events_t *events,
     const h_route_input_t *input)
 {
-    bool raw_wide = input->line_active_count >=
+    uint8_t active_min = events->snapshot.finish_armed ?
+        events->config.finish_marker_active_min :
         events->config.marker_active_min;
+    uint16_t confirm_ms = events->snapshot.finish_armed ?
+        events->config.finish_marker_confirm_ms :
+        events->config.marker_confirm_ms;
+    bool raw_wide = input->line_active_count >= active_min;
     uint32_t debounce_ms = raw_wide ?
-        events->config.marker_confirm_ms :
+        confirm_ms :
         events->config.marker_release_ms;
 
     if (raw_wide != events->raw_marker_wide) {

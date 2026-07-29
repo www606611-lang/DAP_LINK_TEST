@@ -10,8 +10,16 @@
 #define H_MISSION_RUNTIME_PRECISION_SPEED_PPS 700.0f
 #define H_MISSION_RUNTIME_PRECISION_TIMEOUT_MS 4000U
 #define H_MISSION_ROUTE_FINISH_REARM_MS       300U
+#define H_MISSION_ROUTE_FINISH_ARM_COUNT      19000
 /* Tuned after measuring the first physical stop at the finish A marker. */
 #define H_MISSION_ROUTE_PRECISION_DELTA_COUNT    0
+
+typedef enum {
+    H_MISSION_SPEED_IDLE = 0,
+    H_MISSION_SPEED_RAMP,
+    H_MISSION_SPEED_CRUISE,
+    H_MISSION_SPEED_STOPPING
+} h_mission_speed_stage_t;
 
 typedef struct {
     h_mission_snapshot_t mission;
@@ -19,6 +27,8 @@ typedef struct {
     bool route_ready;
     bool line_owned;
     bool precision_owned;
+    h_mission_speed_stage_t speed_stage;
+    float requested_base_speed_pps;
     uint32_t executor_error_count;
 } h_mission_runtime_snapshot_t;
 

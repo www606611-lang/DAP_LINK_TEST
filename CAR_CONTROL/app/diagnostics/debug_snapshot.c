@@ -184,6 +184,8 @@ volatile uint32_t g_car_h_mission_fault;
 volatile uint32_t g_car_h_mission_sequence;
 volatile int32_t g_car_h_target_x_0p1mm;
 volatile uint32_t g_car_h_elapsed_ms;
+volatile uint32_t g_car_h_speed_stage;
+volatile int32_t g_car_h_base_speed_pps;
 volatile uint32_t g_car_h_b_passage_ms;
 volatile uint32_t g_car_h_finish_ms;
 volatile bool g_car_h_route_ready;
@@ -271,6 +273,9 @@ void CarDebugSnapshot_Update(void)
         g_car_h_mission_sequence = h_mission.mission.mission_sequence;
         g_car_h_target_x_0p1mm = h_mission.mission.target_x_0p1mm;
         g_car_h_elapsed_ms = h_mission.mission.elapsed_ms;
+        g_car_h_speed_stage = (uint32_t) h_mission.speed_stage;
+        g_car_h_base_speed_pps = car_debug_round_float(
+            h_mission.requested_base_speed_pps);
         g_car_h_b_passage_ms = h_mission.mission.b_passage_ms;
         g_car_h_finish_ms = h_mission.mission.finish_ms;
         g_car_h_route_ready = h_mission.route_ready;
@@ -609,6 +614,8 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->h_mission_sequence = g_car_h_mission_sequence;
     snapshot->h_target_x_0p1mm = g_car_h_target_x_0p1mm;
     snapshot->h_elapsed_ms = g_car_h_elapsed_ms;
+    snapshot->h_speed_stage = g_car_h_speed_stage;
+    snapshot->h_base_speed_pps = g_car_h_base_speed_pps;
     snapshot->h_b_passage_ms = g_car_h_b_passage_ms;
     snapshot->h_finish_ms = g_car_h_finish_ms;
     snapshot->h_route_ready = g_car_h_route_ready;

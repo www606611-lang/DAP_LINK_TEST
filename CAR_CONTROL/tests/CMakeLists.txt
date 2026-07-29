@@ -42,6 +42,19 @@ target_include_directories(line_follow_mission_test PRIVATE
 
 add_test(NAME line_follow_mission COMMAND line_follow_mission_test)
 
+add_executable(wheel_line_tracking_control_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/wheel_line_tracking_control_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control/wheel_line_tracking_control.c"
+)
+target_compile_features(wheel_line_tracking_control_test PRIVATE c_std_99)
+target_include_directories(wheel_line_tracking_control_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/icm20948"
+)
+
+add_test(NAME wheel_line_tracking_control
+  COMMAND wheel_line_tracking_control_test)
+
 add_executable(h_mission_test
   "${CMAKE_CURRENT_SOURCE_DIR}/h_mission_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_mission.c"

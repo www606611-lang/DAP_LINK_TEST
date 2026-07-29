@@ -4,6 +4,7 @@
 #include "control_supervisor.h"
 #include "debug_snapshot.h"
 #include "h_mission.h"
+#include "h_mission_runtime.h"
 #include "jdy31_config.h"
 #include "line_follow_mission.h"
 #include "line_sensor.h"
@@ -404,12 +405,14 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
         case CAR_DISPLAY_PHASE_ENCODER:
             car_display_show_row(48U, ST7789_COLOR_WHITE,
                 ST7789_COLOR_BLACK,
-                "TIME %3lu.%02lus ENC %+9ld",
+                "TIME %3lu.%02lus BASE%4ld ENC%+8ld",
                 (unsigned long) (elapsed_cs / 100U),
                 (unsigned long) (elapsed_cs % 100U),
                 (long) car_display_clamp_i32(
+                    debug->h_base_speed_pps, 0, 9999),
+                (long) car_display_clamp_i32(
                     debug->h_route_progress_count,
-                    -99999999, 99999999));
+                    -9999999, 9999999));
             break;
 
         case CAR_DISPLAY_PHASE_ATTITUDE:
@@ -560,9 +563,17 @@ static const char *car_display_h_prompt(
         case H_MISSION_STATE_ARMED:
             return "AT A / START READY";
         case H_MISSION_STATE_RUNNING:
+            if (debug->h_speed_stage ==
+                (uint32_t) H_MISSION_SPEED_RAMP) {
+                return "S-CURVE RAMP";
+            }
+            if (debug->h_speed_stage ==
+                (uint32_t) H_MISSION_SPEED_STOPPING) {
+                return "S-CURVE BRAKE";
+            }
             return (debug->h_mission_phase ==
                     (uint32_t) H_MISSION_PHASE_LEAVE_START_A) ?
-                "LEAVING START A" : "FOLLOWING ONE LAP";
+                "LEAVING START A" : "CRUISE / FOLLOW LINE";
         case H_MISSION_STATE_PRECISION_STOP:
             return "STOPPING ON A";
         case H_MISSION_STATE_FINISHED:

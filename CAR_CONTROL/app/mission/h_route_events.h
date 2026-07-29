@@ -6,9 +6,12 @@
 
 typedef struct {
     int32_t precision_stop_delta_count;
+    int32_t finish_arm_count;
     uint16_t finish_rearm_ms;
     uint8_t marker_active_min;
+    uint8_t finish_marker_active_min;
     uint16_t marker_confirm_ms;
+    uint16_t finish_marker_confirm_ms;
     uint16_t marker_release_ms;
 } h_route_config_t;
 

@@ -27,6 +27,8 @@ static int16_t g_start_line_error;
 static int16_t g_command_line_error;
 static uint8_t g_start_active_count;
 static uint8_t g_command_active_count;
+static float g_start_base_speed_pps;
+static float g_command_base_speed_pps;
 
 static void reset_mocks(void)
 {
@@ -54,6 +56,8 @@ static void reset_mocks(void)
     g_command_line_error = 0;
     g_start_active_count = 0U;
     g_command_active_count = 0U;
+    g_start_base_speed_pps = 0.0f;
+    g_command_base_speed_pps = 0.0f;
 }
 
 static line_follow_mission_snapshot_t mission_snapshot(void)
@@ -155,6 +159,22 @@ static void test_wide_marker_start_holds_center_until_narrow(void)
     assert(!mission_snapshot().centered_start_active);
 }
 
+static void test_runtime_base_speed_update(void)
+{
+    reset_mocks();
+    LineFollowMission_Init(false);
+    assert(!LineFollowMission_SetBaseSpeed(99.0f));
+    assert(!LineFollowMission_SetBaseSpeed(5101.0f));
+    assert(LineFollowMission_SetBaseSpeed(500.0f));
+    start_mission();
+    assert(g_start_base_speed_pps == 500.0f);
+
+    assert(LineFollowMission_SetBaseSpeed(3200.0f));
+    LineFollowMission_Task(125U);
+    assert(g_command_base_speed_pps == 3200.0f);
+    assert(mission_snapshot().base_speed_pps == 3200.0f);
+}
+
 static void test_running_refresh_and_operator_stop(void)
 {
     line_follow_mission_snapshot_t snapshot;
@@ -198,6 +218,7 @@ int main(void)
     test_locked_and_busy_start_rejection();
     test_start_applies_formal_baseline();
     test_wide_marker_start_holds_center_until_narrow();
+    test_runtime_base_speed_update();
     test_running_refresh_and_operator_stop();
     test_control_error_faults_and_stops();
     return 0;
@@ -252,12 +273,12 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     float base_speed_pps, int16_t line_error, uint8_t active_count,
     bool line_seen, uint32_t observation_ms, uint32_t now_ms)
 {
-    (void) base_speed_pps;
     (void) line_seen;
     (void) observation_ms;
     (void) now_ms;
     g_start_line_error = line_error;
     g_start_active_count = active_count;
+    g_start_base_speed_pps = base_speed_pps;
     if ((active_count >= 4U) && (line_error == 0)) {
         return WHEEL_LINE_TRACKING_BAD_COMMAND;
     }
@@ -270,12 +291,12 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
     float base_speed_pps, int16_t line_error, uint8_t active_count,
     bool line_seen, uint32_t observation_ms, uint32_t now_ms)
 {
-    (void) base_speed_pps;
     (void) line_seen;
     (void) observation_ms;
     (void) now_ms;
     g_command_line_error = line_error;
     g_command_active_count = active_count;
+    g_command_base_speed_pps = base_speed_pps;
     g_command_count++;
     return g_set_command_result;
 }

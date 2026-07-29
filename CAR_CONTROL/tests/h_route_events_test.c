@@ -7,9 +7,12 @@ static h_route_config_t valid_config(void)
 {
     const h_route_config_t config = {
         .precision_stop_delta_count = 0,
+        .finish_arm_count = 500,
         .finish_rearm_ms = 300U,
         .marker_active_min = 5U,
+        .finish_marker_active_min = 4U,
         .marker_confirm_ms = 20U,
+        .finish_marker_confirm_ms = 10U,
         .marker_release_ms = 20U
     };
     return config;
@@ -61,6 +64,10 @@ static void test_invalid_config_blocks_start(void)
 
     config = valid_config();
     config.precision_stop_delta_count = 2001;
+    assert(!HRouteEvents_SetConfig(&events, &config));
+
+    config = valid_config();
+    config.finish_marker_active_min = 3U;
     assert(!HRouteEvents_SetConfig(&events, &config));
 }
 
@@ -125,14 +132,14 @@ static void test_finish_requires_rearm_and_new_wide_edge(void)
     update(&events, 350U, 501, 2U);
     assert(events.snapshot.finish_armed);
 
-    update(&events, 360U, 520, 5U);
-    update(&events, 379U, 520, 5U);
+    update(&events, 360U, 520, 4U);
+    update(&events, 369U, 520, 4U);
     assert(!events.snapshot.finish_a_passed);
-    update(&events, 380U, 520, 5U);
+    update(&events, 370U, 520, 4U);
     assert(events.snapshot.finish_a_passed_event);
     assert(events.snapshot.finish_a_passed);
     assert(events.snapshot.marker_count == 3U);
-    update(&events, 381U, 521, 5U);
+    update(&events, 371U, 521, 4U);
     assert(!events.snapshot.finish_a_passed_event);
 }
 

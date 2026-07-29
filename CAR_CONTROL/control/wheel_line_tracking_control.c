@@ -34,8 +34,9 @@
 #define WHEEL_LINE_TRACKING_CORNER_SEARCH_RAMP_MS          200U
 #define WHEEL_LINE_TRACKING_CORNER_REACQUIRE_MS          1800U
 #define WHEEL_LINE_TRACKING_BASE_ACCEL_PPS_PER_S        3000.0f
+#define WHEEL_LINE_TRACKING_BASE_DECEL_PPS_PER_S        5000.0f
 #define WHEEL_LINE_TRACKING_RECOVERY_ACCEL_PPS_PER_S    9000.0f
-#define WHEEL_LINE_TRACKING_SLOWDOWN_FRACTION               0.65f
+#define WHEEL_LINE_TRACKING_SLOWDOWN_FRACTION               0.30f
 #define WHEEL_LINE_TRACKING_IMU_MAX_AGE_MS                   50U
 #define WHEEL_LINE_TRACKING_YAW_RATE_PER_CORRECTION_PPS       0.075f
 #define WHEEL_LINE_TRACKING_YAW_RATE_FILTER_TAU_S             0.04f
@@ -410,6 +411,7 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
     float headroom_pps;
     float desired_base_speed_pps;
     float maximum_base_increase_pps;
+    float maximum_base_decrease_pps;
     float yaw_rate_filter_alpha;
     float yaw_rate_error_dps;
     float yaw_rate_boost_pps;
@@ -609,8 +611,13 @@ void WheelLineTrackingControl_Task(uint32_t now_ms)
             desired_base_speed_pps = g_requested_base_speed_pps;
         }
     }
-    if (desired_base_speed_pps <= g_effective_base_speed_pps) {
-        g_effective_base_speed_pps = desired_base_speed_pps;
+    if (desired_base_speed_pps < g_effective_base_speed_pps) {
+        maximum_base_decrease_pps =
+            WHEEL_LINE_TRACKING_BASE_DECEL_PPS_PER_S * dt_s;
+        g_effective_base_speed_pps -= maximum_base_decrease_pps;
+        if (g_effective_base_speed_pps < desired_base_speed_pps) {
+            g_effective_base_speed_pps = desired_base_speed_pps;
+        }
     } else {
         maximum_base_increase_pps =
             (g_corner_recovery_active ?

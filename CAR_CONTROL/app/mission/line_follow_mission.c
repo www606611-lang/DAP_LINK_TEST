@@ -137,6 +137,18 @@ bool LineFollowMission_RequestStartFromWideMarker(
         true, narrow_active_max);
 }
 
+bool LineFollowMission_SetBaseSpeed(float base_speed_pps)
+{
+    if ((g_snapshot.state == LINE_FOLLOW_MISSION_LOCKED) ||
+        (base_speed_pps < 100.0f) ||
+        ((base_speed_pps + LINE_FOLLOW_MISSION_MAX_CORRECTION_PPS) >
+            WHEEL_SPEED_CONTROL_TARGET_MAX_PPS)) {
+        return false;
+    }
+    g_snapshot.base_speed_pps = base_speed_pps;
+    return true;
+}
+
 static bool line_follow_mission_request_start(
     bool centered_start, uint8_t narrow_active_max)
 {

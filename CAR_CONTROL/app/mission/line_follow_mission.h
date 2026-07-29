@@ -32,6 +32,7 @@ void LineFollowMission_Task(uint32_t now_ms);
 bool LineFollowMission_RequestStart(void);
 bool LineFollowMission_RequestStartFromWideMarker(
     uint8_t narrow_active_max);
+bool LineFollowMission_SetBaseSpeed(float base_speed_pps);
 void LineFollowMission_RequestStop(void);
 bool LineFollowMission_IsActive(void);
 const char *LineFollowMission_GetStateText(void);

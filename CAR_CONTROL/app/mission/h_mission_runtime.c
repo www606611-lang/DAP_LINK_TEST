@@ -10,9 +10,17 @@
 #include <stddef.h>
 
 #define H_MISSION_RUNTIME_MARKER_ACTIVE_MIN 5U
+#define H_MISSION_RUNTIME_FINISH_MARKER_ACTIVE_MIN 4U
 #define H_MISSION_RUNTIME_START_NARROW_ACTIVE_MAX 3U
 #define H_MISSION_RUNTIME_MARKER_CONFIRM_MS 20U
+#define H_MISSION_RUNTIME_FINISH_MARKER_CONFIRM_MS 10U
 #define H_MISSION_RUNTIME_MARKER_RELEASE_MS 20U
+#define H_MISSION_RUNTIME_START_SPEED_PPS  500.0f
+#define H_MISSION_RUNTIME_CRUISE_SPEED_PPS 3200.0f
+#define H_MISSION_RUNTIME_ACCEL_TIME_MS    3000U
+#define H_MISSION_RUNTIME_DECEL_START_COUNT 18000
+#define H_MISSION_RUNTIME_FINISH_SPEED_PPS   700.0f
+#define H_MISSION_RUNTIME_DECEL_TIME_MS     2400U
 
 static h_mission_t g_mission;
 static h_route_events_t g_route;
@@ -22,24 +30,37 @@ static bool g_stop_requested;
 static bool g_line_owned;
 static bool g_precision_owned;
 static bool g_executor_fault;
+static h_mission_speed_stage_t g_speed_stage;
+static float g_requested_base_speed_pps;
+static bool g_decel_active;
+static uint32_t g_decel_started_ms;
+static float g_decel_start_speed_pps;
 
 static void h_mission_runtime_collect_input(uint32_t now_ms,
     h_mission_input_t *input, wheel_odometry_snapshot_t *odometry);
 static void h_mission_runtime_update_route(uint32_t now_ms,
     const line_sensor_snapshot_t *sensor,
     const wheel_odometry_snapshot_t *odometry);
-static void h_mission_runtime_execute(void);
+static void h_mission_runtime_execute(uint32_t now_ms);
 static void h_mission_runtime_stop_owned(void);
 static void h_mission_runtime_refresh_snapshot(void);
+static float h_mission_runtime_speed_command(uint32_t elapsed_ms);
+static float h_mission_runtime_s_curve(float start, float finish,
+    uint32_t elapsed_ms, uint32_t duration_ms);
 
 void HMissionRuntime_Init(bool reset_locked, uint32_t now_ms)
 {
     const h_route_config_t route_config = {
         .precision_stop_delta_count =
             H_MISSION_ROUTE_PRECISION_DELTA_COUNT,
+        .finish_arm_count = H_MISSION_ROUTE_FINISH_ARM_COUNT,
         .finish_rearm_ms = H_MISSION_ROUTE_FINISH_REARM_MS,
         .marker_active_min = H_MISSION_RUNTIME_MARKER_ACTIVE_MIN,
+        .finish_marker_active_min =
+            H_MISSION_RUNTIME_FINISH_MARKER_ACTIVE_MIN,
         .marker_confirm_ms = H_MISSION_RUNTIME_MARKER_CONFIRM_MS,
+        .finish_marker_confirm_ms =
+            H_MISSION_RUNTIME_FINISH_MARKER_CONFIRM_MS,
         .marker_release_ms = H_MISSION_RUNTIME_MARKER_RELEASE_MS
     };
 
@@ -51,6 +72,11 @@ void HMissionRuntime_Init(bool reset_locked, uint32_t now_ms)
     g_line_owned = false;
     g_precision_owned = false;
     g_executor_fault = false;
+    g_speed_stage = H_MISSION_SPEED_IDLE;
+    g_requested_base_speed_pps = 0.0f;
+    g_decel_active = false;
+    g_decel_started_ms = 0U;
+    g_decel_start_speed_pps = 0.0f;
     g_snapshot.executor_error_count = 0U;
     h_mission_runtime_refresh_snapshot();
 }
@@ -78,6 +104,9 @@ void HMissionRuntime_Task(uint32_t now_ms)
     HMission_Step(&g_mission, &input);
     if ((old_state != H_MISSION_STATE_RUNNING) &&
         (g_mission.snapshot.state == H_MISSION_STATE_RUNNING)) {
+        g_decel_active = false;
+        g_decel_started_ms = 0U;
+        g_decel_start_speed_pps = 0.0f;
         if (!odometry.ready ||
             !HRouteEvents_Start(&g_route, now_ms,
                 odometry.average_count)) {
@@ -89,7 +118,7 @@ void HMissionRuntime_Task(uint32_t now_ms)
         HRouteEvents_Stop(&g_route);
     }
 
-    h_mission_runtime_execute();
+    h_mission_runtime_execute(now_ms);
     h_mission_runtime_refresh_snapshot();
 }
 
@@ -225,13 +254,47 @@ static void h_mission_runtime_update_route(uint32_t now_ms,
     HRouteEvents_Update(&g_route, &route_input);
 }
 
-static void h_mission_runtime_execute(void)
+static void h_mission_runtime_execute(uint32_t now_ms)
 {
     motion_supervisor_snapshot_t motion = {0};
 
     (void) MotionSupervisor_GetSnapshot(&motion);
     switch (g_mission.snapshot.state) {
         case H_MISSION_STATE_RUNNING:
+            if (!g_decel_active) {
+                g_requested_base_speed_pps =
+                    h_mission_runtime_speed_command(
+                        g_mission.snapshot.elapsed_ms);
+                if (g_route.snapshot.left_start_a &&
+                    (g_route.snapshot.progress_count >=
+                        H_MISSION_RUNTIME_DECEL_START_COUNT)) {
+                    g_decel_active = true;
+                    g_decel_started_ms = now_ms;
+                    g_decel_start_speed_pps =
+                        g_requested_base_speed_pps;
+                }
+            }
+            if (g_decel_active) {
+                g_requested_base_speed_pps =
+                    h_mission_runtime_s_curve(
+                        g_decel_start_speed_pps,
+                        H_MISSION_RUNTIME_FINISH_SPEED_PPS,
+                        now_ms - g_decel_started_ms,
+                        H_MISSION_RUNTIME_DECEL_TIME_MS);
+                g_speed_stage = H_MISSION_SPEED_STOPPING;
+            } else {
+                g_speed_stage =
+                    (g_mission.snapshot.elapsed_ms <
+                        H_MISSION_RUNTIME_ACCEL_TIME_MS) ?
+                        H_MISSION_SPEED_RAMP :
+                        H_MISSION_SPEED_CRUISE;
+            }
+            if (!LineFollowMission_SetBaseSpeed(
+                    g_requested_base_speed_pps)) {
+                g_executor_fault = true;
+                g_snapshot.executor_error_count++;
+                break;
+            }
             if (!g_line_owned) {
                 if (LineFollowMission_RequestStartFromWideMarker(
                         H_MISSION_RUNTIME_START_NARROW_ACTIVE_MAX)) {
@@ -244,8 +307,11 @@ static void h_mission_runtime_execute(void)
             break;
 
         case H_MISSION_STATE_PRECISION_STOP:
+            g_speed_stage = H_MISSION_SPEED_STOPPING;
             if (g_line_owned) {
                 LineFollowMission_RequestStop();
+                (void) LineFollowMission_SetBaseSpeed(
+                    LINE_FOLLOW_MISSION_BASE_SPEED_PPS);
                 if (!LineFollowMission_IsActive()) {
                     g_line_owned = false;
                 }
@@ -269,6 +335,9 @@ static void h_mission_runtime_execute(void)
         case H_MISSION_STATE_FINISHED:
         case H_MISSION_STATE_FAULT:
         case H_MISSION_STATE_LOCKED:
+            g_speed_stage = H_MISSION_SPEED_IDLE;
+            g_requested_base_speed_pps = 0.0f;
+            g_decel_active = false;
             h_mission_runtime_stop_owned();
             break;
 
@@ -286,6 +355,8 @@ static void h_mission_runtime_execute(void)
 
 static void h_mission_runtime_stop_owned(void)
 {
+    (void) LineFollowMission_SetBaseSpeed(
+        LINE_FOLLOW_MISSION_BASE_SPEED_PPS);
     if (g_line_owned) {
         LineFollowMission_RequestStop();
         if (!LineFollowMission_IsActive()) {
@@ -308,4 +379,33 @@ static void h_mission_runtime_refresh_snapshot(void)
         g_snapshot.route.configuration_valid;
     g_snapshot.line_owned = g_line_owned;
     g_snapshot.precision_owned = g_precision_owned;
+    g_snapshot.speed_stage = g_speed_stage;
+    g_snapshot.requested_base_speed_pps =
+        g_requested_base_speed_pps;
+}
+
+static float h_mission_runtime_speed_command(uint32_t elapsed_ms)
+{
+    return h_mission_runtime_s_curve(
+        H_MISSION_RUNTIME_START_SPEED_PPS,
+        H_MISSION_RUNTIME_CRUISE_SPEED_PPS,
+        elapsed_ms, H_MISSION_RUNTIME_ACCEL_TIME_MS);
+}
+
+static float h_mission_runtime_s_curve(float start, float finish,
+    uint32_t elapsed_ms, uint32_t duration_ms)
+{
+    float x;
+    float x2;
+    float x3;
+    float smoother;
+
+    if (elapsed_ms >= duration_ms) {
+        return finish;
+    }
+    x = (float) elapsed_ms / (float) duration_ms;
+    x2 = x * x;
+    x3 = x2 * x;
+    smoother = x3 * ((x * ((6.0f * x) - 15.0f)) + 10.0f);
+    return start + ((finish - start) * smoother);
 }
