@@ -4,7 +4,7 @@
 #include "board_motor_safe.h"
 #include "i2c1_polling.h"
 #include "line_follow_mission.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
 #include "line_tracking_bringup_test.h"
 #include "motion_supervisor.h"
 #include "runtime_metrics.h"
@@ -49,7 +49,7 @@ void speed_tuning_send_line_status(uint32_t now_ms)
     uint32_t sample_age_ms;
 
     if (!AppRuntimeMetrics_GetSnapshot(&runtime) ||
-        !LineSensorBringup_GetSnapshot(&sensor) ||
+        !LineSensor_GetSnapshot(&sensor) ||
         !I2C1Polling_GetSnapshot(&bus) ||
         !WheelLineTrackingControl_GetSnapshot(&line_tracking) ||
         !WheelSpeedControl_GetSnapshot(&speed)) {
@@ -60,7 +60,7 @@ void speed_tuning_send_line_status(uint32_t now_ms)
     BluetoothUart_WriteText("LSTAT state=");
     BluetoothUart_WriteText(LineTrackingBringupTest_GetStateText());
     BluetoothUart_WriteText(" sensor=");
-    BluetoothUart_WriteText(LineSensorBringup_GetStateText());
+    BluetoothUart_WriteText(LineSensor_GetStateText());
     BluetoothUart_WriteText(" raw=");
     speed_tuning_write_u32(sensor.raw);
     BluetoothUart_WriteText(" mask=");
@@ -143,7 +143,7 @@ void speed_tuning_send_mission_status(uint32_t now_ms)
     uint32_t sample_age_ms;
 
     if (!LineFollowMission_GetSnapshot(&mission) ||
-        !LineSensorBringup_GetSnapshot(&sensor) ||
+        !LineSensor_GetSnapshot(&sensor) ||
         !WheelLineTrackingControl_GetSnapshot(&control)) {
         BluetoothUart_WriteText("ERR status\r\n");
         return;
@@ -228,4 +228,3 @@ void speed_tuning_send_motion_status(uint32_t now_ms)
         BoardMotorSafe_IsHighImpedance() ? 1U : 0U);
     BluetoothUart_WriteText("\r\n");
 }
-

@@ -4,11 +4,18 @@ Formal MSPM0G3507 car-control firmware, rebuilt from the clean PB21/LCD bring-up
 baseline. The older `DAP_LINK_TEST` and `DIANSAI_MOTOR_DRIVER_BOARD` projects are
 reference sources only; they are not copied wholesale into this target.
 
+The selected competition task is the official 2026 Jiangsu TI Cup
+`车载平衡滚球运动控制系统（H题）`. Exact requirements, ownership decisions,
+engineering margins, and physical acceptance gates are recorded in
+[`H_PROBLEM_EXECUTION_PLAN.md`](H_PROBLEM_EXECUTION_PLAN.md). That plan
+overrides older generic competition assumptions; existing line, motion, K230,
+and wireless work is reusable infrastructure rather than proof of an H score.
+
 ## Source layout
 
 ```text
 app/main.c + app/car_app.*   top-level scheduler and interaction policy
-app/bringup/                 supervised validation workflows
+app/bringup/                 optional validation workflows, excluded by default
 app/diagnostics/             application/debugger state mirror
 app/display/                 sliced ST7789 application dashboard
 app/services/                application services such as firmware update
@@ -51,12 +58,11 @@ into `car_control`.
   three buttons is pressed during motion, after the speed-command lease
   expires, at the test endpoint, and on every emergency stop.
 - Motor A/E0 is the validated left wheel and motor B/E1 is the validated right
-  wheel. From idle, PB21 starts the formal `1400 pps` line-following mission;
-  pressing it again stops the mission. SW1/PB5 commands a relative `+90 degree`
-  Yaw turn and SW2/PB4 commands a relative `-90 degree` turn. Pressing any key
-  during motion stops immediately; commands are never stacked while moving.
-  Remote position-loop commands and Stress 24 remain available through
-  Bluetooth.
+  wheel. PB21 still starts the supervised `1400 pps` line-following mission for
+  chassis-only validation; that endless mission is not the H-route state
+  machine and is not competition acceptance. PB4/PB5 no longer start the old
+  relative Yaw demonstrations from idle. Pressing any key during motion stops
+  immediately; commands are never stacked while moving.
 - PB21, PB4, and PB5 use both-edge GPIOB interrupts with 5 ms press and 30 ms
   release debounce. The longer release qualification prevents switch bounce
   from re-arming a second command. The board-level GPIOB dispatcher drains
@@ -103,11 +109,11 @@ physical-button motion requests.
 
 When a supervised motion workflow is active, any of the three board buttons
 produces only `STOP_ACTIVE`; it cannot immediately start a different motion.
-When ready, PB21 starts the formal line mission, SW2/PB4 requests a relative
-`-90 degree` Yaw turn, and SW1/PB5 requests `+90 degrees`. `main.c` is now a
-thin adapter from these policy actions to the already validated workflows.
-The read-only `app stat` command and CLI `AppStatus` action expose state,
-workflow, last action, requested Yaw, transition count, and motor high-Z state.
+When idle, PB4/PB5 produce no motor action. PB21 retains the supervised manual
+line mission only until the H2-H6 coordinator replaces it. `main.c` remains a
+thin adapter from policy actions to validated workflows. The read-only
+`app stat` command and CLI `AppStatus` action expose state, workflow, last
+action, transition count, and motor high-Z state.
 
 ## Reusable wheel-drive API
 
@@ -417,24 +423,33 @@ must reboot into suspicious-reset lockout. The CLI actions are
 
 ## Build and flash
 
-Two build profiles share the same validated control and driver sources:
+The normal GCC and TIClang builds are competition-safe by default and set
+`CAR_ENABLE_BRINGUP=OFF`. The validated control and driver APIs remain linked;
+only their temporary test workflows are replaced by disabled entry points.
 
 ```powershell
-# Development and tuning profile. Temporary bring-up workflows are enabled.
+# Normal product build.
 cmake --preset gcc-debug
 cmake --build build-gcc --target car_control -j
 
-# Competition product profile. Temporary speed, position, Heading, and timed
-# line-test workflows are replaced by disabled entry points.
+# Explicit bring-up build for a bounded laboratory retest.
+cmake --preset gcc-debug -D CAR_ENABLE_BRINGUP=ON
+cmake --build build-gcc --target car_control -j
+
+# Restore the product-safe cache before wireless installation.
+cmake --preset gcc-debug -D CAR_ENABLE_BRINGUP=OFF
+cmake --build build-gcc --target car_control -j
+
+# Isolated product directory remains available for release comparison.
 cmake --preset gcc-product
 cmake --build build-product-gcc --target car_control -j
 ```
 
 The matching TIClang presets are `ticlang-debug` and `ticlang-product`.
-`yaw_bringup_test` remains in both profiles because it currently owns the
-validated physical-button Yaw workflow. `line_sensor_bringup` also remains in
-both profiles because it is the active line-sensor service, despite its legacy
-name. Product builds reject the excluded test commands without arming motors.
+Yaw, speed, position, Heading, and timed line bring-up applications are all
+controlled by the same option. The production scheduler calls the line-sensor
+driver directly; the former forwarding-only `line_sensor_bringup` wrapper was
+removed. Product builds reject excluded test commands without arming motors.
 
 The normal development path is the resident JDY-31 updater on `COM6`. From the
 repository root:
@@ -494,7 +509,6 @@ g_car_pb4_interrupt_count
 g_car_pb5_pressed
 g_car_pb5_press_count
 g_car_pb5_interrupt_count
-g_car_last_button_yaw_mdeg
 g_car_last_button_id
 g_car_reset_cause
 g_car_control_mode

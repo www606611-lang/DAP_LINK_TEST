@@ -2,6 +2,7 @@
 #include "line_tracking_bringup_test.h"
 #include "position_bringup_test.h"
 #include "speed_bringup_test.h"
+#include "yaw_bringup_test.h"
 
 #include <stddef.h>
 
@@ -271,6 +272,64 @@ const char *LineTrackingBringupTest_GetStateText(void)
 }
 
 uint32_t LineTrackingBringupTest_GetRunCount(void)
+{
+    return 0U;
+}
+
+void YawBringupTest_Init(bool reset_locked)
+{
+    (void) reset_locked;
+}
+
+void YawBringupTest_Task(uint32_t now_ms)
+{
+    (void) now_ms;
+}
+
+yaw_bringup_config_result_t YawBringupTest_SetConfig(
+    const yaw_bringup_config_t *config)
+{
+    (void) config;
+    return YAW_BRINGUP_CONFIG_BUSY;
+}
+
+bool YawBringupTest_GetConfig(yaw_bringup_config_t *config)
+{
+    (void) config;
+    return false;
+}
+
+bool YawBringupTest_RequestStart(void)
+{
+    return false;
+}
+
+bool YawBringupTest_RequestTurn(float delta_yaw_deg)
+{
+    (void) delta_yaw_deg;
+    return false;
+}
+
+void YawBringupTest_RequestStop(void)
+{
+}
+
+yaw_bringup_test_state_t YawBringupTest_GetState(void)
+{
+    return YAW_BRINGUP_TEST_LOCKED;
+}
+
+bool YawBringupTest_IsActive(void)
+{
+    return false;
+}
+
+const char *YawBringupTest_GetStateText(void)
+{
+    return "DISABLED";
+}
+
+uint32_t YawBringupTest_GetRunCount(void)
 {
     return 0U;
 }

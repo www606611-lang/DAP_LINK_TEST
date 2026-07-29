@@ -2,9 +2,6 @@
 
 #include <stddef.h>
 
-#define CAR_APP_SW2_PB4_YAW_MDEG (-90000L)
-#define CAR_APP_SW1_PB5_YAW_MDEG 90000L
-
 static bool g_reset_locked;
 static car_app_snapshot_t g_snapshot;
 
@@ -19,7 +16,6 @@ void CarApp_Init(bool reset_locked)
         CAR_APP_STATE_LOCKED : CAR_APP_STATE_READY;
     g_snapshot.active_workflow = CAR_APP_WORKFLOW_NONE;
     g_snapshot.action = CAR_APP_ACTION_NONE;
-    g_snapshot.yaw_command_mdeg = 0;
     g_snapshot.transition_count = 0U;
 }
 
@@ -32,7 +28,6 @@ void CarApp_Step(const car_app_inputs_t *inputs)
     }
 
     g_snapshot.action = CAR_APP_ACTION_NONE;
-    g_snapshot.yaw_command_mdeg = 0;
     g_snapshot.active_workflow =
         car_app_get_active_workflow(inputs);
     any_press_event = inputs->pb21_press_event ||
@@ -58,12 +53,6 @@ void CarApp_Step(const car_app_inputs_t *inputs)
     car_app_set_state(CAR_APP_STATE_READY);
     if (inputs->pb21_press_event) {
         g_snapshot.action = CAR_APP_ACTION_START_LINE_MISSION;
-    } else if (inputs->pb4_press_event) {
-        g_snapshot.action = CAR_APP_ACTION_START_YAW;
-        g_snapshot.yaw_command_mdeg = CAR_APP_SW2_PB4_YAW_MDEG;
-    } else if (inputs->pb5_press_event) {
-        g_snapshot.action = CAR_APP_ACTION_START_YAW;
-        g_snapshot.yaw_command_mdeg = CAR_APP_SW1_PB5_YAW_MDEG;
     }
 }
 

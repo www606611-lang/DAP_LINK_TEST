@@ -1,7 +1,7 @@
 #include "line_tracking_bringup_test.h"
 
 #include "line_tracking_finish_policy.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
 #include "runtime_metrics.h"
 #include "wheel_speed_control.h"
 
@@ -81,7 +81,7 @@ void LineTrackingBringupTest_Task(uint32_t now_ms)
                 g_state = LINE_TRACKING_BRINGUP_TEST_ABORTED;
                 return;
             }
-            if (!LineSensorBringup_GetSnapshot(&sensor) ||
+            if (!LineSensor_GetSnapshot(&sensor) ||
                 !sensor.ready) {
                 WheelLineTrackingControl_Stop(
                     CAR_CONTROL_BLOCK_EMERGENCY_STOP);
@@ -230,7 +230,7 @@ static void line_tracking_bringup_start(uint32_t now_ms)
 {
     line_sensor_snapshot_t sensor;
 
-    if (!LineSensorBringup_GetSnapshot(&sensor) ||
+    if (!LineSensor_GetSnapshot(&sensor) ||
         !sensor.ready || !sensor.line_seen ||
         ((uint32_t) (now_ms - sensor.last_sample_ms) >
             WHEEL_LINE_TRACKING_OBSERVATION_MAX_AGE_MS)) {

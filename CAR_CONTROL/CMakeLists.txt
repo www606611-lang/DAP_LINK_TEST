@@ -13,7 +13,7 @@ set(PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/platform/mspm0g3507")
 option(CAR_JDY31_CONFIGURE_ON_BOOT
   "Build a one-shot JDY-31 9600-to-115200 configurator" OFF)
 option(CAR_ENABLE_BRINGUP
-  "Include temporary speed, position, Heading, and line test workflows" ON)
+  "Include temporary speed, position, Yaw, Heading, and line test workflows" OFF)
 set(SYSCFG_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/car_control.syscfg")
 set(SYSCFG_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/syscfg")
 set(SYSCFG_PRODUCT "${MSPM0_SDK_DIR}/.metadata/product.json")
@@ -98,6 +98,7 @@ if(CAR_ENABLE_BRINGUP)
     "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_tracking_bringup_test.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/position_bringup_test.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/speed_bringup_test.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/yaw_bringup_test.c"
   )
 else()
   set(CAR_BRINGUP_SOURCES
@@ -108,8 +109,6 @@ endif()
 add_executable(${APP_NAME}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/car_app.c"
   ${CAR_BRINGUP_SOURCES}
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/line_sensor_bringup.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/app/bringup/yaw_bringup_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/display/car_display.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/line_follow_mission.c"

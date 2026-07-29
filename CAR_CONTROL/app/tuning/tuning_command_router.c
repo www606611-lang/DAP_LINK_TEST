@@ -8,7 +8,7 @@
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "line_follow_mission.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
 #include "line_tracking_bringup_test.h"
 #include "motion_supervisor.h"
 #include "position_bringup_test.h"
@@ -219,8 +219,6 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
         speed_tuning_write_u32((uint32_t) app.active_workflow);
         BluetoothUart_WriteText(" action=");
         speed_tuning_write_u32((uint32_t) app.action);
-        BluetoothUart_WriteText(" yaw=");
-        speed_tuning_write_i32(app.yaw_command_mdeg);
         BluetoothUart_WriteText(" transitions=");
         speed_tuning_write_u32(app.transition_count);
         BluetoothUart_WriteText(" hz=");
@@ -338,7 +336,7 @@ void TuningCommandRouter_ProcessLine(char *line, uint32_t now_ms)
         (strcmp(tokens[1], "cal") == 0)) {
         if (!BoardMotorSafe_IsHighImpedance()) {
             BluetoothUart_WriteText("ERR motor_active\r\n");
-        } else if (!LineSensorBringup_RequestCalibration()) {
+        } else if (LineSensor_RequestCalibration(now_ms) != LINE_SENSOR_OK) {
             BluetoothUart_WriteText("ERR busy\r\n");
         } else {
             BluetoothUart_WriteText("OK LINE CAL\r\n");

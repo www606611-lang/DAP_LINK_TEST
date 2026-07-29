@@ -10,7 +10,7 @@
 #include "heading_bringup_test.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
 #include "line_follow_mission.h"
 #include "line_tracking_bringup_test.h"
 #include "motion_supervisor.h"
@@ -35,7 +35,6 @@ volatile uint32_t g_car_pb4_interrupt_count;
 volatile bool g_car_pb5_pressed;
 volatile uint32_t g_car_pb5_press_count;
 volatile uint32_t g_car_pb5_interrupt_count;
-volatile int32_t g_car_last_button_yaw_mdeg;
 volatile uint32_t g_car_last_button_id;
 volatile uint32_t g_car_reset_cause;
 volatile uint32_t g_car_control_mode;
@@ -338,7 +337,7 @@ void CarDebugSnapshot_Update(void)
         }
     }
 
-    if (LineSensorBringup_GetSnapshot(&line_sensor)) {
+    if (LineSensor_GetSnapshot(&line_sensor)) {
         g_car_line_sensor_state = (uint32_t) line_sensor.state;
         g_car_line_sensor_raw = line_sensor.raw;
         g_car_line_sensor_active_mask = line_sensor.active_mask;
@@ -489,11 +488,6 @@ void CarDebugSnapshot_RecordButtonPress(car_debug_button_id_t button_id)
     }
 }
 
-void CarDebugSnapshot_SetButtonYawCommand(int32_t yaw_command_mdeg)
-{
-    g_car_last_button_yaw_mdeg = yaw_command_mdeg;
-}
-
 bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {
@@ -507,7 +501,6 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->pb21_pressed = g_car_pb21_pressed;
     snapshot->pb4_pressed = g_car_pb4_pressed;
     snapshot->pb5_pressed = g_car_pb5_pressed;
-    snapshot->last_button_yaw_mdeg = g_car_last_button_yaw_mdeg;
     snapshot->last_button_id =
         (car_debug_button_id_t) g_car_last_button_id;
     snapshot->motor_high_impedance = g_car_motor_high_impedance;

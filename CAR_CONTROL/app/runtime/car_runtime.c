@@ -16,18 +16,26 @@
 #include "encoder_input.h"
 #include "electromagnet.h"
 #include "firmware_update.h"
+#if CAR_ENABLE_BRINGUP
 #include "heading_bringup_test.h"
+#endif
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "line_follow_mission.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
+#if CAR_ENABLE_BRINGUP
 #include "line_tracking_bringup_test.h"
+#endif
 #include "motion_supervisor.h"
+#if CAR_ENABLE_BRINGUP
 #include "position_bringup_test.h"
+#endif
 #include "radio_uart.h"
 #include "reset_diagnostics.h"
 #include "runtime_metrics.h"
+#if CAR_ENABLE_BRINGUP
 #include "speed_bringup_test.h"
+#endif
 #include "speed_tuning_console.h"
 #include "st7789.h"
 #include "system_watchdog.h"
@@ -38,7 +46,9 @@
 #include "wheel_position_control.h"
 #include "wheel_speed_control.h"
 #include "wheel_yaw_control.h"
+#if CAR_ENABLE_BRINGUP
 #include "yaw_bringup_test.h"
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -95,12 +105,16 @@ void CarRuntime_Init(void)
     WheelYawControl_Init(now_ms);
     WheelHeadingControl_Init(now_ms);
     WheelLineTrackingControl_Init(now_ms);
+#if CAR_ENABLE_BRINGUP
     SpeedBringupTest_Init(suspicious_reset);
     PositionBringupTest_Init(suspicious_reset);
     YawBringupTest_Init(suspicious_reset);
     HeadingBringupTest_Init(suspicious_reset);
-    LineSensorBringup_Init(now_ms);
+#endif
+    LineSensor_Init(now_ms);
+#if CAR_ENABLE_BRINGUP
     LineTrackingBringupTest_Init(suspicious_reset);
+#endif
     LineFollowMission_Init(suspicious_reset);
     MotionSupervisor_Init(suspicious_reset);
     CarApp_Init(suspicious_reset);
@@ -151,7 +165,7 @@ void CarRuntime_Step(void)
     EncoderInput_Task(now_ms);
     WheelOdometry_Task(now_ms);
     ICM20948_Task(now_ms);
-    LineSensorBringup_Task(now_ms);
+    LineSensor_Task(now_ms);
     ChassisRadioLink_SetStatusFlags(
         BoardMotorSafe_IsHighImpedance() ?
             CHASSIS_RADIO_STATUS_HIGH_Z : 0U);
@@ -167,15 +181,19 @@ void CarRuntime_Step(void)
 
     car_app_inputs.service_active = JDY31_ConfigIsExclusive() ||
         FirmwareUpdate_IsPending();
+#if CAR_ENABLE_BRINGUP
     car_app_inputs.speed_test_active =
         SpeedBringupTest_GetState() == SPEED_BRINGUP_TEST_RUNNING;
     car_app_inputs.position_test_active =
         PositionBringupTest_GetState() == POSITION_BRINGUP_TEST_RUNNING;
     car_app_inputs.heading_test_active = HeadingBringupTest_IsActive();
     car_app_inputs.line_test_active = LineTrackingBringupTest_IsActive();
+#endif
     car_app_inputs.line_mission_active = LineFollowMission_IsActive();
     car_app_inputs.motion_active = MotionSupervisor_IsActive();
+#if CAR_ENABLE_BRINGUP
     car_app_inputs.yaw_test_active = YawBringupTest_IsActive();
+#endif
     car_app_inputs.pb21_press_event = pb21_press_event;
     car_app_inputs.pb4_press_event = pb4_press_event;
     car_app_inputs.pb5_press_event = pb5_press_event;
@@ -185,11 +203,13 @@ void CarRuntime_Step(void)
         car_runtime_process_action(&car_app_snapshot);
     }
 
+#if CAR_ENABLE_BRINGUP
     SpeedBringupTest_Task(now_ms, false);
     PositionBringupTest_Task(now_ms, false);
     YawBringupTest_Task(now_ms);
     HeadingBringupTest_Task(now_ms);
     LineTrackingBringupTest_Task(now_ms);
+#endif
     LineFollowMission_Task(now_ms);
     MotionSupervisor_Task(now_ms);
     WheelPositionControl_Task(now_ms);
@@ -280,6 +300,7 @@ static void car_runtime_process_action(
 
     if (snapshot->action == CAR_APP_ACTION_STOP_ACTIVE) {
         switch (snapshot->active_workflow) {
+#if CAR_ENABLE_BRINGUP
             case CAR_APP_WORKFLOW_SPEED_TEST:
                 SpeedBringupTest_RequestStop();
                 break;
@@ -292,28 +313,23 @@ static void car_runtime_process_action(
             case CAR_APP_WORKFLOW_LINE_TEST:
                 LineTrackingBringupTest_RequestStop();
                 break;
+#endif
             case CAR_APP_WORKFLOW_LINE_MISSION:
                 LineFollowMission_RequestStop();
                 break;
             case CAR_APP_WORKFLOW_MOTION:
                 MotionSupervisor_RequestStop();
                 break;
+#if CAR_ENABLE_BRINGUP
             case CAR_APP_WORKFLOW_YAW_TEST:
                 YawBringupTest_RequestStop();
                 break;
+#endif
             default:
                 break;
         }
-        CarDebugSnapshot_SetButtonYawCommand(0);
     } else if (snapshot->action ==
         CAR_APP_ACTION_START_LINE_MISSION) {
-        if (LineFollowMission_RequestStart()) {
-            CarDebugSnapshot_SetButtonYawCommand(0);
-        }
-    } else if ((snapshot->action == CAR_APP_ACTION_START_YAW) &&
-        YawBringupTest_RequestTurn(
-            (float) snapshot->yaw_command_mdeg / 1000.0f)) {
-        CarDebugSnapshot_SetButtonYawCommand(
-            snapshot->yaw_command_mdeg);
+        (void) LineFollowMission_RequestStart();
     }
 }

@@ -1,7 +1,7 @@
 #include "tuning_wave.h"
 
 #include "bluetooth_uart.h"
-#include "line_sensor_bringup.h"
+#include "line_sensor.h"
 #include "tuning_wire.h"
 #include "wheel_heading_control.h"
 #include "wheel_line_tracking_control.h"
@@ -35,7 +35,7 @@ void speed_tuning_send_wave(uint32_t now_ms)
 
     if (WheelLineTrackingControl_GetSnapshot(&line_tracking) &&
         line_tracking.running &&
-        LineSensorBringup_GetSnapshot(&line_sensor) &&
+        LineSensor_GetSnapshot(&line_sensor) &&
         WheelSpeedControl_GetSnapshot(&speed)) {
         BluetoothUart_WriteText("linewave:");
         speed_tuning_write_i32(line_tracking.line_error);

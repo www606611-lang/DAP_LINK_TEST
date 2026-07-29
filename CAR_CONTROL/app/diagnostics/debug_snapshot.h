@@ -19,7 +19,6 @@ typedef struct {
     bool pb21_pressed;
     bool pb4_pressed;
     bool pb5_pressed;
-    int32_t last_button_yaw_mdeg;
     car_debug_button_id_t last_button_id;
     bool motor_high_impedance;
     bool imu_ready;
@@ -74,7 +73,6 @@ typedef struct {
 
 void CarDebugSnapshot_Update(void);
 void CarDebugSnapshot_RecordButtonPress(car_debug_button_id_t button_id);
-void CarDebugSnapshot_SetButtonYawCommand(int32_t yaw_command_mdeg);
 bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot);
 
 #endif

@@ -24,18 +24,16 @@ static void test_ready_button_commands(void)
     snapshot = step(&inputs);
     assert(snapshot.state == CAR_APP_STATE_READY);
     assert(snapshot.action == CAR_APP_ACTION_START_LINE_MISSION);
-    assert(snapshot.yaw_command_mdeg == 0);
 
     inputs.pb21_press_event = false;
     inputs.pb4_press_event = true;
     snapshot = step(&inputs);
-    assert(snapshot.action == CAR_APP_ACTION_START_YAW);
-    assert(snapshot.yaw_command_mdeg == -90000);
+    assert(snapshot.action == CAR_APP_ACTION_NONE);
 
     inputs.pb4_press_event = false;
     inputs.pb5_press_event = true;
     snapshot = step(&inputs);
-    assert(snapshot.yaw_command_mdeg == 90000);
+    assert(snapshot.action == CAR_APP_ACTION_NONE);
 }
 
 static void test_motion_button_stops_active_workflow(void)
@@ -52,7 +50,6 @@ static void test_motion_button_stops_active_workflow(void)
     assert(snapshot.state == CAR_APP_STATE_MOTION_ACTIVE);
     assert(snapshot.active_workflow == CAR_APP_WORKFLOW_LINE_TEST);
     assert(snapshot.action == CAR_APP_ACTION_STOP_ACTIVE);
-    assert(snapshot.yaw_command_mdeg == 0);
 }
 
 static void test_button_stops_formal_line_mission(void)

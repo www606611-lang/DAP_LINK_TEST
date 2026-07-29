@@ -25,7 +25,6 @@ typedef enum {
 typedef enum {
     CAR_APP_ACTION_NONE = 0,
     CAR_APP_ACTION_STOP_ACTIVE,
-    CAR_APP_ACTION_START_YAW,
     CAR_APP_ACTION_START_LINE_MISSION
 } car_app_action_t;
 
@@ -47,7 +46,6 @@ typedef struct {
     car_app_state_t state;
     car_app_workflow_t active_workflow;
     car_app_action_t action;
-    int32_t yaw_command_mdeg;
     uint32_t transition_count;
 } car_app_snapshot_t;
 
