@@ -111,6 +111,9 @@ add_executable(${APP_NAME}
   ${CAR_BRINGUP_SOURCES}
   "${CMAKE_CURRENT_SOURCE_DIR}/app/diagnostics/debug_snapshot.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/display/car_display.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/h_mission.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/h_mission_runtime.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/h_route_events.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mission/line_follow_mission.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/motion/motion_supervisor.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/main.c"

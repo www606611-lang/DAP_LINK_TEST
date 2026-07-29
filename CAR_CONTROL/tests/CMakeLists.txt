@@ -42,6 +42,47 @@ target_include_directories(line_follow_mission_test PRIVATE
 
 add_test(NAME line_follow_mission COMMAND line_follow_mission_test)
 
+add_executable(h_mission_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/h_mission_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_mission.c"
+)
+target_compile_features(h_mission_test PRIVATE c_std_99)
+target_include_directories(h_mission_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission"
+)
+
+add_test(NAME h_mission COMMAND h_mission_test)
+
+add_executable(h_route_events_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/h_route_events_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_route_events.c"
+)
+target_compile_features(h_route_events_test PRIVATE c_std_99)
+target_include_directories(h_route_events_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission"
+)
+
+add_test(NAME h_route_events COMMAND h_route_events_test)
+
+add_executable(h_mission_runtime_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/h_mission_runtime_test.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_mission_runtime.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_mission.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission/h_route_events.c"
+)
+target_compile_features(h_mission_runtime_test PRIVATE c_std_99)
+target_include_directories(h_mission_runtime_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/mission"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app/motion"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../bsp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../control"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/chassis_radio"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/device/line_sensor"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../drivers/utility"
+)
+
+add_test(NAME h_mission_runtime COMMAND h_mission_runtime_test)
+
 add_executable(wheel_odometry_test
   "${CMAKE_CURRENT_SOURCE_DIR}/wheel_odometry_test.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../control/wheel_odometry.c"

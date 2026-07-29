@@ -52,7 +52,7 @@ void CarApp_Step(const car_app_inputs_t *inputs)
 
     car_app_set_state(CAR_APP_STATE_READY);
     if (inputs->pb21_press_event) {
-        g_snapshot.action = CAR_APP_ACTION_START_LINE_MISSION;
+        g_snapshot.action = CAR_APP_ACTION_H_PRIMARY;
     }
 }
 
@@ -95,6 +95,9 @@ static car_app_workflow_t car_app_get_active_workflow(
     }
     if (inputs->line_test_active) {
         return CAR_APP_WORKFLOW_LINE_TEST;
+    }
+    if (inputs->h_mission_active) {
+        return CAR_APP_WORKFLOW_H_MISSION;
     }
     if (inputs->line_mission_active) {
         return CAR_APP_WORKFLOW_LINE_MISSION;

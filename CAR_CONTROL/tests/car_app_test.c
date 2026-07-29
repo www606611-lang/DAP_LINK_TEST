@@ -23,7 +23,7 @@ static void test_ready_button_commands(void)
     inputs.pb21_press_event = true;
     snapshot = step(&inputs);
     assert(snapshot.state == CAR_APP_STATE_READY);
-    assert(snapshot.action == CAR_APP_ACTION_START_LINE_MISSION);
+    assert(snapshot.action == CAR_APP_ACTION_H_PRIMARY);
 
     inputs.pb21_press_event = false;
     inputs.pb4_press_event = true;
@@ -34,6 +34,23 @@ static void test_ready_button_commands(void)
     inputs.pb5_press_event = true;
     snapshot = step(&inputs);
     assert(snapshot.action == CAR_APP_ACTION_NONE);
+}
+
+static void test_button_stops_h_mission_before_child_workflow(void)
+{
+    car_app_inputs_t inputs;
+    car_app_snapshot_t snapshot;
+
+    memset(&inputs, 0, sizeof(inputs));
+    CarApp_Init(false);
+    inputs.h_mission_active = true;
+    inputs.line_mission_active = true;
+    inputs.pb4_press_event = true;
+    snapshot = step(&inputs);
+
+    assert(snapshot.state == CAR_APP_STATE_MOTION_ACTIVE);
+    assert(snapshot.active_workflow == CAR_APP_WORKFLOW_H_MISSION);
+    assert(snapshot.action == CAR_APP_ACTION_STOP_ACTIVE);
 }
 
 static void test_motion_button_stops_active_workflow(void)
@@ -163,6 +180,7 @@ static void test_transition_count_tracks_state_changes(void)
 int main(void)
 {
     test_ready_button_commands();
+    test_button_stops_h_mission_before_child_workflow();
     test_motion_button_stops_active_workflow();
     test_button_stops_formal_line_mission();
     test_button_stops_motion_workflow();

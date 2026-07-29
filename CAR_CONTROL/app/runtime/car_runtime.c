@@ -21,6 +21,7 @@
 #endif
 #include "icm20948.h"
 #include "jdy31_config.h"
+#include "h_mission_runtime.h"
 #include "line_follow_mission.h"
 #include "line_sensor.h"
 #if CAR_ENABLE_BRINGUP
@@ -121,6 +122,7 @@ void CarRuntime_Init(void)
     BluetoothUart_Init();
     RadioUart_Init();
     ChassisRadioLink_Init(now_ms);
+    HMissionRuntime_Init(suspicious_reset, now_ms);
     JDY31_ConfigInit(now_ms, CAR_JDY31_CONFIGURE_ON_BOOT != 0);
     if (!JDY31_ConfigIsExclusive()) {
         SpeedTuningConsole_Init();
@@ -189,6 +191,7 @@ void CarRuntime_Step(void)
     car_app_inputs.heading_test_active = HeadingBringupTest_IsActive();
     car_app_inputs.line_test_active = LineTrackingBringupTest_IsActive();
 #endif
+    car_app_inputs.h_mission_active = HMissionRuntime_IsActive();
     car_app_inputs.line_mission_active = LineFollowMission_IsActive();
     car_app_inputs.motion_active = MotionSupervisor_IsActive();
 #if CAR_ENABLE_BRINGUP
@@ -210,6 +213,7 @@ void CarRuntime_Step(void)
     HeadingBringupTest_Task(now_ms);
     LineTrackingBringupTest_Task(now_ms);
 #endif
+    HMissionRuntime_Task(now_ms);
     LineFollowMission_Task(now_ms);
     MotionSupervisor_Task(now_ms);
     WheelPositionControl_Task(now_ms);
@@ -317,6 +321,9 @@ static void car_runtime_process_action(
             case CAR_APP_WORKFLOW_LINE_MISSION:
                 LineFollowMission_RequestStop();
                 break;
+            case CAR_APP_WORKFLOW_H_MISSION:
+                HMissionRuntime_RequestStop();
+                break;
             case CAR_APP_WORKFLOW_MOTION:
                 MotionSupervisor_RequestStop();
                 break;
@@ -328,8 +335,7 @@ static void car_runtime_process_action(
             default:
                 break;
         }
-    } else if (snapshot->action ==
-        CAR_APP_ACTION_START_LINE_MISSION) {
-        (void) LineFollowMission_RequestStart();
+    } else if (snapshot->action == CAR_APP_ACTION_H_PRIMARY) {
+        HMissionRuntime_RequestPrimary();
     }
 }

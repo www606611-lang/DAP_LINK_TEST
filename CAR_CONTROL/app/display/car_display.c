@@ -3,6 +3,7 @@
 #include "car_app.h"
 #include "control_supervisor.h"
 #include "debug_snapshot.h"
+#include "h_mission.h"
 #include "jdy31_config.h"
 #include "line_follow_mission.h"
 #include "line_sensor.h"
@@ -40,6 +41,13 @@ static const char *car_display_key_text(
     const car_debug_display_snapshot_t *debug);
 static int32_t car_display_clamp_i32(
     int32_t value, int32_t minimum, int32_t maximum);
+static void car_display_update_h(const car_debug_display_snapshot_t *debug,
+    uint32_t now_ms, car_display_phase_t phase, const char *line_bits,
+    const char *line_state_text, uint16_t line_color,
+    const char *key_text);
+static const char *car_display_h_state_text(uint32_t state);
+static const char *car_display_h_phase_text(uint32_t phase);
+static const char *car_display_h_fault_text(uint32_t fault);
 
 void CarDisplay_Init(void)
 {
@@ -165,6 +173,10 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     if (uptime_s > 9999U) {
         uptime_s = 9999U;
     }
+
+    car_display_update_h(&debug, now_ms, phase, line_bits,
+        line_state_text, line_color, key_text);
+    return;
 
     switch (phase) {
         case CAR_DISPLAY_PHASE_SPEED:
@@ -357,6 +369,193 @@ void CarDisplay_Update(uint32_t now_ms, car_display_phase_t phase)
     }
 }
 
+static void car_display_update_h(const car_debug_display_snapshot_t *debug,
+    uint32_t now_ms, car_display_phase_t phase, const char *line_bits,
+    const char *line_state_text, uint16_t line_color,
+    const char *key_text)
+{
+    uint16_t state_color;
+    uint32_t elapsed_cs = debug->h_elapsed_ms / 10U;
+    uint32_t b_cs = debug->h_b_passage_ms / 10U;
+    uint32_t finish_cs = debug->h_finish_ms / 10U;
+
+    (void) now_ms;
+    if (debug->h_mission_state == (uint32_t) H_MISSION_STATE_FAULT) {
+        state_color = ST7789_COLOR_RED;
+    } else if ((debug->h_mission_state ==
+            (uint32_t) H_MISSION_STATE_RUNNING) ||
+        (debug->h_mission_state ==
+            (uint32_t) H_MISSION_STATE_PRECISION_STOP) ||
+        (debug->h_mission_state ==
+            (uint32_t) H_MISSION_STATE_FINISHED)) {
+        state_color = ST7789_COLOR_GREEN;
+    } else {
+        state_color = ST7789_COLOR_YELLOW;
+    }
+
+    switch (phase) {
+        case CAR_DISPLAY_PHASE_SPEED:
+            car_display_show_row(28U, state_color,
+                ST7789_COLOR_BLACK,
+                "TASK H%lu SEQ%05lu TGT%+6ld x0.1mm",
+                (unsigned long) debug->h_mission_profile,
+                (unsigned long) debug->h_mission_sequence,
+                (long) car_display_clamp_i32(
+                    debug->h_target_x_0p1mm, -9999, 9999));
+            break;
+
+        case CAR_DISPLAY_PHASE_ENCODER:
+            car_display_show_row(48U, ST7789_COLOR_WHITE,
+                ST7789_COLOR_BLACK,
+                "TIME %3lu.%02lus B%3lu.%02lus F%3lu.%02lus",
+                (unsigned long) (elapsed_cs / 100U),
+                (unsigned long) (elapsed_cs % 100U),
+                (unsigned long) (b_cs / 100U),
+                (unsigned long) (b_cs % 100U),
+                (unsigned long) (finish_cs / 100U),
+                (unsigned long) (finish_cs % 100U));
+            break;
+
+        case CAR_DISPLAY_PHASE_ATTITUDE:
+            car_display_show_row(68U,
+                (debug->imu_ready && debug->imu_attitude_valid) ?
+                    ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
+                ST7789_COLOR_BLACK,
+                "YAW %+7ld RATE %+8ld",
+                (long) car_display_clamp_i32(
+                    debug->imu_yaw_mdeg, -999999, 999999),
+                (long) car_display_clamp_i32(
+                    debug->imu_yaw_rate_mdps, -9999999, 9999999));
+            break;
+
+        case CAR_DISPLAY_PHASE_LINE:
+            car_display_show_row(88U, line_color,
+                ST7789_COLOR_BLACK,
+                "LINE %s E%+3ld N%lu %-4s", line_bits,
+                (long) car_display_clamp_i32(
+                    debug->line_sensor_error, -99, 99),
+                (unsigned long) debug->line_sensor_active_count,
+                line_state_text);
+            break;
+
+        case CAR_DISPLAY_PHASE_CONTROL:
+            car_display_show_row(108U,
+                debug->h_route_calibrated ?
+                    ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
+                ST7789_COLOR_BLACK,
+                "ROUTE %-3s D%+7ld A%u L%u B%u F%u",
+                debug->h_route_calibrated ? "OK" : "CAL",
+                (long) car_display_clamp_i32(
+                    debug->h_route_progress_count, -999999, 999999),
+                debug->h_route_initial_a_seen ? 1U : 0U,
+                debug->h_route_left_a ? 1U : 0U,
+                debug->h_route_b_passed ? 1U : 0U,
+                debug->h_route_finish_a ? 1U : 0U);
+            break;
+
+        case CAR_DISPLAY_PHASE_HEALTH:
+            car_display_show_row(128U,
+                (debug->imu_ready && debug->imu_attitude_valid &&
+                 debug->line_sensor_ready) ?
+                    ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
+                ST7789_COLOR_BLACK,
+                "IMU %-3s LINE %-3s ROUTE %-3s MODE %-6s",
+                (debug->imu_ready && debug->imu_attitude_valid) ?
+                    "OK" : "BAD",
+                debug->line_sensor_ready ? "OK" : "BAD",
+                debug->h_route_calibrated ? "OK" : "CAL",
+                car_display_control_mode_text(debug->control_mode));
+            break;
+
+        case CAR_DISPLAY_PHASE_FOOTER:
+            car_display_show_row(150U, state_color,
+                ST7789_COLOR_BLACK,
+                "KEY %-4s PH%-7s FAULT %-7s",
+                key_text,
+                car_display_h_phase_text(debug->h_mission_phase),
+                car_display_h_fault_text(debug->h_mission_fault));
+            break;
+
+        case CAR_DISPLAY_PHASE_HEADER:
+        default:
+            car_display_show_row(5U, ST7789_COLOR_WHITE,
+                ST7789_COLOR_BLUE,
+                "H%lu %-6s %-7s",
+                (unsigned long) debug->h_mission_profile,
+                car_display_h_state_text(debug->h_mission_state),
+                car_display_h_phase_text(debug->h_mission_phase));
+            ST7789_ShowAsciiStringFast(264U, 5U,
+                debug->motor_high_impedance ? "HIGH-Z" : "ARMED ",
+                ST7789_8X16,
+                debug->motor_high_impedance ?
+                    ST7789_COLOR_GREEN : ST7789_COLOR_RED,
+                ST7789_COLOR_BLUE);
+            break;
+    }
+}
+
+static const char *car_display_h_state_text(uint32_t state)
+{
+    switch ((h_mission_state_t) state) {
+        case H_MISSION_STATE_LOCKED:
+            return "LOCK";
+        case H_MISSION_STATE_READY:
+            return "READY";
+        case H_MISSION_STATE_ARMED:
+            return "ARMED";
+        case H_MISSION_STATE_RUNNING:
+            return "RUN";
+        case H_MISSION_STATE_PRECISION_STOP:
+            return "PSTOP";
+        case H_MISSION_STATE_FINISHED:
+            return "DONE";
+        case H_MISSION_STATE_FAULT:
+            return "FAULT";
+        default:
+            return "UNK";
+    }
+}
+
+static const char *car_display_h_phase_text(uint32_t phase)
+{
+    switch ((h_mission_phase_t) phase) {
+        case H_MISSION_PHASE_IDLE:
+            return "IDLE";
+        case H_MISSION_PHASE_BALL_ONLY:
+            return "BALL";
+        case H_MISSION_PHASE_LEAVE_START_A:
+            return "LEAVE-A";
+        case H_MISSION_PHASE_RUN_TO_B:
+            return "TO-B";
+        case H_MISSION_PHASE_RUN_TO_A:
+            return "TO-A";
+        case H_MISSION_PHASE_PRECISION_STOP:
+            return "PSTOP";
+        default:
+            return "UNK";
+    }
+}
+
+static const char *car_display_h_fault_text(uint32_t fault)
+{
+    switch ((h_mission_fault_t) fault) {
+        case H_MISSION_FAULT_NONE:
+            return "NONE";
+        case H_MISSION_FAULT_OPERATOR_STOP:
+            return "STOP";
+        case H_MISSION_FAULT_CHASSIS:
+            return "CHASSIS";
+        case H_MISSION_FAULT_LINE:
+            return "LINE";
+        case H_MISSION_FAULT_K230_LINK:
+            return "K230";
+        case H_MISSION_FAULT_BALL_CONTROLLER:
+            return "BALL";
+        default:
+            return "UNK";
+    }
+}
+
 static void car_display_show_row(uint16_t y, uint16_t color,
     uint16_t background, const char *format, ...)
 {
@@ -470,6 +669,8 @@ static const char *car_display_workflow_text(uint32_t workflow)
             return "HEADING";
         case CAR_APP_WORKFLOW_LINE_TEST:
             return "LINE-TST";
+        case CAR_APP_WORKFLOW_H_MISSION:
+            return "H-MISS";
         case CAR_APP_WORKFLOW_LINE_MISSION:
             return "LINE";
         case CAR_APP_WORKFLOW_MOTION:

@@ -69,6 +69,22 @@ typedef struct {
     uint32_t radio_frame_age_ms;
     uint32_t radio_rx_frame_count;
     uint32_t radio_parse_error_count;
+    uint32_t h_mission_state;
+    uint32_t h_mission_phase;
+    uint32_t h_mission_profile;
+    uint32_t h_mission_fault;
+    uint32_t h_mission_sequence;
+    int32_t h_target_x_0p1mm;
+    uint32_t h_elapsed_ms;
+    uint32_t h_b_passage_ms;
+    uint32_t h_finish_ms;
+    bool h_route_calibrated;
+    bool h_route_marker_wide;
+    bool h_route_initial_a_seen;
+    bool h_route_left_a;
+    bool h_route_b_passed;
+    bool h_route_finish_a;
+    int32_t h_route_progress_count;
 } car_debug_display_snapshot_t;
 
 void CarDebugSnapshot_Update(void);

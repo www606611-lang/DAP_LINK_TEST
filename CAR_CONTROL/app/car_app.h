@@ -17,6 +17,7 @@ typedef enum {
     CAR_APP_WORKFLOW_POSITION_TEST,
     CAR_APP_WORKFLOW_HEADING_TEST,
     CAR_APP_WORKFLOW_LINE_TEST,
+    CAR_APP_WORKFLOW_H_MISSION,
     CAR_APP_WORKFLOW_LINE_MISSION,
     CAR_APP_WORKFLOW_MOTION,
     CAR_APP_WORKFLOW_YAW_TEST
@@ -25,7 +26,7 @@ typedef enum {
 typedef enum {
     CAR_APP_ACTION_NONE = 0,
     CAR_APP_ACTION_STOP_ACTIVE,
-    CAR_APP_ACTION_START_LINE_MISSION
+    CAR_APP_ACTION_H_PRIMARY
 } car_app_action_t;
 
 typedef struct {
@@ -34,6 +35,7 @@ typedef struct {
     bool position_test_active;
     bool heading_test_active;
     bool line_test_active;
+    bool h_mission_active;
     bool line_mission_active;
     bool motion_active;
     bool yaw_test_active;

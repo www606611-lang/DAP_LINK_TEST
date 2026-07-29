@@ -8,6 +8,7 @@
 #include "delay.h"
 #include "encoder_input.h"
 #include "heading_bringup_test.h"
+#include "h_mission_runtime.h"
 #include "icm20948.h"
 #include "jdy31_config.h"
 #include "line_sensor.h"
@@ -176,6 +177,22 @@ volatile bool g_car_radio_k230_online;
 volatile uint32_t g_car_radio_frame_age_ms;
 volatile uint32_t g_car_radio_rx_frame_count;
 volatile uint32_t g_car_radio_parse_error_count;
+volatile uint32_t g_car_h_mission_state;
+volatile uint32_t g_car_h_mission_phase;
+volatile uint32_t g_car_h_mission_profile;
+volatile uint32_t g_car_h_mission_fault;
+volatile uint32_t g_car_h_mission_sequence;
+volatile int32_t g_car_h_target_x_0p1mm;
+volatile uint32_t g_car_h_elapsed_ms;
+volatile uint32_t g_car_h_b_passage_ms;
+volatile uint32_t g_car_h_finish_ms;
+volatile bool g_car_h_route_calibrated;
+volatile bool g_car_h_route_marker_wide;
+volatile bool g_car_h_route_initial_a_seen;
+volatile bool g_car_h_route_left_a;
+volatile bool g_car_h_route_b_passed;
+volatile bool g_car_h_route_finish_a;
+volatile int32_t g_car_h_route_progress_count;
 
 static int32_t car_debug_round_float(float value);
 
@@ -193,6 +210,7 @@ void CarDebugSnapshot_Update(void)
     jdy31_config_snapshot_t jdy31;
     chassis_radio_snapshot_t radio;
     car_app_snapshot_t car_app;
+    h_mission_runtime_snapshot_t h_mission;
 
     g_car_pb21_pressed = BoardButton_IsPressed();
     g_car_pb21_interrupt_count = BoardButton_GetInterruptCountId(
@@ -243,6 +261,24 @@ void CarDebugSnapshot_Update(void)
         g_car_radio_rx_frame_count = radio.rx_frame_count;
         g_car_radio_parse_error_count = radio.crc_error_count +
             radio.length_error_count + radio.version_error_count;
+    }
+    if (HMissionRuntime_GetSnapshot(&h_mission)) {
+        g_car_h_mission_state = (uint32_t) h_mission.mission.state;
+        g_car_h_mission_phase = (uint32_t) h_mission.mission.phase;
+        g_car_h_mission_profile = (uint32_t) h_mission.mission.profile;
+        g_car_h_mission_fault = (uint32_t) h_mission.mission.fault;
+        g_car_h_mission_sequence = h_mission.mission.mission_sequence;
+        g_car_h_target_x_0p1mm = h_mission.mission.target_x_0p1mm;
+        g_car_h_elapsed_ms = h_mission.mission.elapsed_ms;
+        g_car_h_b_passage_ms = h_mission.mission.b_passage_ms;
+        g_car_h_finish_ms = h_mission.mission.finish_ms;
+        g_car_h_route_calibrated = h_mission.route_calibrated;
+        g_car_h_route_marker_wide = h_mission.route.marker_wide;
+        g_car_h_route_initial_a_seen = h_mission.route.initial_a_seen;
+        g_car_h_route_left_a = h_mission.route.left_start_a;
+        g_car_h_route_b_passed = h_mission.route.b_passed;
+        g_car_h_route_finish_a = h_mission.route.finish_a_passed;
+        g_car_h_route_progress_count = h_mission.route.progress_count;
     }
 
     if (WheelSpeedControl_GetSnapshot(&speed)) {
@@ -564,6 +600,22 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->radio_rx_frame_count = g_car_radio_rx_frame_count;
     snapshot->radio_parse_error_count =
         g_car_radio_parse_error_count;
+    snapshot->h_mission_state = g_car_h_mission_state;
+    snapshot->h_mission_phase = g_car_h_mission_phase;
+    snapshot->h_mission_profile = g_car_h_mission_profile;
+    snapshot->h_mission_fault = g_car_h_mission_fault;
+    snapshot->h_mission_sequence = g_car_h_mission_sequence;
+    snapshot->h_target_x_0p1mm = g_car_h_target_x_0p1mm;
+    snapshot->h_elapsed_ms = g_car_h_elapsed_ms;
+    snapshot->h_b_passage_ms = g_car_h_b_passage_ms;
+    snapshot->h_finish_ms = g_car_h_finish_ms;
+    snapshot->h_route_calibrated = g_car_h_route_calibrated;
+    snapshot->h_route_marker_wide = g_car_h_route_marker_wide;
+    snapshot->h_route_initial_a_seen = g_car_h_route_initial_a_seen;
+    snapshot->h_route_left_a = g_car_h_route_left_a;
+    snapshot->h_route_b_passed = g_car_h_route_b_passed;
+    snapshot->h_route_finish_a = g_car_h_route_finish_a;
+    snapshot->h_route_progress_count = g_car_h_route_progress_count;
     return true;
 }
 
