@@ -1,6 +1,6 @@
 """Validated hardware and model configuration for the K230 gimbal app."""
 
-BUILD_ID = "k230-gimbal-k8-hud-r1"
+BUILD_ID = "k230-h-vision-fast-r1"
 
 PROJECT_DEVICE_DIR = "/sdcard/K230_GIMBAL"
 KMODEL_PATH = "/data/best.kmodel"
@@ -35,18 +35,24 @@ CHASSIS_RADIO_OFFLINE_MS = 1000
 CHASSIS_RADIO_RECONNECT_MS = 5000
 CHASSIS_RADIO_PEER_RECOVER_MS = 5000
 
-# Keep weak edge detections for the locked-target hysteresis below. A new
-# target still needs the higher acquire confidence, so this does not make the
-# tracker jump onto every low-confidence box.
-CONFIDENCE_THRESHOLD = 0.25
-TARGET_ACQUIRE_CONFIDENCE = 0.45
-TARGET_HOLD_CONFIDENCE = 0.25
+# H uses one expected steel ball. Low-confidence measurements still need
+# spatial continuity; threshold changes are not the only dropout defense.
+CONFIDENCE_THRESHOLD = 0.18
+TARGET_ACQUIRE_CONFIDENCE = 0.35
+TARGET_HOLD_CONFIDENCE = 0.18
 TARGET_MATCH_MAX_DISTANCE_PX = 180
 TARGET_FORGET_MS = 500
+TARGET_COAST_MS = 120
+TARGET_MAX_COAST_FRAMES = 2
 NMS_THRESHOLD = 0.45
 PRE_NMS_TOPK = 25
 MAX_BOXES = 5
-GC_EVERY_N_FRAMES = 20
+# The active H model has one class and one physical target, so scanning and NMS
+# over every candidate is unnecessary. Explicit per-20-frame GC caused the
+# measured 120 ms periodic control stalls; the fast path is allocation-bounded
+# and is endurance-tested with scheduled GC disabled.
+SINGLE_TARGET_FAST_PATH = True
+GC_EVERY_N_FRAMES = 0
 STATUS_PRINT_MS = 2000
 
 BOX_COLOR = (0, 255, 0)
@@ -58,10 +64,13 @@ HUD_GOOD_COLOR = (0, 255, 0)
 HUD_WARN_COLOR = (255, 210, 0)
 HUD_BAD_COLOR = (255, 64, 64)
 HUD_UPDATE_MS = 100
+OVERLAY_UPDATE_MS = 50
 
-# K5 owns both gimbal axes through the supervised visual tracker.
-CAN_ENABLED = True
-GIMBAL_MOTION_ENABLED = True
+# H transition default: power-on runs camera detection only. The former
+# two-axis tracker must not move hardware; H later enables only the beam axis
+# through its own supervised controller.
+CAN_ENABLED = False
+GIMBAL_MOTION_ENABLED = False
 GIMBAL_YAW_CAN_ADDRESS = 1
 GIMBAL_PITCH_CAN_ADDRESS = 2
 GIMBAL_YAW_POSITIVE_DIRECTION = "CW"

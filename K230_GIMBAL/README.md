@@ -1,8 +1,16 @@
 # K230 Gimbal Firmware
 
-Status: physically accepted and frozen on 2026-07-24.
+Status: former two-axis baseline accepted on 2026-07-24; H-problem transition
+active from 2026-07-29.
 
-Validated build: `k230-gimbal-k8-hud-r1`
+The official H task now takes precedence. Power-on defaults to camera-only
+steel-ball detection with CAN and both former gimbal axes disabled. H will use
+a chassis-fixed overhead camera and a separate one-dimensional ball-on-beam
+controller that enables only the mechanically connected beam actuator.
+
+Historical validated build: `k230-gimbal-k8-hud-r1`
+
+Current H camera-only build: `k230-h-vision-fast-r1`
 
 This project owns K230 vision, the local MCP2515 CAN bus, and both ZDT gimbal
 motors. It runs independently from the Tianmengxing chassis. Chassis wireless
@@ -81,8 +89,8 @@ display: 800 x 480 ST7701
 AI frame: 640 x 384
 model input: 320 x 320
 fixed focus: 210
-acquire confidence: 0.45
-hold confidence: 0.25
+acquire confidence: 0.35
+hold confidence: 0.18
 NMS threshold: 0.45
 target coordinates: 400 x 240, center 200 x 120
 ```
@@ -90,6 +98,25 @@ target coordinates: 400 x 240, center 200 x 120
 The target selector holds the current object near image edges and does not jump
 to a distant detection while locked. Loss and reacquisition preserve the same
 tracking direction conventions.
+
+The H camera-only build also uses a single-class highest-score path and at most
+two predicted frames through a short detection gap. These are transition
+settings; final confidence and ROI acceptance use data captured on the mounted
+PPR beam.
+
+## H Vision Transition Evidence
+
+The first motor-disabled H optimization improved live inference from about
+`21.73 FPS` to `35.5-36.0 FPS`. Ordinary camera-to-position work is `27-30 ms`;
+measured p95/p99 sampling periods are approximately `30/35 ms`. Full-output
+transpose and NMS are absent in the one-class path, and CAN/motor timeout
+counters remain zero.
+
+The square model still exhausts the MicroPython allocation window roughly every
+30 seconds. Automatic collection produced a measured maximum vision frame of
+`103 ms`, so this build is not the final H balance observer. The final mounted
+pipe path uses a narrow rectangular ROI/model or geometric tracking to remove
+that allocation burst before closed-loop acceptance.
 
 ## Accepted Tracking Parameters
 
@@ -132,20 +159,23 @@ overshoot rather than materially reduce latency.
 - `CHASSIS_RADIO_ENABLED` remains `False`; the gimbal does not depend on the
   chassis or ESP32-C3.
 
-## Display HUD
+## H-Problem Display HUD
 
-The on-device display refreshes target boxes at the vision frame rate and text
-at 10 Hz to avoid adding control latency.
+The on-device display now serves the fixed-camera steel-ball observer. It keeps
+the camera image and accepted ball box unobstructed while text refreshes at
+10 Hz to avoid adding control latency.
 
 | Area | Values |
 | --- | --- |
-| Top left | Tracking state, target coordinates, X/Y error |
-| Top right | FPS, AI latency, fixed focus |
-| Bottom left | Yaw/Pitch command RPM and measured angle in degrees |
-| Bottom right | CAN errors, timeouts, retries, and both bus voltages |
+| Top left | `BALL LOCK`, `BALL PREDICT`, or `BALL LOST`; ball X/Y |
+| Top right | FPS, AI latency, confidence or coast state |
 
-State colors are green for normal tracking, yellow for search/lost/warning, and
-red for a fault.
+Green means a measured ball, yellow means bounded prediction through a short
+detector dropout, and red means no valid observation. The former Yaw/Pitch,
+CAN, bus-voltage, focus, radio, and gimbal-center overlays are deliberately not
+shown because they do not belong to the H scoring path. Pixel X/Y is temporary;
+pipe calibration will replace it with ball position, target, and error in
+millimeters.
 
 ## Acceptance Evidence
 
@@ -174,12 +204,12 @@ d43183c  responsive tracking parameters
 9f6b4f4  production HUD and bounded transient command retry
 ```
 
-## Frozen Boundary
+## Historical Two-Axis Boundary
 
-Treat vision selection, velocity tracking, ZDT protocol, CAN timing, and the HUD
-as validated reusable infrastructure. Competition work belongs in a separate
-mission layer. It may submit high-level gimbal or chassis goals, but it must not
-rewrite the accepted tracker merely to compensate for mission behavior.
+Treat ZDT protocol, MCP2515 timing, and bounded motor supervision as reusable
+infrastructure. The former two-axis selection/velocity tracker is historical
+evidence, not an H controller, and may be replaced by the H ball observer and
+single-axis beam cascade.
 
 The K230-to-ESP32 WiFi/UDP heartbeat gate, the bidirectional
 ESP32-to-Tianmengxing UART3 shadow gate, and the W3 independent endpoint-reset

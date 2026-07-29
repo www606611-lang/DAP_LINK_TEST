@@ -47,6 +47,106 @@ def ticks_diff(now_ms, then_ms):
     return int(now_ms) - int(then_ms)
 
 
+class LatencyHistogram:
+    """Allocation-free runtime latency percentile estimator."""
+
+    def __init__(self, bin_width_ms=5, bin_count=41):
+        self.bin_width_ms = int(bin_width_ms)
+        self.bin_count = int(bin_count)
+        if self.bin_width_ms <= 0 or self.bin_count < 2:
+            raise ValueError("invalid latency histogram")
+        self.counts = [0] * self.bin_count
+        self.sample_count = 0
+        self.maximum_ms = 0
+
+    def add(self, value_ms):
+        value_ms = max(0, int(value_ms))
+        index = value_ms // self.bin_width_ms
+        if index >= self.bin_count:
+            index = self.bin_count - 1
+        self.counts[index] += 1
+        self.sample_count += 1
+        if value_ms > self.maximum_ms:
+            self.maximum_ms = value_ms
+
+    def percentile_ms(self, percentile):
+        if self.sample_count == 0:
+            return 0
+        percentile = clamp(int(percentile), 1, 100)
+        target = (
+            self.sample_count * percentile + 99
+        ) // 100
+        accumulated = 0
+        for index in range(self.bin_count):
+            accumulated += self.counts[index]
+            if accumulated >= target:
+                return index * self.bin_width_ms
+        return self.maximum_ms
+
+    def reset(self):
+        for index in range(self.bin_count):
+            self.counts[index] = 0
+        self.sample_count = 0
+        self.maximum_ms = 0
+
+
+class VisionWindowStats:
+    """Per-status-window latency and target continuity statistics."""
+
+    def __init__(self):
+        self.latency = LatencyHistogram()
+        self.reset()
+
+    def reset(self):
+        self.latency.reset()
+        self.frames = 0
+        self.measured = 0
+        self.coasted = 0
+        self.lost = 0
+        self.confidence_sum = 0.0
+        self.confidence_min = 1.0
+
+    def add(self, latency_ms, measured, coasting, confidence):
+        self.latency.add(latency_ms)
+        self.frames += 1
+        if measured:
+            self.measured += 1
+            confidence = float(confidence)
+            self.confidence_sum += confidence
+            if confidence < self.confidence_min:
+                self.confidence_min = confidence
+        elif coasting:
+            self.coasted += 1
+        else:
+            self.lost += 1
+
+    def snapshot(self):
+        if self.frames:
+            raw_miss_pct = 100.0 * (self.coasted + self.lost) / self.frames
+            lost_pct = 100.0 * self.lost / self.frames
+        else:
+            raw_miss_pct = 0.0
+            lost_pct = 0.0
+        return {
+            "frames": self.frames,
+            "measured": self.measured,
+            "coasted": self.coasted,
+            "lost": self.lost,
+            "raw_miss_pct": raw_miss_pct,
+            "lost_pct": lost_pct,
+            "confidence_avg": (
+                self.confidence_sum / self.measured
+                if self.measured else 0.0
+            ),
+            "confidence_min": (
+                self.confidence_min if self.measured else 0.0
+            ),
+            "latency_p95_ms": self.latency.percentile_ms(95),
+            "latency_p99_ms": self.latency.percentile_ms(99),
+            "latency_max_ms": self.latency.maximum_ms,
+        }
+
+
 def print_exception(exc):
     printer = getattr(sys, "print_exception", None)
     if printer:
@@ -208,18 +308,34 @@ class TargetSelector:
         hold_confidence,
         max_match_distance_px,
         forget_ms,
+        coast_ms=0,
+        max_coast_frames=0,
     ):
         self.acquire_confidence = float(acquire_confidence)
         self.hold_confidence = float(hold_confidence)
         self.max_match_distance_sq = float(max_match_distance_px) ** 2
         self.forget_ms = int(forget_ms)
+        self.coast_ms = int(coast_ms)
+        self.max_coast_frames = int(max_coast_frames)
         if not 0.0 <= self.hold_confidence <= self.acquire_confidence <= 1.0:
             raise ValueError("invalid target confidence hysteresis")
         if self.max_match_distance_sq <= 0.0 or self.forget_ms <= 0:
             raise ValueError("invalid target continuity limits")
+        if (
+            self.coast_ms < 0
+            or self.coast_ms > self.forget_ms
+            or self.max_coast_frames < 0
+        ):
+            raise ValueError("invalid target coast limits")
         self.last_center = None
         self.last_class_id = None
         self.last_seen_ms = None
+        self.velocity_x_px_ms = 0.0
+        self.velocity_y_px_ms = 0.0
+        self.coast_frame_count = 0
+        self.coasting = False
+        self.last_measurement_valid = False
+        self.last_confidence = 0.0
 
     def select(self, detections, now_ms):
         now_ms = int(now_ms)
@@ -233,7 +349,7 @@ class TargetSelector:
         if self.last_center is not None:
             selected = self._nearest_held_detection(detections)
             if selected is None:
-                return None
+                return self._coast(now_ms)
         else:
             selected = self._highest_confidence_detection(
                 detections, self.acquire_confidence
@@ -242,15 +358,63 @@ class TargetSelector:
             return None
 
         center_x, center_y = self._center(selected)
+        if self.last_center is not None and self.last_seen_ms is not None:
+            delta_ms = ticks_diff(now_ms, self.last_seen_ms)
+            if delta_ms > 0:
+                measured_vx = (center_x - self.last_center[0]) / delta_ms
+                measured_vy = (center_y - self.last_center[1]) / delta_ms
+                self.velocity_x_px_ms = (
+                    0.65 * measured_vx
+                    + 0.35 * self.velocity_x_px_ms
+                )
+                self.velocity_y_px_ms = (
+                    0.65 * measured_vy
+                    + 0.35 * self.velocity_y_px_ms
+                )
         self.last_center = (center_x, center_y)
         self.last_class_id = int(selected[5])
         self.last_seen_ms = now_ms
+        self.coast_frame_count = 0
+        self.coasting = False
+        self.last_measurement_valid = True
+        self.last_confidence = float(selected[4])
         return map_target_center(center_x, center_y)
 
     def reset(self):
         self.last_center = None
         self.last_class_id = None
         self.last_seen_ms = None
+        self.velocity_x_px_ms = 0.0
+        self.velocity_y_px_ms = 0.0
+        self.coast_frame_count = 0
+        self.coasting = False
+        self.last_measurement_valid = False
+        self.last_confidence = 0.0
+
+    def _coast(self, now_ms):
+        self.last_measurement_valid = False
+        self.coasting = False
+        if (
+            self.coast_ms <= 0
+            or self.max_coast_frames <= 0
+            or self.last_seen_ms is None
+            or self.coast_frame_count >= self.max_coast_frames
+        ):
+            return None
+        age_ms = ticks_diff(now_ms, self.last_seen_ms)
+        if age_ms < 0 or age_ms > self.coast_ms:
+            return None
+        predicted_x = int(
+            self.last_center[0] + self.velocity_x_px_ms * age_ms
+        )
+        predicted_y = int(
+            self.last_center[1] + self.velocity_y_px_ms * age_ms
+        )
+        predicted_x = clamp(predicted_x, 0, config.AI_WIDTH - 1)
+        predicted_y = clamp(predicted_y, 0, config.AI_HEIGHT - 1)
+        self.coast_frame_count += 1
+        self.coasting = True
+        return map_target_center(predicted_x, predicted_y)
 
     def _nearest_held_detection(self, detections):
         best = None
@@ -291,7 +455,45 @@ class TargetSelector:
 
 
 def postprocess(results, labels, ratio, pad_top, pad_left):
-    output_data = results[0][0].transpose()
+    raw_output = results[0][0]
+    if (
+        len(labels) == 1
+        and getattr(config, "SINGLE_TARGET_FAST_PATH", False)
+    ):
+        best_indices = np.argmax(raw_output, axis=1)
+        best_index = int(best_indices[4])
+        score = float(raw_output[4, best_index])
+        if score < config.CONFIDENCE_THRESHOLD:
+            return []
+        x = raw_output[0, best_index]
+        y = raw_output[1, best_index]
+        width = raw_output[2, best_index]
+        height = raw_output[3, best_index]
+        x1 = clamp(
+            int((x - 0.5 * width - pad_left) / ratio),
+            0,
+            config.AI_WIDTH - 1,
+        )
+        y1 = clamp(
+            int((y - 0.5 * height - pad_top) / ratio),
+            0,
+            config.AI_HEIGHT - 1,
+        )
+        x2 = clamp(
+            int((x + 0.5 * width - pad_left) / ratio),
+            0,
+            config.AI_WIDTH - 1,
+        )
+        y2 = clamp(
+            int((y + 0.5 * height - pad_top) / ratio),
+            0,
+            config.AI_HEIGHT - 1,
+        )
+        if x2 <= x1 or y2 <= y1:
+            return []
+        return [[x1, y1, x2, y2, score, 0]]
+
+    output_data = raw_output.transpose()
     boxes = output_data[:, 0:4]
     class_scores = output_data[:, 4:]
     class_ids = np.argmax(class_scores, axis=-1)
@@ -338,7 +540,6 @@ def postprocess(results, labels, ratio, pad_top, pad_left):
 def draw_detections(
     osd_image,
     detections,
-    labels,
     hud,
 ):
     osd_image.clear()
@@ -346,51 +547,18 @@ def draw_detections(
         10, 6, 28, hud["state"], color=hud["state_color"]
     )
     osd_image.draw_string_advanced(
-        10, 40, 21, hud["target"], color=config.HUD_INFO_COLOR
+        10, 40, 22, hud["ball"], color=config.HUD_INFO_COLOR
     )
     osd_image.draw_string_advanced(
-        10, 66, 21, hud["error"], color=config.HUD_INFO_COLOR
+        590, 40, 20, hud["quality"], color=hud["quality_color"]
     )
     osd_image.draw_string_advanced(
-        580, 6, 23, hud["performance"], color=config.FPS_COLOR
-    )
-    osd_image.draw_string_advanced(
-        650, 36, 19, hud["focus"], color=config.FOCUS_COLOR
-    )
-    if hud["radio"]:
-        osd_image.draw_string_advanced(
-            560, 62, 19, hud["radio"], color=config.HUD_INFO_COLOR
-        )
-
-    osd_image.draw_string_advanced(
-        10, 418, 21, hud["yaw"], color=config.HUD_INFO_COLOR
-    )
-    osd_image.draw_string_advanced(
-        10, 446, 21, hud["pitch"], color=config.HUD_INFO_COLOR
-    )
-    osd_image.draw_string_advanced(
-        555, 418, 20, hud["can"], color=hud["can_color"]
-    )
-    osd_image.draw_string_advanced(
-        555, 446, 20, hud["bus"], color=config.HUD_INFO_COLOR
-    )
-
-    center_x = config.DISPLAY_WIDTH // 2
-    center_y = config.DISPLAY_HEIGHT // 2
-    osd_image.draw_rectangle(
-        center_x - 10,
-        center_y - 10,
-        20,
-        20,
-        color=config.FOCUS_COLOR,
-        thickness=2,
+        590, 6, 22, hud["performance"], color=config.FPS_COLOR
     )
 
     for detection in detections:
         x1, y1, x2, y2 = [int(value) for value in detection[:4]]
         score = detection[4]
-        class_id = int(detection[5])
-        label = labels[class_id]
 
         draw_x = int(x1 * config.DISPLAY_WIDTH // config.AI_WIDTH)
         draw_y = int(y1 * config.DISPLAY_HEIGHT // config.AI_HEIGHT)
@@ -408,106 +576,49 @@ def draw_detections(
             draw_x,
             max(0, draw_y - 30),
             22,
-            "%s %.2f" % (label, score),
+            "BALL %.2f" % score,
             color=config.TEXT_COLOR,
         )
-
-
-def _voltage_text(millivolts):
-    if not millivolts:
-        return "--.-"
-    return "%.1f" % (float(millivolts) / 1000.0)
 
 
 def build_hud(
     fps_value,
     vision_latency_ms,
-    focus_status,
     target,
-    tracker=None,
-    can_gate=None,
-    radio_status=None,
+    measured=False,
+    coasting=False,
+    confidence=0.0,
 ):
-    state = "VISION"
-    state_color = config.HUD_GOOD_COLOR
-    error_x = 0
-    error_y = 0
-    yaw_rpm = 0.0
-    pitch_rpm = 0.0
-    yaw_position = 0.0
-    pitch_position = 0.0
-    yaw_bus_mv = 0
-    pitch_bus_mv = 0
-    command_retries = 0
-
-    if tracker is not None:
-        state = tracker.state_text()
-        error_x = tracker.raw_error_x
-        error_y = tracker.raw_error_y
-        yaw_rpm = tracker.command_yaw_rpm
-        pitch_rpm = tracker.command_pitch_rpm
-        supervisor = tracker.supervisor
-        yaw_position = supervisor.positions["yaw"]
-        pitch_position = supervisor.positions["pitch"]
-        yaw_bus_mv = supervisor.bus_mv["yaw"]
-        pitch_bus_mv = supervisor.bus_mv["pitch"]
-        command_retries = supervisor.command_retry_count
-        if "FAULT" in state:
-            state_color = config.HUD_BAD_COLOR
-        elif "LOST" in state or "SEARCH" in state:
-            state_color = config.HUD_WARN_COLOR
-
-    if target is None:
-        target_text = "TARGET ---"
-        error_text = "ERROR  X---  Y---"
+    confidence = float(confidence)
+    if measured and target is not None:
+        state = "BALL LOCK"
+        state_color = config.HUD_GOOD_COLOR
+        quality_text = "CONF %.2f" % confidence
+        quality_color = config.HUD_GOOD_COLOR
+    elif coasting and target is not None:
+        state = "BALL PREDICT"
+        state_color = config.HUD_WARN_COLOR
+        quality_text = "COAST %.2f" % confidence
+        quality_color = config.HUD_WARN_COLOR
     else:
-        target_text = "TARGET X%03d Y%03d" % (target[0], target[1])
-        error_text = "ERROR  X%+4d Y%+4d" % (error_x, error_y)
+        state = "BALL LOST"
+        state_color = config.HUD_BAD_COLOR
+        quality_text = "CONF ---"
+        quality_color = config.HUD_BAD_COLOR
 
-    can_text = "CAN OFF"
-    can_color = config.HUD_WARN_COLOR
-    if can_gate is not None:
-        controller = can_gate.controller
-        errors = getattr(controller, "error_count", 0) if controller else 0
-        timeouts = (
-            getattr(controller, "timeout_count", 0) if controller else 0
-        )
-        if can_gate.state == can_gate.STATE_FAILED:
-            can_text = "CAN FAIL E%d T%d R%d" % (
-                errors, timeouts, command_retries
-            )
-            can_color = config.HUD_BAD_COLOR
-        elif can_gate.state == can_gate.STATE_ACTIVE:
-            health = "OK" if errors == 0 and timeouts == 0 else "WARN"
-            can_text = "CAN %s E%d T%d R%d" % (
-                health, errors, timeouts, command_retries
-            )
-            can_color = (
-                config.HUD_GOOD_COLOR
-                if health == "OK"
-                else config.HUD_WARN_COLOR
-            )
-        else:
-            can_text = "%s E%d T%d R%d" % (
-                can_gate.state_text(), errors, timeouts, command_retries
-            )
+    ball_text = (
+        "BALL X%03d Y%03d" % (target[0], target[1])
+        if target is not None else "BALL X--- Y---"
+    )
 
     return {
         "state": state,
         "state_color": state_color,
-        "target": target_text,
-        "error": error_text,
-        "performance": "FPS %.1f  AI %dms" %
+        "ball": ball_text,
+        "quality": quality_text,
+        "quality_color": quality_color,
+        "performance": "FPS %.1f AI %dms" %
         (fps_value, int(vision_latency_ms)),
-        "focus": focus_status.replace("FOCUS ", "F "),
-        "radio": radio_status or "",
-        "yaw": "YAW %+5.1f RPM  %+6.1f DEG" % (yaw_rpm, yaw_position),
-        "pitch": "PITCH %+5.1f RPM  %+6.1f DEG" %
-        (pitch_rpm, pitch_position),
-        "can": can_text,
-        "can_color": can_color,
-        "bus": "BUS Y%s P%sV" %
-        (_voltage_text(yaw_bus_mv), _voltage_text(pitch_bus_mv)),
     }
 
 
@@ -550,6 +661,8 @@ def run():
         config.TARGET_HOLD_CONFIDENCE,
         config.TARGET_MATCH_MAX_DISTANCE_PX,
         config.TARGET_FORGET_MS,
+        config.TARGET_COAST_MS,
+        config.TARGET_MAX_COAST_FRAMES,
     )
 
     try:
@@ -568,15 +681,10 @@ def run():
         )
         sensor.set_pixformat(Sensor.RGBP888, chn=CAM_CHN_ID_1)
 
-        focus_status = "FOCUS OFF"
         if config.ENABLE_FIXED_FOCUS:
             print("sensor id:", config.SENSOR_ID)
             print("focus", focus_caps_text(sensor))
-            focus_status = (
-                "FOCUS %d" % config.FIXED_FOCUS_POS
-                if set_fixed_focus(sensor, "before-run")
-                else "FOCUS N/A"
-            )
+            set_fixed_focus(sensor, "before-run")
 
         bind_info = sensor.bind_info(x=0, y=0, chn=CAM_CHN_ID_0)
         Display.bind_layer(**bind_info, layer=Display.LAYER_VIDEO1)
@@ -635,17 +743,27 @@ def run():
         sensor_running = True
         if config.ENABLE_FIXED_FOCUS:
             time.sleep_ms(300)
-            focus_status = (
-                "FOCUS %d" % config.FIXED_FOCUS_POS
-                if set_fixed_focus(sensor, "after-run")
-                else "FOCUS N/A"
-            )
+            set_fixed_focus(sensor, "after-run")
 
         fps = time.clock()
         frame_count = 0
         last_status_ms = time.ticks_ms()
         last_hud_ms = 0
+        last_overlay_ms = 0
         hud = None
+        vision_histogram = LatencyHistogram()
+        frame_histogram = LatencyHistogram()
+        period_histogram = LatencyHistogram()
+        vision_window_stats = VisionWindowStats()
+        previous_frame_started_ms = None
+        last_period_ms = 0
+        last_snapshot_ms = 0
+        last_ai2d_ms = 0
+        last_kpu_ms = 0
+        last_output_ms = 0
+        last_postprocess_ms = 0
+        last_overlay_latency_ms = 0
+        last_gc_latency_ms = 0
         if radio is not None:
             radio.open(last_status_ms)
         if can_gate is not None:
@@ -702,45 +820,78 @@ def run():
         print("vision build:", config.BUILD_ID)
 
         while True:
+            frame_started_ms = time.ticks_ms()
+            if previous_frame_started_ms is not None:
+                last_period_ms = max(
+                    0,
+                    time.ticks_diff(
+                        frame_started_ms, previous_frame_started_ms
+                    ),
+                )
+                period_histogram.add(last_period_ms)
+            previous_frame_started_ms = frame_started_ms
             fps.tick()
             os.exitpoint()
             frame_count += 1
-            frame_started_ms = time.ticks_ms()
 
             frame = sensor.snapshot(chn=CAM_CHN_ID_1)
+            snapshot_done_ms = time.ticks_ms()
             ai2d_input_tensor = nn.from_numpy(frame.to_numpy_ref())
             ai2d_builder.run(ai2d_input_tensor, kpu_input_tensor)
             kpu.set_input_tensor(0, kpu_input_tensor)
+            ai2d_done_ms = time.ticks_ms()
             kpu.run()
+            kpu_done_ms = time.ticks_ms()
 
             results = []
             for output_index in range(kpu.outputs_size()):
                 output_tensor = kpu.get_output_tensor(output_index)
                 results.append(output_tensor.to_numpy())
                 del output_tensor
+            output_done_ms = time.ticks_ms()
 
             detections = postprocess(results, labels, ratio, top, left)
             del results
             del ai2d_input_tensor
 
             now_ms = time.ticks_ms()
+            last_snapshot_ms = max(
+                0, time.ticks_diff(snapshot_done_ms, frame_started_ms)
+            )
+            last_ai2d_ms = max(
+                0, time.ticks_diff(ai2d_done_ms, snapshot_done_ms)
+            )
+            last_kpu_ms = max(
+                0, time.ticks_diff(kpu_done_ms, ai2d_done_ms)
+            )
+            last_output_ms = max(
+                0, time.ticks_diff(output_done_ms, kpu_done_ms)
+            )
+            last_postprocess_ms = max(
+                0, time.ticks_diff(now_ms, output_done_ms)
+            )
             vision_latency_ms = max(
                 0, time.ticks_diff(now_ms, frame_started_ms)
             )
+            vision_histogram.add(vision_latency_ms)
             target = target_selector.select(detections, now_ms)
             if target is None:
                 last_target_valid = False
             else:
                 last_cx, last_cy = target
                 last_target_valid = True
+            vision_window_stats.add(
+                vision_latency_ms,
+                target_selector.last_measurement_valid,
+                target_selector.coasting,
+                target_selector.last_confidence,
+            )
 
             fps_value = fps.fps()
             if tracker is not None:
                 tracker.task(target, now_ms)
-            radio_status = None
             if radio is not None:
                 radio.task(now_ms)
-                radio_status = radio.state_text()
             if can_gate is not None:
                 if tracker is None:
                     can_gate.task()
@@ -751,26 +902,40 @@ def run():
                 hud = build_hud(
                     fps_value,
                     vision_latency_ms,
-                    focus_status,
                     target,
-                    tracker,
-                    can_gate,
-                    radio_status,
+                    target_selector.last_measurement_valid,
+                    target_selector.coasting,
+                    target_selector.last_confidence,
                 )
                 last_hud_ms = now_ms
-            draw_detections(
-                osd_image,
-                detections,
-                labels,
-                hud,
+            overlay_due = (
+                last_overlay_ms == 0
+                or time.ticks_diff(now_ms, last_overlay_ms)
+                >= config.OVERLAY_UPDATE_MS
             )
-            Display.show_image(osd_image)
+            if overlay_due:
+                overlay_started_ms = time.ticks_ms()
+                draw_detections(
+                    osd_image,
+                    detections,
+                    hud,
+                )
+                Display.show_image(osd_image)
+                last_overlay_latency_ms = max(
+                    0,
+                    time.ticks_diff(
+                        time.ticks_ms(), overlay_started_ms
+                    ),
+                )
+                last_overlay_ms = now_ms
             frame_done_ms = time.ticks_ms()
             frame_latency_ms = max(
                 0, time.ticks_diff(frame_done_ms, frame_started_ms)
             )
+            frame_histogram.add(frame_latency_ms)
 
             if time.ticks_diff(frame_done_ms, last_status_ms) >= config.STATUS_PRINT_MS:
+                vision_window = vision_window_stats.snapshot()
                 can_snapshot = (
                     can_gate.snapshot() if can_gate is not None else {}
                 )
@@ -786,20 +951,52 @@ def run():
                 )
                 print(
                     "PERF fps=%.2f frame_ms=%d vision_ms=%d "
+                    "v_p95=%d v_p99=%d v_max=%d f_p95=%d f_p99=%d "
+                    "period=%d p_p95=%d p_p99=%d p_max=%d "
+                    "vw_p95=%d vw_p99=%d vw_max=%d "
+                    "snap=%d ai2d=%d kpu=%d out=%d post=%d osd=%d gc=%d "
                     "control_ms=%d can_ms=%d motion_y_ms=%s "
-                    "motion_p_ms=%s" %
+                    "motion_p_ms=%s mem=%s" %
                     (
                         fps_value,
                         frame_latency_ms,
                         vision_latency_ms,
+                        vision_histogram.percentile_ms(95),
+                        vision_histogram.percentile_ms(99),
+                        vision_histogram.maximum_ms,
+                        frame_histogram.percentile_ms(95),
+                        frame_histogram.percentile_ms(99),
+                        last_period_ms,
+                        period_histogram.percentile_ms(95),
+                        period_histogram.percentile_ms(99),
+                        period_histogram.maximum_ms,
+                        vision_window["latency_p95_ms"],
+                        vision_window["latency_p99_ms"],
+                        vision_window["latency_max_ms"],
+                        last_snapshot_ms,
+                        last_ai2d_ms,
+                        last_kpu_ms,
+                        last_output_ms,
+                        last_postprocess_ms,
+                        last_overlay_latency_ms,
+                        last_gc_latency_ms,
                         tracker_timing.get("control_ms", 0),
                         supervisor_timing.get("can_command_ms", 0),
                         str(motion_timing.get("yaw")),
                         str(motion_timing.get("pitch")),
+                        str(
+                            gc.mem_free()
+                            if hasattr(gc, "mem_free")
+                            else "NA"
+                        ),
                     )
                 )
                 print(
-                    "TRACK state=%s event=%s boxes=%d valid=%d "
+                    "TRACK state=%s event=%s boxes=%d valid=%d measured=%d "
+                    "coast=%d conf=%.3f "
+                    "win=%d hit=%d wcoast=%d lost=%d "
+                    "miss_pct=%.1f lost_pct=%.1f "
+                    "conf_avg=%.3f conf_min=%.3f "
                     "cx=%d cy=%d cmd=%d lease_expired=%d "
                     "lease_recovered=%d can_errors=%d timeouts=%d "
                     "tec=%d rec=%d" %
@@ -808,6 +1005,17 @@ def run():
                         tracker_snapshot.get("event", "NONE"),
                         len(detections),
                         1 if last_target_valid else 0,
+                        1 if target_selector.last_measurement_valid else 0,
+                        1 if target_selector.coasting else 0,
+                        target_selector.last_confidence,
+                        vision_window["frames"],
+                        vision_window["measured"],
+                        vision_window["coasted"],
+                        vision_window["lost"],
+                        vision_window["raw_miss_pct"],
+                        vision_window["lost_pct"],
+                        vision_window["confidence_avg"],
+                        vision_window["confidence_min"],
                         last_cx,
                         last_cy,
                         tracker_snapshot.get("command_count", 0),
@@ -819,13 +1027,18 @@ def run():
                         can_snapshot.get("rec", 0),
                     )
                 )
+                vision_window_stats.reset()
                 last_status_ms = frame_done_ms
 
             if (
                 config.GC_EVERY_N_FRAMES
                 and frame_count % config.GC_EVERY_N_FRAMES == 0
             ):
+                gc_started_ms = time.ticks_ms()
                 gc.collect()
+                last_gc_latency_ms = max(
+                    0, time.ticks_diff(time.ticks_ms(), gc_started_ms)
+                )
 
     except KeyboardInterrupt as exc:
         print("user stop:", exc)

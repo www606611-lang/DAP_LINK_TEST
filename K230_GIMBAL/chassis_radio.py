@@ -8,8 +8,12 @@ from wire_protocol import (
     ROLE_K230,
     TYPE_HEARTBEAT,
     TYPE_HELLO,
+    TYPE_H_BALL_STATUS,
+    TYPE_H_MISSION_COMMAND,
     TYPE_STATUS,
+    decode_h_mission_command,
     encode_frame,
+    encode_h_ball_status,
     encode_u32_le,
     sequence_is_newer,
 )
@@ -50,6 +54,9 @@ class ChassisRadio:
         self.unsupported_count = 0
         self.socket_error_count = 0
         self.recovery_count = 0
+        self.h_mission_command_count = 0
+        self.h_decode_error_count = 0
+        self.last_h_mission_command = None
 
     def open(self, now_ms):
         if not NETWORK_RUNTIME:
@@ -147,7 +154,20 @@ class ChassisRadio:
             "length_errors": self.parser.length_error_count,
             "socket_errors": self.socket_error_count,
             "recoveries": self.recovery_count,
+            "h_mission_commands": self.h_mission_command_count,
+            "h_decode_errors": self.h_decode_error_count,
         }
+
+    def send_h_ball_status(self, status, now_ms):
+        if self.sock is None:
+            return False
+        payload = encode_h_ball_status(status)
+        return self._send(TYPE_H_BALL_STATUS, payload, now_ms)
+
+    def consume_h_mission_command(self):
+        command = self.last_h_mission_command
+        self.last_h_mission_command = None
+        return command
 
     def _connect(self, now_ms):
         self.last_connect_attempt_ms = now_ms
@@ -204,7 +224,12 @@ class ChassisRadio:
             for message_type, sequence, payload in frames:
                 if (
                     message_type not in
-                    (TYPE_HELLO, TYPE_HEARTBEAT, TYPE_STATUS)
+                    (
+                        TYPE_HELLO,
+                        TYPE_HEARTBEAT,
+                        TYPE_STATUS,
+                        TYPE_H_MISSION_COMMAND,
+                    )
                     or len(payload) < 1
                 ):
                     self.unsupported_count += 1
@@ -213,6 +238,16 @@ class ChassisRadio:
                 if role not in (ROLE_ESP32, ROLE_CHASSIS):
                     self.unsupported_count += 1
                     continue
+                h_mission_command = None
+                if message_type == TYPE_H_MISSION_COMMAND:
+                    if role != ROLE_CHASSIS:
+                        self.unsupported_count += 1
+                        continue
+                    try:
+                        h_mission_command = decode_h_mission_command(payload)
+                    except ValueError:
+                        self.h_decode_error_count += 1
+                        continue
                 previous = self.last_rx_sequence[role]
                 if (
                     previous is not None
@@ -237,6 +272,9 @@ class ChassisRadio:
                 self.last_rx_by_role_ms[role] = now_ms
                 self.last_rx_ms = now_ms
                 self.rx_frame_count += 1
+                if h_mission_command is not None:
+                    self.last_h_mission_command = h_mission_command
+                    self.h_mission_command_count += 1
 
     def _send(self, message_type, payload, now_ms):
         packet = encode_frame(message_type, self.tx_sequence, payload)
@@ -251,8 +289,10 @@ class ChassisRadio:
             )
             self.tx_frame_count += 1
             self.last_tx_ms = now_ms
+            return True
         except Exception:
             self.socket_error_count += 1
+            return False
 
     def _role_online(self, role, now_ms):
         return (

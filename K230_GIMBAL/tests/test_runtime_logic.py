@@ -2,6 +2,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as host_numpy
+
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
@@ -9,6 +11,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 import config
 import chassis_radio
 import gimbal_control
+import vision as vision_module
 from chassis_radio import ChassisRadio
 from gimbal_control import (
     EMM_PULSES_PER_REVOLUTION,
@@ -18,23 +21,34 @@ from gimbal_control import (
 )
 from mcp2515 import MCP2515, MCP2515RuntimeGate
 from vision import (
+    LatencyHistogram,
     TargetSelector,
+    VisionWindowStats,
     build_hud,
     letterbox_param,
     map_target_center,
     nms_detections,
+    postprocess,
     select_target,
 )
 from wire_protocol import (
     FrameParser,
+    H_BALL_FLAG_ARMED,
+    H_BALL_FLAG_MEASUREMENT_VALID,
     ROLE_CHASSIS,
     ROLE_ESP32,
     ROLE_K230,
     TYPE_HEARTBEAT,
     TYPE_HELLO,
+    TYPE_H_BALL_STATUS,
+    TYPE_H_MISSION_COMMAND,
     TYPE_STATUS,
     crc16_ccitt,
+    decode_h_ball_status,
+    decode_h_mission_command,
     encode_frame,
+    encode_h_ball_status,
+    encode_h_mission_command,
     sequence_is_newer,
 )
 from zdt_motor import (
@@ -349,48 +363,29 @@ class FakeGimbalMotion:
 
 
 class RuntimeLogicTest(unittest.TestCase):
-    def test_hud_reports_tracking_motion_can_and_bus_health(self):
-        class Supervisor:
-            positions = {"yaw": 31.25, "pitch": -8.5}
-            bus_mv = {"yaw": 11620, "pitch": 11590}
-            command_retry_count = 0
+    def test_hud_reports_only_h_ball_vision_state(self):
+        hud = build_hud(35.8, 28, (183, 129), True, False, 0.62)
 
-        class Tracker:
-            raw_error_x = -17
-            raw_error_y = 9
-            command_yaw_rpm = 2.5
-            command_pitch_rpm = -1.5
-            supervisor = Supervisor()
-
-            @staticmethod
-            def state_text():
-                return "TRACK MOVE"
-
-        class Controller:
-            error_count = 0
-            timeout_count = 0
-
-        class CanGate:
-            STATE_FAILED = 2
-            STATE_ACTIVE = 3
-            state = STATE_ACTIVE
-            controller = Controller()
-
-            @staticmethod
-            def state_text():
-                return "CAN ACTIVE"
-
-        hud = build_hud(
-            21.6, 34, "FOCUS 210", (183, 129), Tracker(), CanGate()
+        self.assertEqual(hud["state"], "BALL LOCK")
+        self.assertEqual(hud["ball"], "BALL X183 Y129")
+        self.assertEqual(hud["quality"], "CONF 0.62")
+        self.assertEqual(hud["performance"], "FPS 35.8 AI 28ms")
+        self.assertEqual(
+            set(hud),
+            {
+                "state", "state_color", "ball", "quality",
+                "quality_color", "performance",
+            },
         )
 
-        self.assertEqual(hud["state"], "TRACK MOVE")
-        self.assertEqual(hud["target"], "TARGET X183 Y129")
-        self.assertEqual(hud["error"], "ERROR  X -17 Y  +9")
-        self.assertEqual(hud["can"], "CAN OK E0 T0 R0")
-        self.assertEqual(hud["bus"], "BUS Y11.6 P11.6V")
-        self.assertIn("+2.5 RPM", hud["yaw"])
-        self.assertIn("-1.5 RPM", hud["pitch"])
+        predicted = build_hud(35.8, 28, (184, 129), False, True, 0.41)
+        self.assertEqual(predicted["state"], "BALL PREDICT")
+        self.assertEqual(predicted["quality"], "COAST 0.41")
+
+        lost = build_hud(35.8, 28, None, False, False, 0.0)
+        self.assertEqual(lost["state"], "BALL LOST")
+        self.assertEqual(lost["ball"], "BALL X--- Y---")
+        self.assertEqual(lost["quality"], "CONF ---")
 
     def test_speed_command_retries_one_transient_timeout(self):
         supervisor, reader, _motion = self.make_gimbal_supervisor(False)
@@ -475,11 +470,11 @@ class RuntimeLogicTest(unittest.TestCase):
         )
         return tracker, supervisor, reader, motion
 
-    def test_independent_gimbal_tracking_gate_is_enabled(self):
+    def test_h_transition_power_on_has_no_motor_ownership(self):
         self.assertFalse(config.CHASSIS_RADIO_ENABLED)
-        self.assertTrue(config.CAN_ENABLED)
+        self.assertFalse(config.CAN_ENABLED)
         self.assertTrue(config.ZDT_DISCOVERY_ENABLED)
-        self.assertTrue(config.GIMBAL_MOTION_ENABLED)
+        self.assertFalse(config.GIMBAL_MOTION_ENABLED)
         self.assertEqual(config.GIMBAL_YAW_CAN_ADDRESS, 1)
         self.assertEqual(config.GIMBAL_PITCH_CAN_ADDRESS, 2)
         self.assertEqual(config.GIMBAL_YAW_POSITIVE_DIRECTION, "CW")
@@ -1135,6 +1130,84 @@ class RuntimeLogicTest(unittest.TestCase):
     def test_crc_known_vector(self):
         self.assertEqual(crc16_ccitt(b"123456789"), 0x29B1)
 
+    def test_h_mission_and_ball_status_codec_round_trip(self):
+        command = {
+            "profile": 6,
+            "action": 2,
+            "flags": 1,
+            "mission_sequence": 0x1234,
+            "target_x_0p1mm": -500,
+            "command_time_ms": 0x10203040,
+            "chassis_accel_mm_s2": -321,
+            "lease_ms": 250,
+        }
+        self.assertEqual(
+            decode_h_mission_command(encode_h_mission_command(command)),
+            command,
+        )
+
+        status = {
+            "profile": 6,
+            "controller_state": 3,
+            "quality": 87,
+            "flags": H_BALL_FLAG_MEASUREMENT_VALID | H_BALL_FLAG_ARMED,
+            "mission_sequence": 0x1234,
+            "sample_time_ms": 0x55667788,
+            "ball_x_0p1mm": -487,
+            "ball_v_0p1mm_s": 125,
+            "target_x_0p1mm": -500,
+            "error_0p1mm": 13,
+            "beam_angle_mdeg": -2750,
+            "observation_age_ms": 18,
+            "max_abs_error_0p1mm": 42,
+        }
+        self.assertEqual(
+            decode_h_ball_status(encode_h_ball_status(status)),
+            status,
+        )
+
+    def test_chassis_radio_exchanges_h_unit_data(self):
+        command = {
+            "profile": 5,
+            "action": 1,
+            "flags": 0,
+            "mission_sequence": 7,
+            "target_x_0p1mm": 0,
+            "command_time_ms": 1000,
+            "chassis_accel_mm_s2": 45,
+            "lease_ms": 300,
+        }
+        packet = encode_frame(
+            TYPE_H_MISSION_COMMAND,
+            10,
+            encode_h_mission_command(command),
+        )
+        radio = ChassisRadio()
+        radio.sock = FakeSocket((packet,))
+        radio._receive(1010)
+        self.assertEqual(radio.consume_h_mission_command(), command)
+
+        status = {
+            "profile": 5,
+            "controller_state": 2,
+            "quality": 90,
+            "flags": H_BALL_FLAG_MEASUREMENT_VALID,
+            "mission_sequence": 7,
+            "sample_time_ms": 1020,
+            "ball_x_0p1mm": 11,
+            "ball_v_0p1mm_s": -20,
+            "target_x_0p1mm": 0,
+            "error_0p1mm": 11,
+            "beam_angle_mdeg": 350,
+            "observation_age_ms": 12,
+            "max_abs_error_0p1mm": 30,
+        }
+        self.assertTrue(radio.send_h_ball_status(status, 1020))
+        sent_packet = radio.sock.sent[0][0]
+        frame = FrameParser().feed(sent_packet)[0]
+        self.assertEqual(frame[0], TYPE_H_BALL_STATUS)
+        self.assertEqual(decode_h_ball_status(frame[2]), status)
+
     def test_frame_round_trip_fragmented(self):
         packet = encode_frame(TYPE_HEARTBEAT, 0x1234, b"abc")
         parser = FrameParser()
@@ -1282,6 +1355,28 @@ class RuntimeLogicTest(unittest.TestCase):
         ]
         self.assertEqual(select_target(detections), (200, 120))
 
+    def test_single_target_fast_postprocess_keeps_only_best_box(self):
+        output = host_numpy.zeros((1, 5, 3), dtype=host_numpy.float32)
+        output[0, :, 0] = [100, 100, 20, 20, 0.20]
+        output[0, :, 1] = [300, 160, 40, 20, 0.82]
+        output[0, :, 2] = [500, 200, 30, 30, 0.40]
+        original_np = vision_module.np
+        original_fast_path = config.SINGLE_TARGET_FAST_PATH
+        try:
+            vision_module.np = host_numpy
+            config.SINGLE_TARGET_FAST_PATH = True
+            detections = postprocess(
+                [output], ["steel_ball"], 1.0, 0, 0
+            )
+        finally:
+            vision_module.np = original_np
+            config.SINGLE_TARGET_FAST_PATH = original_fast_path
+
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0][:4], [280, 150, 320, 170])
+        self.assertAlmostEqual(detections[0][4], 0.82, places=5)
+        self.assertEqual(detections[0][5], 0)
+
     def test_target_selector_holds_nearby_low_confidence_edge_detection(self):
         selector = TargetSelector(0.45, 0.25, 180, 500)
         self.assertEqual(
@@ -1323,6 +1418,63 @@ class RuntimeLogicTest(unittest.TestCase):
             selector.select([[0, 0, 80, 80, 0.95, 0]], 500),
             map_target_center(40, 40),
         )
+
+    def test_target_selector_coasts_two_frames_then_invalidates(self):
+        selector = TargetSelector(
+            0.35, 0.18, 180, 500, coast_ms=120,
+            max_coast_frames=2,
+        )
+        selector.select([[90, 90, 110, 110, 0.80, 0]], 0)
+        selector.select([[110, 90, 130, 110, 0.70, 0]], 20)
+
+        first_prediction = selector.select([], 40)
+        second_prediction = selector.select([], 60)
+
+        self.assertEqual(first_prediction, map_target_center(133, 100))
+        self.assertEqual(second_prediction, map_target_center(146, 100))
+        self.assertTrue(selector.coasting)
+        self.assertFalse(selector.last_measurement_valid)
+        self.assertIsNone(selector.select([], 80))
+        self.assertFalse(selector.coasting)
+
+    def test_latency_histogram_reports_bounded_percentiles(self):
+        histogram = LatencyHistogram(bin_width_ms=5, bin_count=41)
+        for value in range(1, 101):
+            histogram.add(value)
+        histogram.add(350)
+
+        self.assertEqual(histogram.sample_count, 101)
+        self.assertEqual(histogram.percentile_ms(95), 95)
+        self.assertEqual(histogram.percentile_ms(99), 100)
+        self.assertEqual(histogram.maximum_ms, 350)
+
+        histogram.reset()
+        self.assertEqual(histogram.sample_count, 0)
+        self.assertEqual(histogram.maximum_ms, 0)
+        self.assertEqual(histogram.percentile_ms(95), 0)
+
+    def test_vision_window_stats_separates_coast_and_true_loss(self):
+        stats = VisionWindowStats()
+        stats.add(20, True, False, 0.50)
+        stats.add(25, True, False, 0.70)
+        stats.add(30, False, True, 0.70)
+        stats.add(100, False, False, 0.0)
+
+        snapshot = stats.snapshot()
+        self.assertEqual(snapshot["frames"], 4)
+        self.assertEqual(snapshot["measured"], 2)
+        self.assertEqual(snapshot["coasted"], 1)
+        self.assertEqual(snapshot["lost"], 1)
+        self.assertAlmostEqual(snapshot["raw_miss_pct"], 50.0)
+        self.assertAlmostEqual(snapshot["lost_pct"], 25.0)
+        self.assertAlmostEqual(snapshot["confidence_avg"], 0.60)
+        self.assertAlmostEqual(snapshot["confidence_min"], 0.50)
+        self.assertEqual(snapshot["latency_p95_ms"], 100)
+        self.assertEqual(snapshot["latency_p99_ms"], 100)
+        self.assertEqual(snapshot["latency_max_ms"], 100)
+
+        stats.reset()
+        self.assertEqual(stats.snapshot()["frames"], 0)
 
     def test_nms_suppresses_only_same_class_overlap(self):
         detections = [
