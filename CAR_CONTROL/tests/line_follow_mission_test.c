@@ -23,6 +23,10 @@ static uint32_t g_stop_count;
 static uint32_t g_reset_metrics_count;
 static uint32_t g_emergency_stop_count;
 static car_control_block_reason_t g_stop_reason;
+static int16_t g_start_line_error;
+static int16_t g_command_line_error;
+static uint8_t g_start_active_count;
+static uint8_t g_command_active_count;
 
 static void reset_mocks(void)
 {
@@ -46,6 +50,10 @@ static void reset_mocks(void)
     g_reset_metrics_count = 0U;
     g_emergency_stop_count = 0U;
     g_stop_reason = CAR_CONTROL_BLOCK_NONE;
+    g_start_line_error = 0;
+    g_command_line_error = 0;
+    g_start_active_count = 0U;
+    g_command_active_count = 0U;
 }
 
 static line_follow_mission_snapshot_t mission_snapshot(void)
@@ -99,6 +107,52 @@ static void test_start_applies_formal_baseline(void)
     assert(g_right_limit == 750U);
     assert(g_start_count == 1U);
     assert(g_reset_metrics_count == 1U);
+    assert(g_start_line_error == g_sensor.line_error);
+}
+
+static void test_wide_marker_start_holds_center_until_narrow(void)
+{
+    line_follow_mission_snapshot_t snapshot;
+
+    reset_mocks();
+    LineFollowMission_Init(false);
+    g_sensor.active_count = 5U;
+    g_sensor.line_error = -15;
+    assert(LineFollowMission_RequestStartFromWideMarker(3U));
+    LineFollowMission_Task(100U);
+    assert(LineFollowMission_IsActive());
+    assert(g_start_line_error == 0);
+    assert(g_start_active_count == 3U);
+    snapshot = mission_snapshot();
+    assert(snapshot.centered_start_active);
+
+    g_sensor.active_count = 6U;
+    g_sensor.line_error = 12;
+    LineFollowMission_Task(110U);
+    assert(g_command_line_error == 0);
+    assert(g_command_active_count == 3U);
+    assert(mission_snapshot().centered_start_active);
+
+    g_sensor.active_count = 4U;
+    g_sensor.line_error = -9;
+    LineFollowMission_Task(120U);
+    assert(g_command_line_error == 0);
+    assert(g_command_active_count == 3U);
+    assert(mission_snapshot().centered_start_active);
+
+    g_sensor.active_count = 3U;
+    g_sensor.line_error = 7;
+    LineFollowMission_Task(130U);
+    assert(g_command_line_error == 7);
+    assert(g_command_active_count == 3U);
+    assert(!mission_snapshot().centered_start_active);
+
+    g_sensor.active_count = 6U;
+    g_sensor.line_error = -11;
+    LineFollowMission_Task(140U);
+    assert(g_command_line_error == -11);
+    assert(g_command_active_count == 6U);
+    assert(!mission_snapshot().centered_start_active);
 }
 
 static void test_running_refresh_and_operator_stop(void)
@@ -143,6 +197,7 @@ int main(void)
 {
     test_locked_and_busy_start_rejection();
     test_start_applies_formal_baseline();
+    test_wide_marker_start_holds_center_until_narrow();
     test_running_refresh_and_operator_stop();
     test_control_error_faults_and_stops();
     return 0;
@@ -198,11 +253,14 @@ wheel_line_tracking_result_t WheelLineTrackingControl_Start(
     bool line_seen, uint32_t observation_ms, uint32_t now_ms)
 {
     (void) base_speed_pps;
-    (void) line_error;
-    (void) active_count;
     (void) line_seen;
     (void) observation_ms;
     (void) now_ms;
+    g_start_line_error = line_error;
+    g_start_active_count = active_count;
+    if ((active_count >= 4U) && (line_error == 0)) {
+        return WHEEL_LINE_TRACKING_BAD_COMMAND;
+    }
     g_start_count++;
     g_control.running = true;
     return WHEEL_LINE_TRACKING_OK;
@@ -213,11 +271,11 @@ wheel_line_tracking_result_t WheelLineTrackingControl_SetCommand(
     bool line_seen, uint32_t observation_ms, uint32_t now_ms)
 {
     (void) base_speed_pps;
-    (void) line_error;
-    (void) active_count;
     (void) line_seen;
     (void) observation_ms;
     (void) now_ms;
+    g_command_line_error = line_error;
+    g_command_active_count = active_count;
     g_command_count++;
     return g_set_command_result;
 }

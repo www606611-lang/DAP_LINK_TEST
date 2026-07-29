@@ -72,24 +72,11 @@ static void test_h2_ignores_initial_a_and_precision_stops(void)
     input.left_start_a = true;
     input.now_ms = 200U;
     HMission_Step(&mission, &input);
-    assert(mission.snapshot.phase == H_MISSION_PHASE_RUN_TO_B);
+    assert(mission.snapshot.phase == H_MISSION_PHASE_RUN_TO_A);
 
     input.left_start_a = false;
     input.finish_a_passed = true;
     input.now_ms = 250U;
-    HMission_Step(&mission, &input);
-    assert(mission.snapshot.phase == H_MISSION_PHASE_RUN_TO_B);
-
-    input.finish_a_passed = false;
-    input.b_passed = true;
-    input.now_ms = 500U;
-    HMission_Step(&mission, &input);
-    assert(mission.snapshot.phase == H_MISSION_PHASE_RUN_TO_A);
-    assert(mission.snapshot.b_passage_ms == 399U);
-
-    input.b_passed = false;
-    input.finish_a_passed = true;
-    input.now_ms = 900U;
     HMission_Step(&mission, &input);
     assert(mission.snapshot.state == H_MISSION_STATE_PRECISION_STOP);
     assert(HMission_GetOutput(&mission, &output));
@@ -97,13 +84,27 @@ static void test_h2_ignores_initial_a_and_precision_stops(void)
 
     input.finish_a_passed = false;
     input.precision_stop_complete = true;
-    input.now_ms = 950U;
+    input.now_ms = 300U;
     HMission_Step(&mission, &input);
     assert(mission.snapshot.state == H_MISSION_STATE_FINISHED);
-    assert(mission.snapshot.finish_ms == 849U);
+    assert(mission.snapshot.finish_ms == 199U);
     assert(HMission_GetOutput(&mission, &output));
     assert(output.chassis_action == H_MISSION_CHASSIS_STOP);
     assert(output.ball_action == H_MISSION_BALL_IDLE);
+}
+
+static void test_ready_press_starts_without_second_press(void)
+{
+    h_mission_t mission;
+    h_mission_input_t input;
+
+    HMission_Init(&mission, false);
+    input = ready_input(&mission, 50U);
+    input.start_pressed = true;
+    HMission_Step(&mission, &input);
+    assert(mission.snapshot.state == H_MISSION_STATE_RUNNING);
+    assert(mission.snapshot.phase == H_MISSION_PHASE_LEAVE_START_A);
+    assert(mission.snapshot.run_count == 1U);
 }
 
 static void test_h3_is_ball_only_and_holds_final_target(void)
@@ -247,6 +248,7 @@ int main(void)
 {
     test_locked_requires_safe_unlock();
     test_h2_ignores_initial_a_and_precision_stops();
+    test_ready_press_starts_without_second_press();
     test_h3_is_ball_only_and_holds_final_target();
     test_h4_finishes_at_b();
     test_h5_requires_b_before_finish_a();

@@ -24,11 +24,14 @@ typedef struct {
     uint16_t output_limit_permille;
     uint32_t run_count;
     uint32_t elapsed_ms;
+    bool centered_start_active;
 } line_follow_mission_snapshot_t;
 
 void LineFollowMission_Init(bool reset_locked);
 void LineFollowMission_Task(uint32_t now_ms);
 bool LineFollowMission_RequestStart(void);
+bool LineFollowMission_RequestStartFromWideMarker(
+    uint8_t narrow_active_max);
 void LineFollowMission_RequestStop(void);
 bool LineFollowMission_IsActive(void);
 const char *LineFollowMission_GetStateText(void);

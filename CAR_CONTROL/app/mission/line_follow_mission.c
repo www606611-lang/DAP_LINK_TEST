@@ -17,9 +17,13 @@
 static line_follow_mission_snapshot_t g_snapshot;
 static bool g_start_requested;
 static bool g_stop_requested;
+static bool g_centered_start_requested;
+static uint8_t g_centered_start_narrow_max;
 static uint32_t g_started_ms;
 
 static bool line_follow_mission_can_start(void);
+static bool line_follow_mission_request_start(
+    bool centered_start, uint8_t narrow_active_max);
 static void line_follow_mission_start(uint32_t now_ms);
 static void line_follow_mission_stop(void);
 static void line_follow_mission_fault(
@@ -36,8 +40,11 @@ void LineFollowMission_Init(bool reset_locked)
         LINE_FOLLOW_MISSION_OUTPUT_LIMIT_PERMILLE;
     g_snapshot.run_count = 0U;
     g_snapshot.elapsed_ms = 0U;
+    g_snapshot.centered_start_active = false;
     g_start_requested = false;
     g_stop_requested = false;
+    g_centered_start_requested = false;
+    g_centered_start_narrow_max = 0U;
     g_started_ms = 0U;
 }
 
@@ -46,6 +53,9 @@ void LineFollowMission_Task(uint32_t now_ms)
     line_sensor_snapshot_t sensor;
     wheel_line_tracking_snapshot_t control;
     wheel_line_tracking_result_t result;
+    int16_t line_error;
+    uint8_t active_count;
+    bool line_seen;
     bool start_event = g_start_requested;
     bool stop_event = g_stop_requested;
 
@@ -86,9 +96,24 @@ void LineFollowMission_Task(uint32_t now_ms)
         return;
     }
 
+    line_error = sensor.line_error;
+    active_count = sensor.active_count;
+    line_seen = sensor.line_seen;
+    if (g_snapshot.centered_start_active) {
+        if (!sensor.line_seen) {
+            g_snapshot.centered_start_active = false;
+        } else if (sensor.active_count <=
+                g_centered_start_narrow_max) {
+            g_snapshot.centered_start_active = false;
+        } else {
+            line_error = 0;
+            active_count = g_centered_start_narrow_max;
+            line_seen = true;
+        }
+    }
     result = WheelLineTrackingControl_SetCommand(
         g_snapshot.base_speed_pps,
-        sensor.line_error, sensor.active_count, sensor.line_seen,
+        line_error, active_count, line_seen,
         sensor.last_sample_ms, now_ms);
     if (result != WHEEL_LINE_TRACKING_OK) {
         line_follow_mission_fault(result,
@@ -97,6 +122,23 @@ void LineFollowMission_Task(uint32_t now_ms)
 }
 
 bool LineFollowMission_RequestStart(void)
+{
+    return line_follow_mission_request_start(false, 0U);
+}
+
+bool LineFollowMission_RequestStartFromWideMarker(
+    uint8_t narrow_active_max)
+{
+    if ((narrow_active_max == 0U) ||
+        (narrow_active_max >= 8U)) {
+        return false;
+    }
+    return line_follow_mission_request_start(
+        true, narrow_active_max);
+}
+
+static bool line_follow_mission_request_start(
+    bool centered_start, uint8_t narrow_active_max)
 {
     wheel_line_tracking_snapshot_t control;
 
@@ -108,6 +150,8 @@ bool LineFollowMission_RequestStart(void)
         control.running) {
         return false;
     }
+    g_centered_start_requested = centered_start;
+    g_centered_start_narrow_max = narrow_active_max;
     g_start_requested = true;
     return true;
 }
@@ -161,6 +205,9 @@ static void line_follow_mission_start(uint32_t now_ms)
     line_sensor_snapshot_t sensor;
     wheel_line_tracking_config_t config;
     wheel_line_tracking_result_t result;
+    int16_t line_error;
+    uint8_t active_count;
+    bool line_seen;
 
     if (!line_follow_mission_can_start()) {
         line_follow_mission_fault(WHEEL_LINE_TRACKING_BUSY,
@@ -204,9 +251,17 @@ static void line_follow_mission_start(uint32_t now_ms)
     }
 
     AppRuntimeMetrics_Reset(now_ms);
+    g_snapshot.centered_start_active =
+        g_centered_start_requested &&
+        (sensor.active_count > g_centered_start_narrow_max);
+    line_error = g_snapshot.centered_start_active ?
+        0 : sensor.line_error;
+    active_count = g_snapshot.centered_start_active ?
+        g_centered_start_narrow_max : sensor.active_count;
+    line_seen = sensor.line_seen;
     result = WheelLineTrackingControl_Start(
         g_snapshot.base_speed_pps,
-        sensor.line_error, sensor.active_count, sensor.line_seen,
+        line_error, active_count, line_seen,
         sensor.last_sample_ms, now_ms);
     if (result != WHEEL_LINE_TRACKING_OK) {
         line_follow_mission_fault(result,
@@ -226,6 +281,7 @@ static void line_follow_mission_stop(void)
     WheelLineTrackingControl_Stop(CAR_CONTROL_BLOCK_OPERATOR_STOP);
     g_snapshot.last_result = WHEEL_LINE_TRACKING_STOPPED;
     g_snapshot.state = LINE_FOLLOW_MISSION_STOPPED;
+    g_snapshot.centered_start_active = false;
 }
 
 static void line_follow_mission_fault(
@@ -236,4 +292,5 @@ static void line_follow_mission_fault(
     ControlSupervisor_EmergencyStop(reason);
     g_snapshot.last_result = result;
     g_snapshot.state = LINE_FOLLOW_MISSION_FAULT;
+    g_snapshot.centered_start_active = false;
 }

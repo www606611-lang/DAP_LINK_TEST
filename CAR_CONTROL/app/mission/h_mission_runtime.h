@@ -9,17 +9,14 @@
 
 #define H_MISSION_RUNTIME_PRECISION_SPEED_PPS 700.0f
 #define H_MISSION_RUNTIME_PRECISION_TIMEOUT_MS 4000U
-/* Filled only from a measured run on the full-size H route. */
-#define H_MISSION_ROUTE_LEAVE_A_MIN_COUNT       0
-#define H_MISSION_ROUTE_INITIAL_A_MAX_COUNT     0
-#define H_MISSION_ROUTE_B_PASSAGE_COUNT         0
-#define H_MISSION_ROUTE_FINISH_ARM_COUNT        0
-#define H_MISSION_ROUTE_PRECISION_DELTA_COUNT   0
+#define H_MISSION_ROUTE_FINISH_REARM_MS       300U
+/* Tuned after measuring the first physical stop at the finish A marker. */
+#define H_MISSION_ROUTE_PRECISION_DELTA_COUNT    0
 
 typedef struct {
     h_mission_snapshot_t mission;
     h_route_snapshot_t route;
-    bool route_calibrated;
+    bool route_ready;
     bool line_owned;
     bool precision_owned;
     uint32_t executor_error_count;

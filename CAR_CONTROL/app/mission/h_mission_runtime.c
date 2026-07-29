@@ -9,7 +9,8 @@
 #include "wheel_odometry.h"
 #include <stddef.h>
 
-#define H_MISSION_RUNTIME_MARKER_ACTIVE_MIN 6U
+#define H_MISSION_RUNTIME_MARKER_ACTIVE_MIN 5U
+#define H_MISSION_RUNTIME_START_NARROW_ACTIVE_MAX 3U
 #define H_MISSION_RUNTIME_MARKER_CONFIRM_MS 20U
 #define H_MISSION_RUNTIME_MARKER_RELEASE_MS 20U
 
@@ -34,14 +35,12 @@ static void h_mission_runtime_refresh_snapshot(void);
 void HMissionRuntime_Init(bool reset_locked, uint32_t now_ms)
 {
     const h_route_config_t route_config = {
-        H_MISSION_ROUTE_LEAVE_A_MIN_COUNT,
-        H_MISSION_ROUTE_INITIAL_A_MAX_COUNT,
-        H_MISSION_ROUTE_B_PASSAGE_COUNT,
-        H_MISSION_ROUTE_FINISH_ARM_COUNT,
-        H_MISSION_ROUTE_PRECISION_DELTA_COUNT,
-        H_MISSION_RUNTIME_MARKER_ACTIVE_MIN,
-        H_MISSION_RUNTIME_MARKER_CONFIRM_MS,
-        H_MISSION_RUNTIME_MARKER_RELEASE_MS
+        .precision_stop_delta_count =
+            H_MISSION_ROUTE_PRECISION_DELTA_COUNT,
+        .finish_rearm_ms = H_MISSION_ROUTE_FINISH_REARM_MS,
+        .marker_active_min = H_MISSION_RUNTIME_MARKER_ACTIVE_MIN,
+        .marker_confirm_ms = H_MISSION_RUNTIME_MARKER_CONFIRM_MS,
+        .marker_release_ms = H_MISSION_RUNTIME_MARKER_RELEASE_MS
     };
 
     (void) now_ms;
@@ -150,7 +149,7 @@ const char *HMissionRuntime_GetPhaseText(void)
         case H_MISSION_PHASE_BALL_ONLY: return "BALL";
         case H_MISSION_PHASE_LEAVE_START_A: return "LEAVE-A";
         case H_MISSION_PHASE_RUN_TO_B: return "TO-B";
-        case H_MISSION_PHASE_RUN_TO_A: return "TO-A";
+        case H_MISSION_PHASE_RUN_TO_A: return "LAP";
         case H_MISSION_PHASE_PRECISION_STOP: return "PSTOP";
         default: return "UNK";
     }
@@ -182,6 +181,7 @@ static void h_mission_runtime_collect_input(uint32_t now_ms,
         (g_precision_owned &&
          (motion.state == MOTION_SUPERVISOR_ABORTED));
     input->line_ready = g_route.snapshot.configuration_valid &&
+        g_route.snapshot.marker_wide &&
         has_sensor && sensor.ready && sensor.line_seen &&
         ((uint32_t) (now_ms - sensor.last_sample_ms) <=
             WHEEL_LINE_TRACKING_OBSERVATION_MAX_AGE_MS) &&
@@ -190,11 +190,19 @@ static void h_mission_runtime_collect_input(uint32_t now_ms,
         (g_mission.snapshot.state == H_MISSION_STATE_RUNNING) &&
         (line.state == LINE_FOLLOW_MISSION_FAULT);
     input->left_start_a = g_route.snapshot.left_start_a_event;
-    input->b_passed = g_route.snapshot.b_passed_event;
+    input->b_passed = false;
     input->finish_a_passed =
         g_route.snapshot.finish_a_passed_event;
-    input->precision_stop_complete = g_precision_owned &&
-        (motion.state == MOTION_SUPERVISOR_COMPLETE);
+    if (g_route.config.precision_stop_delta_count == 0) {
+        input->precision_stop_complete =
+            (g_mission.snapshot.state ==
+                H_MISSION_STATE_PRECISION_STOP) &&
+            !g_line_owned && !g_precision_owned &&
+            input->chassis_high_z;
+    } else {
+        input->precision_stop_complete = g_precision_owned &&
+            (motion.state == MOTION_SUPERVISOR_COMPLETE);
+    }
 }
 
 static void h_mission_runtime_update_route(uint32_t now_ms,
@@ -225,7 +233,8 @@ static void h_mission_runtime_execute(void)
     switch (g_mission.snapshot.state) {
         case H_MISSION_STATE_RUNNING:
             if (!g_line_owned) {
-                if (LineFollowMission_RequestStart()) {
+                if (LineFollowMission_RequestStartFromWideMarker(
+                        H_MISSION_RUNTIME_START_NARROW_ACTIVE_MAX)) {
                     g_line_owned = true;
                 } else {
                     g_executor_fault = true;
@@ -243,7 +252,8 @@ static void h_mission_runtime_execute(void)
                 break;
             }
             if (!g_precision_owned &&
-                BoardMotorSafe_IsHighImpedance()) {
+                BoardMotorSafe_IsHighImpedance() &&
+                (g_route.config.precision_stop_delta_count != 0)) {
                 if (MotionSupervisor_RequestRelativeHoldHeading(
                         g_route.config.precision_stop_delta_count,
                         H_MISSION_RUNTIME_PRECISION_SPEED_PPS,
@@ -294,7 +304,7 @@ static void h_mission_runtime_refresh_snapshot(void)
 {
     (void) HMission_GetSnapshot(&g_mission, &g_snapshot.mission);
     (void) HRouteEvents_GetSnapshot(&g_route, &g_snapshot.route);
-    g_snapshot.route_calibrated =
+    g_snapshot.route_ready =
         g_snapshot.route.configuration_valid;
     g_snapshot.line_owned = g_line_owned;
     g_snapshot.precision_owned = g_precision_owned;

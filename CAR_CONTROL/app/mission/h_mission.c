@@ -142,6 +142,9 @@ void HMission_Step(h_mission_t *mission,
         case H_MISSION_STATE_READY:
             if (h_mission_can_arm(mission, input)) {
                 mission->snapshot.state = H_MISSION_STATE_ARMED;
+                if (input->start_pressed) {
+                    h_mission_start(mission, input->now_ms);
+                }
             }
             break;
 
@@ -393,7 +396,10 @@ static void h_mission_step_running(h_mission_t *mission,
 
         case H_MISSION_PHASE_LEAVE_START_A:
             if (input->left_start_a) {
-                mission->snapshot.phase = H_MISSION_PHASE_RUN_TO_B;
+                mission->snapshot.phase =
+                    (mission->snapshot.profile == H_MISSION_PROFILE_H2) ?
+                        H_MISSION_PHASE_RUN_TO_A :
+                        H_MISSION_PHASE_RUN_TO_B;
             }
             break;
 

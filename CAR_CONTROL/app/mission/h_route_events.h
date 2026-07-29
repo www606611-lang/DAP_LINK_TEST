@@ -5,11 +5,8 @@
 #include <stdint.h>
 
 typedef struct {
-    int32_t leave_a_min_count;
-    int32_t initial_a_max_count;
-    int32_t b_passage_count;
-    int32_t finish_arm_count;
     int32_t precision_stop_delta_count;
+    uint16_t finish_rearm_ms;
     uint8_t marker_active_min;
     uint16_t marker_confirm_ms;
     uint16_t marker_release_ms;
@@ -30,10 +27,9 @@ typedef struct {
     bool marker_wide;
     bool initial_a_seen;
     bool left_start_a;
-    bool b_passed;
+    bool finish_armed;
     bool finish_a_passed;
     bool left_start_a_event;
-    bool b_passed_event;
     bool finish_a_passed_event;
     int32_t start_count;
     int32_t progress_count;
@@ -46,6 +42,7 @@ typedef struct {
     bool raw_marker_wide;
     bool marker_rise_event;
     uint32_t raw_marker_changed_ms;
+    uint32_t left_start_ms;
 } h_route_events_t;
 
 bool HRouteEvents_ConfigIsValid(const h_route_config_t *config);

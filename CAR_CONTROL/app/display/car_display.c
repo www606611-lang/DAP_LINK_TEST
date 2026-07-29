@@ -48,6 +48,8 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
 static const char *car_display_h_state_text(uint32_t state);
 static const char *car_display_h_phase_text(uint32_t phase);
 static const char *car_display_h_fault_text(uint32_t fault);
+static const char *car_display_h_prompt(
+    const car_debug_display_snapshot_t *debug);
 
 void CarDisplay_Init(void)
 {
@@ -376,8 +378,6 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
 {
     uint16_t state_color;
     uint32_t elapsed_cs = debug->h_elapsed_ms / 10U;
-    uint32_t b_cs = debug->h_b_passage_ms / 10U;
-    uint32_t finish_cs = debug->h_finish_ms / 10U;
 
     (void) now_ms;
     if (debug->h_mission_state == (uint32_t) H_MISSION_STATE_FAULT) {
@@ -397,35 +397,33 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
         case CAR_DISPLAY_PHASE_SPEED:
             car_display_show_row(28U, state_color,
                 ST7789_COLOR_BLACK,
-                "TASK H%lu SEQ%05lu TGT%+6ld x0.1mm",
-                (unsigned long) debug->h_mission_profile,
-                (unsigned long) debug->h_mission_sequence,
-                (long) car_display_clamp_i32(
-                    debug->h_target_x_0p1mm, -9999, 9999));
+                "STATUS %-30s",
+                car_display_h_prompt(debug));
             break;
 
         case CAR_DISPLAY_PHASE_ENCODER:
             car_display_show_row(48U, ST7789_COLOR_WHITE,
                 ST7789_COLOR_BLACK,
-                "TIME %3lu.%02lus B%3lu.%02lus F%3lu.%02lus",
+                "TIME %3lu.%02lus ENC %+9ld",
                 (unsigned long) (elapsed_cs / 100U),
                 (unsigned long) (elapsed_cs % 100U),
-                (unsigned long) (b_cs / 100U),
-                (unsigned long) (b_cs % 100U),
-                (unsigned long) (finish_cs / 100U),
-                (unsigned long) (finish_cs % 100U));
+                (long) car_display_clamp_i32(
+                    debug->h_route_progress_count,
+                    -99999999, 99999999));
             break;
 
         case CAR_DISPLAY_PHASE_ATTITUDE:
-            car_display_show_row(68U,
-                (debug->imu_ready && debug->imu_attitude_valid) ?
-                    ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
+            car_display_show_row(68U, ST7789_COLOR_WHITE,
                 ST7789_COLOR_BLACK,
-                "YAW %+7ld RATE %+8ld",
+                "WHEEL T%+5ld/%+5ld V%+5ld/%+5ld",
                 (long) car_display_clamp_i32(
-                    debug->imu_yaw_mdeg, -999999, 999999),
+                    debug->speed_left_target_pps, -9999, 9999),
                 (long) car_display_clamp_i32(
-                    debug->imu_yaw_rate_mdps, -9999999, 9999999));
+                    debug->speed_right_target_pps, -9999, 9999),
+                (long) car_display_clamp_i32(
+                    debug->encoder_0_speed_pps, -9999, 9999),
+                (long) car_display_clamp_i32(
+                    debug->encoder_1_speed_pps, -9999, 9999));
             break;
 
         case CAR_DISPLAY_PHASE_LINE:
@@ -440,39 +438,34 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
 
         case CAR_DISPLAY_PHASE_CONTROL:
             car_display_show_row(108U,
-                debug->h_route_calibrated ?
+                debug->h_route_ready ?
                     ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
                 ST7789_COLOR_BLACK,
-                "ROUTE %-3s D%+7ld A%u L%u B%u F%u",
-                debug->h_route_calibrated ? "OK" : "CAL",
-                (long) car_display_clamp_i32(
-                    debug->h_route_progress_count, -999999, 999999),
-                debug->h_route_initial_a_seen ? 1U : 0U,
+                "A WIDE%u LEFT%u ARM%u FIN%u MARK%lu",
+                debug->h_route_marker_wide ? 1U : 0U,
                 debug->h_route_left_a ? 1U : 0U,
-                debug->h_route_b_passed ? 1U : 0U,
-                debug->h_route_finish_a ? 1U : 0U);
+                debug->h_route_finish_armed ? 1U : 0U,
+                debug->h_route_finish_a ? 1U : 0U,
+                (unsigned long) debug->h_route_marker_count);
             break;
 
         case CAR_DISPLAY_PHASE_HEALTH:
             car_display_show_row(128U,
-                (debug->imu_ready && debug->imu_attitude_valid &&
-                 debug->line_sensor_ready) ?
+                (debug->line_sensor_ready && debug->h_route_ready) ?
                     ST7789_COLOR_GREEN : ST7789_COLOR_YELLOW,
                 ST7789_COLOR_BLACK,
-                "IMU %-3s LINE %-3s ROUTE %-3s MODE %-6s",
-                (debug->imu_ready && debug->imu_attitude_valid) ?
-                    "OK" : "BAD",
+                "SENSOR %-3s MOTOR %-6s MODE %-6s",
                 debug->line_sensor_ready ? "OK" : "BAD",
-                debug->h_route_calibrated ? "OK" : "CAL",
+                debug->motor_high_impedance ? "HIGH-Z" : "ACTIVE",
                 car_display_control_mode_text(debug->control_mode));
             break;
 
         case CAR_DISPLAY_PHASE_FOOTER:
             car_display_show_row(150U, state_color,
                 ST7789_COLOR_BLACK,
-                "KEY %-4s PH%-7s FAULT %-7s",
+                "KEY %-4s SEQ%05lu FAULT %-7s",
                 key_text,
-                car_display_h_phase_text(debug->h_mission_phase),
+                (unsigned long) debug->h_mission_sequence,
                 car_display_h_fault_text(debug->h_mission_fault));
             break;
 
@@ -480,8 +473,7 @@ static void car_display_update_h(const car_debug_display_snapshot_t *debug,
         default:
             car_display_show_row(5U, ST7789_COLOR_WHITE,
                 ST7789_COLOR_BLUE,
-                "H%lu %-6s %-7s",
-                (unsigned long) debug->h_mission_profile,
+                "H2 %-6s %-7s",
                 car_display_h_state_text(debug->h_mission_state),
                 car_display_h_phase_text(debug->h_mission_phase));
             ST7789_ShowAsciiStringFast(264U, 5U,
@@ -528,7 +520,7 @@ static const char *car_display_h_phase_text(uint32_t phase)
         case H_MISSION_PHASE_RUN_TO_B:
             return "TO-B";
         case H_MISSION_PHASE_RUN_TO_A:
-            return "TO-A";
+            return "LAP";
         case H_MISSION_PHASE_PRECISION_STOP:
             return "PSTOP";
         default:
@@ -553,6 +545,32 @@ static const char *car_display_h_fault_text(uint32_t fault)
             return "BALL";
         default:
             return "UNK";
+    }
+}
+
+static const char *car_display_h_prompt(
+    const car_debug_display_snapshot_t *debug)
+{
+    switch ((h_mission_state_t) debug->h_mission_state) {
+        case H_MISSION_STATE_LOCKED:
+            return "RESET LOCKED";
+        case H_MISSION_STATE_READY:
+            return debug->h_route_marker_wide ?
+                "AT A / START READY" : "PLACE CAR AT A";
+        case H_MISSION_STATE_ARMED:
+            return "AT A / START READY";
+        case H_MISSION_STATE_RUNNING:
+            return (debug->h_mission_phase ==
+                    (uint32_t) H_MISSION_PHASE_LEAVE_START_A) ?
+                "LEAVING START A" : "FOLLOWING ONE LAP";
+        case H_MISSION_STATE_PRECISION_STOP:
+            return "STOPPING ON A";
+        case H_MISSION_STATE_FINISHED:
+            return "H2 COMPLETE";
+        case H_MISSION_STATE_FAULT:
+            return "STOPPED BY FAULT";
+        default:
+            return "STATE UNKNOWN";
     }
 }
 

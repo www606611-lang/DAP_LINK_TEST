@@ -186,13 +186,14 @@ volatile int32_t g_car_h_target_x_0p1mm;
 volatile uint32_t g_car_h_elapsed_ms;
 volatile uint32_t g_car_h_b_passage_ms;
 volatile uint32_t g_car_h_finish_ms;
-volatile bool g_car_h_route_calibrated;
+volatile bool g_car_h_route_ready;
 volatile bool g_car_h_route_marker_wide;
 volatile bool g_car_h_route_initial_a_seen;
 volatile bool g_car_h_route_left_a;
-volatile bool g_car_h_route_b_passed;
+volatile bool g_car_h_route_finish_armed;
 volatile bool g_car_h_route_finish_a;
 volatile int32_t g_car_h_route_progress_count;
+volatile uint32_t g_car_h_route_marker_count;
 
 static int32_t car_debug_round_float(float value);
 
@@ -272,13 +273,14 @@ void CarDebugSnapshot_Update(void)
         g_car_h_elapsed_ms = h_mission.mission.elapsed_ms;
         g_car_h_b_passage_ms = h_mission.mission.b_passage_ms;
         g_car_h_finish_ms = h_mission.mission.finish_ms;
-        g_car_h_route_calibrated = h_mission.route_calibrated;
+        g_car_h_route_ready = h_mission.route_ready;
         g_car_h_route_marker_wide = h_mission.route.marker_wide;
         g_car_h_route_initial_a_seen = h_mission.route.initial_a_seen;
         g_car_h_route_left_a = h_mission.route.left_start_a;
-        g_car_h_route_b_passed = h_mission.route.b_passed;
+        g_car_h_route_finish_armed = h_mission.route.finish_armed;
         g_car_h_route_finish_a = h_mission.route.finish_a_passed;
         g_car_h_route_progress_count = h_mission.route.progress_count;
+        g_car_h_route_marker_count = h_mission.route.marker_count;
     }
 
     if (WheelSpeedControl_GetSnapshot(&speed)) {
@@ -609,13 +611,14 @@ bool CarDebugSnapshot_GetDisplay(car_debug_display_snapshot_t *snapshot)
     snapshot->h_elapsed_ms = g_car_h_elapsed_ms;
     snapshot->h_b_passage_ms = g_car_h_b_passage_ms;
     snapshot->h_finish_ms = g_car_h_finish_ms;
-    snapshot->h_route_calibrated = g_car_h_route_calibrated;
+    snapshot->h_route_ready = g_car_h_route_ready;
     snapshot->h_route_marker_wide = g_car_h_route_marker_wide;
     snapshot->h_route_initial_a_seen = g_car_h_route_initial_a_seen;
     snapshot->h_route_left_a = g_car_h_route_left_a;
-    snapshot->h_route_b_passed = g_car_h_route_b_passed;
+    snapshot->h_route_finish_armed = g_car_h_route_finish_armed;
     snapshot->h_route_finish_a = g_car_h_route_finish_a;
     snapshot->h_route_progress_count = g_car_h_route_progress_count;
+    snapshot->h_route_marker_count = g_car_h_route_marker_count;
     return true;
 }
 

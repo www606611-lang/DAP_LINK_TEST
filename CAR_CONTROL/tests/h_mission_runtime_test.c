@@ -22,6 +22,8 @@ static uint32_t g_line_start_count;
 static uint32_t g_line_stop_count;
 static uint32_t g_motion_start_count;
 static int32_t g_motion_delta;
+static bool g_line_started_from_marker;
+static uint8_t g_line_start_narrow_max;
 
 static void reset_mocks(void)
 {
@@ -43,12 +45,18 @@ static void reset_mocks(void)
     g_line_stop_count = 0U;
     g_motion_start_count = 0U;
     g_motion_delta = 0;
+    g_line_started_from_marker = false;
+    g_line_start_narrow_max = 0U;
 }
 
 static h_route_config_t valid_route(void)
 {
     const h_route_config_t config = {
-        20, 80, 500, 900, 25, 6U, 20U, 20U
+        .precision_stop_delta_count = 0,
+        .finish_rearm_ms = 300U,
+        .marker_active_min = 5U,
+        .marker_confirm_ms = 20U,
+        .marker_release_ms = 20U
     };
     return config;
 }
@@ -67,7 +75,7 @@ static void task(uint32_t now_ms)
     HMissionRuntime_Task(now_ms);
 }
 
-static void test_uncalibrated_route_cannot_arm_or_move(void)
+static void test_not_on_a_cannot_arm_or_move(void)
 {
     h_mission_runtime_snapshot_t snapshot;
 
@@ -77,7 +85,8 @@ static void test_uncalibrated_route_cannot_arm_or_move(void)
     snapshot = runtime_snapshot();
     assert(snapshot.mission.profile == H_MISSION_PROFILE_H2);
     assert(snapshot.mission.state == H_MISSION_STATE_READY);
-    assert(!snapshot.route_calibrated);
+    assert(snapshot.route_ready);
+    assert(!snapshot.route.marker_wide);
 
     HMissionRuntime_RequestPrimary();
     task(10U);
@@ -88,13 +97,13 @@ static void test_uncalibrated_route_cannot_arm_or_move(void)
 
 static void test_reset_lock_cannot_arm_or_move(void)
 {
-    h_route_config_t config = valid_route();
     h_mission_runtime_snapshot_t snapshot;
 
     reset_mocks();
+    g_sensor.active_count = 5U;
     HMissionRuntime_Init(true, 0U);
-    assert(HMissionRuntime_SetRouteConfig(&config));
     task(0U);
+    task(20U);
     snapshot = runtime_snapshot();
     assert(snapshot.mission.profile == H_MISSION_PROFILE_H2);
     assert(snapshot.mission.state == H_MISSION_STATE_LOCKED);
@@ -108,47 +117,83 @@ static void test_reset_lock_cannot_arm_or_move(void)
 
 static void test_ordered_route_and_precision_executor(void)
 {
-    h_route_config_t config = valid_route();
     h_mission_runtime_snapshot_t snapshot;
 
     reset_mocks();
+    g_sensor.active_count = 5U;
     HMissionRuntime_Init(false, 0U);
-    assert(HMissionRuntime_SetRouteConfig(&config));
-    task(10U);
+    task(0U);
+    task(20U);
     assert(runtime_snapshot().mission.state == H_MISSION_STATE_ARMED);
 
     HMissionRuntime_RequestPrimary();
-    task(20U);
+    task(30U);
     snapshot = runtime_snapshot();
     assert(snapshot.mission.state == H_MISSION_STATE_RUNNING);
     assert(snapshot.mission.phase == H_MISSION_PHASE_LEAVE_START_A);
     assert(snapshot.route.running);
     assert(g_line_start_count == 1U);
+    assert(g_line_started_from_marker);
+    assert(g_line_start_narrow_max == 3U);
 
-    g_sensor.active_count = 6U;
-    task(30U);
-    task(50U);
+    task(31U);
+    task(51U);
     assert(runtime_snapshot().route.initial_a_seen);
 
     g_sensor.active_count = 2U;
     g_odometry.average_count = 25;
     task(60U);
     task(80U);
-    assert(runtime_snapshot().mission.phase == H_MISSION_PHASE_RUN_TO_B);
-
-    g_odometry.average_count = 500;
-    task(90U);
     assert(runtime_snapshot().mission.phase == H_MISSION_PHASE_RUN_TO_A);
 
-    g_sensor.active_count = 6U;
+    task(379U);
+    assert(!runtime_snapshot().route.finish_armed);
+    task(380U);
+    assert(runtime_snapshot().route.finish_armed);
+
+    g_sensor.active_count = 5U;
     g_odometry.average_count = 900;
-    task(100U);
-    task(120U);
+    task(390U);
+    task(410U);
     snapshot = runtime_snapshot();
     assert(snapshot.mission.state == H_MISSION_STATE_PRECISION_STOP);
     assert(g_line_stop_count >= 1U);
 
-    task(130U);
+    task(420U);
+    snapshot = runtime_snapshot();
+    assert(snapshot.mission.state == H_MISSION_STATE_FINISHED);
+    assert(!snapshot.line_owned);
+    assert(!snapshot.precision_owned);
+    assert(g_motion_start_count == 0U);
+}
+
+static void test_nonzero_precision_delta_uses_motion(void)
+{
+    h_route_config_t config = valid_route();
+
+    config.precision_stop_delta_count = 25;
+    reset_mocks();
+    g_sensor.active_count = 5U;
+    HMissionRuntime_Init(false, 0U);
+    assert(HMissionRuntime_SetRouteConfig(&config));
+    task(0U);
+    task(20U);
+    HMissionRuntime_RequestPrimary();
+    task(30U);
+    task(31U);
+    task(51U);
+
+    g_sensor.active_count = 2U;
+    task(60U);
+    task(80U);
+    task(380U);
+    g_sensor.active_count = 5U;
+    task(390U);
+    task(410U);
+    assert(runtime_snapshot().mission.state ==
+        H_MISSION_STATE_PRECISION_STOP);
+
+    task(420U);
     assert(g_motion_start_count == 1U);
     assert(g_motion_delta == config.precision_stop_delta_count);
     assert(runtime_snapshot().precision_owned);
@@ -158,27 +203,23 @@ static void test_ordered_route_and_precision_executor(void)
     g_motion.state = MOTION_SUPERVISOR_COMPLETE;
     g_high_z = true;
     g_control_mode = CAR_CONTROL_MODE_SAFE_IDLE;
-    task(140U);
-    snapshot = runtime_snapshot();
-    assert(snapshot.mission.state == H_MISSION_STATE_FINISHED);
-    assert(!snapshot.line_owned);
-    assert(!snapshot.precision_owned);
+    task(430U);
+    assert(runtime_snapshot().mission.state == H_MISSION_STATE_FINISHED);
 }
 
 static void test_stop_request_stops_owned_line(void)
 {
-    h_route_config_t config = valid_route();
-
     reset_mocks();
+    g_sensor.active_count = 5U;
     HMissionRuntime_Init(false, 0U);
-    assert(HMissionRuntime_SetRouteConfig(&config));
     task(0U);
+    task(20U);
     HMissionRuntime_RequestPrimary();
-    task(10U);
+    task(30U);
     assert(HMissionRuntime_IsActive());
 
     HMissionRuntime_RequestStop();
-    task(20U);
+    task(40U);
     assert(runtime_snapshot().mission.state == H_MISSION_STATE_FAULT);
     assert(runtime_snapshot().mission.fault ==
         H_MISSION_FAULT_OPERATOR_STOP);
@@ -225,6 +266,14 @@ bool LineFollowMission_RequestStart(void)
     g_high_z = false;
     g_control_mode = CAR_CONTROL_MODE_LINE_TRACKING;
     return true;
+}
+
+bool LineFollowMission_RequestStartFromWideMarker(
+    uint8_t narrow_active_max)
+{
+    g_line_started_from_marker = true;
+    g_line_start_narrow_max = narrow_active_max;
+    return LineFollowMission_RequestStart();
 }
 
 void LineFollowMission_RequestStop(void)
@@ -282,9 +331,10 @@ bool MotionSupervisor_IsActive(void)
 
 int main(void)
 {
-    test_uncalibrated_route_cannot_arm_or_move();
+    test_not_on_a_cannot_arm_or_move();
     test_reset_lock_cannot_arm_or_move();
     test_ordered_route_and_precision_executor();
+    test_nonzero_precision_delta_uses_motion();
     test_stop_request_stops_owned_line();
     return 0;
 }

@@ -11,11 +11,10 @@ bool HRouteEvents_ConfigIsValid(const h_route_config_t *config)
     if (config == NULL) {
         return false;
     }
-    return (config->leave_a_min_count > 0) &&
-        (config->initial_a_max_count >= config->leave_a_min_count) &&
-        (config->b_passage_count > config->initial_a_max_count) &&
-        (config->finish_arm_count > config->b_passage_count) &&
-        (config->precision_stop_delta_count != 0) &&
+    return (config->precision_stop_delta_count >= -2000) &&
+        (config->precision_stop_delta_count <= 2000) &&
+        (config->finish_rearm_ms >= 100U) &&
+        (config->finish_rearm_ms <= 5000U) &&
         (config->marker_active_min >= 4U) &&
         (config->marker_active_min <= 8U) &&
         (config->marker_confirm_ms > 0U) &&
@@ -86,13 +85,11 @@ void HRouteEvents_Update(h_route_events_t *events,
     }
 
     events->snapshot.left_start_a_event = false;
-    events->snapshot.b_passed_event = false;
     events->snapshot.finish_a_passed_event = false;
     events->marker_rise_event = false;
     events->snapshot.input_valid = input->odometry_ready &&
         input->line_sensor_ready;
-    if (!events->snapshot.running ||
-        !events->snapshot.configuration_valid) {
+    if (!events->snapshot.configuration_valid) {
         return;
     }
     if (!events->snapshot.input_valid) {
@@ -100,39 +97,39 @@ void HRouteEvents_Update(h_route_events_t *events,
         return;
     }
 
+    h_route_events_update_marker(events, input);
+    if (!events->snapshot.running) {
+        events->snapshot.progress_count = 0;
+        return;
+    }
+
     events->snapshot.progress_count =
         input->odometry_count - events->snapshot.start_count;
-    h_route_events_update_marker(events, input);
 
     if (!events->snapshot.initial_a_seen &&
-        events->snapshot.marker_wide &&
-        (events->snapshot.progress_count <=
-            events->config.initial_a_max_count)) {
+        events->snapshot.marker_wide) {
         events->snapshot.initial_a_seen = true;
     }
 
     if (events->snapshot.initial_a_seen &&
         !events->snapshot.left_start_a &&
-        !events->snapshot.marker_wide &&
-        (events->snapshot.progress_count >=
-            events->config.leave_a_min_count)) {
+        !events->snapshot.marker_wide) {
         events->snapshot.left_start_a = true;
         events->snapshot.left_start_a_event = true;
+        events->left_start_ms = input->now_ms;
     }
 
     if (events->snapshot.left_start_a &&
-        !events->snapshot.b_passed &&
-        (events->snapshot.progress_count >=
-            events->config.b_passage_count)) {
-        events->snapshot.b_passed = true;
-        events->snapshot.b_passed_event = true;
+        !events->snapshot.finish_armed &&
+        !events->snapshot.marker_wide &&
+        ((uint32_t) (input->now_ms - events->left_start_ms) >=
+            events->config.finish_rearm_ms)) {
+        events->snapshot.finish_armed = true;
     }
 
-    if (events->snapshot.b_passed &&
+    if (events->snapshot.finish_armed &&
         !events->snapshot.finish_a_passed &&
-        events->marker_rise_event &&
-        (events->snapshot.progress_count >=
-            events->config.finish_arm_count)) {
+        events->marker_rise_event) {
         events->snapshot.finish_a_passed = true;
         events->snapshot.finish_a_passed_event = true;
     }
@@ -155,10 +152,9 @@ static void h_route_events_reset_run(h_route_events_t *events)
     events->snapshot.marker_wide = false;
     events->snapshot.initial_a_seen = false;
     events->snapshot.left_start_a = false;
-    events->snapshot.b_passed = false;
+    events->snapshot.finish_armed = false;
     events->snapshot.finish_a_passed = false;
     events->snapshot.left_start_a_event = false;
-    events->snapshot.b_passed_event = false;
     events->snapshot.finish_a_passed_event = false;
     events->snapshot.start_count = 0;
     events->snapshot.progress_count = 0;
@@ -166,6 +162,7 @@ static void h_route_events_reset_run(h_route_events_t *events)
     events->raw_marker_wide = false;
     events->marker_rise_event = false;
     events->raw_marker_changed_ms = 0U;
+    events->left_start_ms = 0U;
 }
 
 static void h_route_events_update_marker(h_route_events_t *events,
